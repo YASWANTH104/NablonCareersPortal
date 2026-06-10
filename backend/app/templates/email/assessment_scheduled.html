@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Assessment Assigned – Nablon AI Careers{% endblock %}
+
+{% block content %}
+<h2>Hi {{ full_name }}, you've been assigned an assessment.</h2>
+<p>Please complete the following assessment as part of your application for <strong>{{ job_title }}</strong>.</p>
+
+<table style="width:100%; border-collapse:collapse; margin: 24px 0; background:#f8f9fc; border-radius:8px; overflow:hidden;">
+  <tr>
+    <td style="padding:12px 16px; font-weight:600; color:#6B7280; width:40%; border-bottom:1px solid #E5E7EB;">Assessment</td>
+    <td style="padding:12px 16px; border-bottom:1px solid #E5E7EB;">{{ assessment_title }}</td>
+  </tr>
+  <tr>
+    <td style="padding:12px 16px; font-weight:600; color:#6B7280; border-bottom:1px solid #E5E7EB;">Type</td>
+    <td style="padding:12px 16px; border-bottom:1px solid #E5E7EB;">{{ assessment_type }}</td>
+  </tr>
+  <tr>
+    <td style="padding:12px 16px; font-weight:600; color:#F59E0B; border-bottom:1px solid #E5E7EB;">Deadline</td>
+    <td style="padding:12px 16px; border-bottom:1px solid #E5E7EB; font-weight:600; color:#F59E0B;">{{ deadline }}</td>
+  </tr>
+  {% if duration_mins %}
+  <tr>
+    <td style="padding:12px 16px; font-weight:600; color:#6B7280; border-bottom:1px solid #E5E7EB;">Duration</td>
+    <td style="padding:12px 16px; border-bottom:1px solid #E5E7EB;">{{ duration_mins }} minutes</td>
+  </tr>
+  {% endif %}
+  {% if platform_link %}
+  <tr>
+    <td style="padding:12px 16px; font-weight:600; color:#6B7280;">Assessment Link</td>
+    <td style="padding:12px 16px;"><a href="{{ platform_link }}" style="color:#4F5EFF;">{{ platform_link }}</a></td>
+  </tr>
+  {% endif %}
+</table>
+
+{% if platform_link %}
+<a href="{{ platform_link }}" class="cta">Start Assessment</a>
+{% endif %}
+
+{% if instructions %}
+<div style="margin-top:24px; padding:16px; background:#FFFBEB; border-left:4px solid #F59E0B; border-radius:4px;">
+  <p style="font-weight:600; color:#92400E; margin:0 0 8px;">Instructions</p>
+  <p style="color:#78350F; margin:0; white-space:pre-wrap;">{{ instructions }}</p>
+</div>
+{% endif %}
+
+<p style="margin-top:24px;">Please complete the assessment before the deadline. If you have questions, reach out to our HR team.</p>
+{% endblock %}

@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Verify your email — Nablon AI Careers{% endblock %}
+{% block content %}
+<h2>Hi {{ full_name }},</h2>
+<p>Welcome to Nablon AI Careers! Please verify your email address to activate your account.</p>
+<a href="{{ verify_url }}" class="cta">Verify Email Address</a>
+<p style="color:#6B7280;font-size:13px;">This link expires in 24 hours. If you didn't create an account, you can ignore this email.</p>
+{% endblock %}

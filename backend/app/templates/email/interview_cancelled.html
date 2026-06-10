@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Interview Cancelled – Nablon AI Careers{% endblock %}
+
+{% block content %}
+{% if role == "interviewer" %}
+<h2>Hi {{ full_name }}, an interview you were scheduled to conduct has been cancelled.</h2>
+<p>The following interview for <strong>{{ job_title }}</strong> has been cancelled. No action required on your part.</p>
+{% else %}
+<h2>Hi {{ full_name }}, your interview has been cancelled.</h2>
+<p>We're writing to let you know that your scheduled interview for <strong>{{ job_title }}</strong> has been cancelled.</p>
+{% endif %}
+
+<table style="width:100%; border-collapse:collapse; margin: 24px 0; background:#f8f9fc; border-radius:8px; overflow:hidden;">
+  <tr>
+    <td style="padding:12px 16px; font-weight:600; color:#6B7280; width:40%; border-bottom:1px solid #E5E7EB;">Round</td>
+    <td style="padding:12px 16px; border-bottom:1px solid #E5E7EB;">Round {{ round_number }} – {{ title }}</td>
+  </tr>
+  <tr>
+    <td style="padding:12px 16px; font-weight:600; color:#6B7280; border-bottom:1px solid #E5E7EB;">Type</td>
+    <td style="padding:12px 16px; border-bottom:1px solid #E5E7EB;">{{ interview_type | replace('_', ' ') | title }}</td>
+  </tr>
+  <tr>
+    <td style="padding:12px 16px; font-weight:600; color:#EF4444; border-bottom:1px solid #E5E7EB;">Was Scheduled</td>
+    <td style="padding:12px 16px; border-bottom:1px solid #E5E7EB; color:#EF4444;">{{ scheduled_at }}</td>
+  </tr>
+</table>
+
+{% if role == "candidate" %}
+<p>Our team will be in touch if we wish to reschedule. If you have questions, please contact our HR team.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Interview Rescheduled – Nablon AI Careers{% endblock %}
+
+{% block content %}
+{% if role == "interviewer" %}
+<h2>Hi {{ full_name }}, an interview you're paneling has been rescheduled.</h2>
+<p>Please update your calendar with the new details for <strong>{{ job_title }}</strong>.</p>
+{% else %}
+<h2>Hi {{ full_name }}, your interview has been rescheduled.</h2>
+<p>Your interview for <strong>{{ job_title }}</strong> has been moved to a new time. Please find the updated details below.</p>
+{% endif %}
+
+<table style="width:100%; border-collapse:collapse; margin: 24px 0; background:#f8f9fc; border-radius:8px; overflow:hidden;">
+  {% if role == "interviewer" and candidate_name %}
+  <tr>
+    <td style="padding:12px 16px; font-weight:600; color:#6B7280; width:40%; border-bottom:1px solid #E5E7EB;">Candidate</td>
+    <td style="padding:12px 16px; border-bottom:1px solid #E5E7EB;">{{ candidate_name }}</td>
+  </tr>
+  {% endif %}
+  <tr>
+    <td style="padding:12px 16px; font-weight:600; color:#6B7280; width:40%; border-bottom:1px solid #E5E7EB;">Round</td>
+    <td style="padding:12px 16px; border-bottom:1px solid #E5E7EB;">Round {{ round_number }} – {{ title }}</td>
+  </tr>
+  <tr>
+    <td style="padding:12px 16px; font-weight:600; color:#6B7280; border-bottom:1px solid #E5E7EB;">Type</td>
+    <td style="padding:12px 16px; border-bottom:1px solid #E5E7EB;">{{ interview_type | replace('_', ' ') | title }}</td>
+  </tr>
+  <tr>
+    <td style="padding:12px 16px; font-weight:600; color:#F59E0B; border-bottom:1px solid #E5E7EB;">New Date &amp; Time</td>
+    <td style="padding:12px 16px; border-bottom:1px solid #E5E7EB; font-weight:600; color:#F59E0B;">{{ scheduled_at }}</td>
+  </tr>
+  <tr>
+    <td style="padding:12px 16px; font-weight:600; color:#6B7280; border-bottom:1px solid #E5E7EB;">Duration</td>
+    <td style="padding:12px 16px; border-bottom:1px solid #E5E7EB;">{{ duration_mins }} minutes</td>
+  </tr>
+  {% if meeting_link %}
+  <tr>
+    <td style="padding:12px 16px; font-weight:600; color:#6B7280;">Meeting Link</td>
+    <td style="padding:12px 16px;"><a href="{{ meeting_link }}" style="color:#4F5EFF;">{{ meeting_link }}</a></td>
+  </tr>
+  {% elif location %}
+  <tr>
+    <td style="padding:12px 16px; font-weight:600; color:#6B7280;">Location</td>
+    <td style="padding:12px 16px;">{{ location }}</td>
+  </tr>
+  {% endif %}
+</table>
+
+{% if meeting_link %}
+<a href="{{ meeting_link }}" class="cta">Join Interview</a>
+{% endif %}
+
+<p style="margin-top:24px;">If you have questions, please reach out to our HR team.</p>
+{% endblock %}
