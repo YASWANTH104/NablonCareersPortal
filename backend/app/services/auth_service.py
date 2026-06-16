@@ -15,7 +15,7 @@ from app.utils.security import (
     decode_refresh_token,
     generate_token,
 )
-from app.services.email_service import send_verification_email, send_password_reset_email
+from app.services.email_service import send_password_reset_email
 
 REFRESH_KEY_PREFIX = "refresh:"
 
@@ -41,7 +41,8 @@ async def register_user(data: RegisterRequest, db: AsyncSession) -> User:
     await db.commit()
     await db.refresh(user)
 
-    await send_verification_email(user.email, user.full_name, verification_token)
+    from app.tasks.email_tasks import send_verification_email_task
+    send_verification_email_task.delay(user.email, user.full_name, verification_token)
     return user
 
 

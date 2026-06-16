@@ -97,3 +97,24 @@ class OfferLetterListResponse(BaseModel):
 class OfferRespondRequest(BaseModel):
     decision: str  # accepted | rejected
     candidate_signature: Optional[str] = None  # base64 data-URL
+
+
+class CandidateOfferResponse(BaseModel):
+    """Offer letter view for the authenticated candidate — no internal tokens exposed."""
+    id: uuid.UUID
+    application_id: uuid.UUID
+    designation: str
+    department_name: Optional[str] = None
+    joining_date: Optional[date] = None
+    salary_ctc: Optional[float] = None
+    salary_currency: str
+    probation_months: int
+    work_location: Optional[str] = None
+    status: str
+    sent_at: Optional[datetime] = None
+    accepted_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    candidate_signature: Optional[str] = None
+    signed_at: Optional[datetime] = None
+    body_html: Optional[str] = None
+    job_title: Optional[str] = None

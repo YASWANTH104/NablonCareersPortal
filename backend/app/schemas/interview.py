@@ -95,6 +95,7 @@ class InterviewResponse(BaseModel):
     candidate_name: Optional[str] = None
     candidate_email: Optional[str] = None
     job_id: Optional[uuid.UUID] = None
+    candidate_self_feedback: Optional["CandidateSelfFeedbackResponse"] = None
 
 
 class InterviewListResponse(BaseModel):
@@ -103,3 +104,45 @@ class InterviewListResponse(BaseModel):
     page: int
     limit: int
     pages: int
+
+
+class CandidateSelfFeedbackCreate(BaseModel):
+    overall_score: Optional[int] = None          # 0-10
+    communication_score: Optional[int] = None    # 0-10
+    technical_confidence: Optional[int] = None   # 0-10
+    was_prepared: Optional[bool] = None
+    would_recommend: Optional[bool] = None
+    difficulty: Optional[str] = None             # easy | medium | hard | very_hard
+    experience_rating: Optional[str] = None      # excellent | good | average | poor
+    comments: Optional[str] = None
+
+
+class CandidateSelfFeedbackResponse(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    interview_id: uuid.UUID
+    candidate_id: uuid.UUID
+    overall_score: Optional[int] = None
+    communication_score: Optional[int] = None
+    technical_confidence: Optional[int] = None
+    was_prepared: Optional[bool] = None
+    would_recommend: Optional[bool] = None
+    difficulty: Optional[str] = None
+    experience_rating: Optional[str] = None
+    comments: Optional[str] = None
+    created_at: datetime
+
+
+class CandidateInterviewSummary(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    application_id: uuid.UUID
+    round_number: int
+    title: Optional[str] = None
+    interview_type: Optional[str] = None
+    scheduled_at: datetime
+    duration_mins: int
+    status: str
+    self_feedback_submitted: bool = False

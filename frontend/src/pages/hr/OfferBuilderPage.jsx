@@ -131,6 +131,8 @@ export default function OfferBuilderPage() {
     onSuccess: (res) => {
       toast.success('Offer draft created');
       queryClient.invalidateQueries({ queryKey: ['offers'] });
+      // Seed the application-offer cache so navigating back shows the offer immediately
+      queryClient.setQueryData(['application-offer', applicationId], res.data);
       navigate(`/hr/offers/${res.data.id}`, { replace: true });
     },
     onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to create offer'),
@@ -216,7 +218,11 @@ export default function OfferBuilderPage() {
       <div className="flex items-center justify-between mb-6 flex-shrink-0">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => navigate(-1)}
+            onClick={() => {
+              const appId = isNew ? applicationId : offer?.application_id;
+              if (appId) navigate(`/hr/applicants/${appId}?tab=offer`);
+              else navigate(-1);
+            }}
             className="p-2 hover:bg-surface-100 rounded-lg transition-colors"
           >
             <ArrowLeft className="w-5 h-5 text-gray-500" />
@@ -447,7 +453,7 @@ export default function OfferBuilderPage() {
               {offer && (
                 <button
                   type="button"
-                  onClick={() => navigate(`/hr/applicants/${offer.application_id}`)}
+                  onClick={() => navigate(`/hr/applicants/${offer.application_id}?tab=offer`)}
                   className="w-full flex items-center justify-center gap-2 px-4 py-2 text-xs text-gray-400 hover:text-gray-600 transition-colors"
                 >
                   <ExternalLink className="w-3.5 h-3.5" /> View Application

@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 
 from app.config import settings
-from app.routers import auth, users, jobs, applications, referrals, interviews, assessments, offers, dashboard, notifications, uploads, reports
+from app.routers import auth, users, jobs, applications, referrals, interviews, assessments, offers, dashboard, notifications, uploads, reports, documents, agencies
 
 
 @asynccontextmanager
@@ -50,6 +50,8 @@ app.include_router(dashboard.router, prefix=prefix)
 app.include_router(notifications.router, prefix=prefix)
 app.include_router(reports.router, prefix=prefix)
 app.include_router(uploads.router, prefix=prefix)
+app.include_router(documents.router, prefix=prefix)
+app.include_router(agencies.router, prefix=prefix)
 
 
 @app.get("/health")
@@ -57,7 +59,7 @@ async def health_check():
     return {"status": "ok"}
 
 
-# Serve locally uploaded files in development (no S3)
-_uploads_dir = Path("/app/uploads")
+# Serve locally uploaded files in development
+_uploads_dir = Path(__file__).resolve().parent.parent.parent / "uploads"
 _uploads_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(_uploads_dir)), name="uploads")

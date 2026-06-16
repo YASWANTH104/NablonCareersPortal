@@ -34,7 +34,9 @@ export default function LoginPage() {
       useAuthStore.setState({ accessToken: data.access_token });
       const meRes = await authApi.me();
       login(meRes.data, data.access_token, data.refresh_token);
-      const from = location.state?.from?.pathname || getHomeRoute(meRes.data.role);
+      const agencyReturn = sessionStorage.getItem('agency_return_to');
+      const from = location.state?.from?.pathname || agencyReturn || getHomeRoute(meRes.data.role);
+      if (agencyReturn) sessionStorage.removeItem('agency_return_to');
       navigate(from, { replace: true });
     } catch (err) {
       toast.error(err.response?.data?.detail ?? 'Invalid credentials');

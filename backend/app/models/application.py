@@ -28,6 +28,7 @@ class Application(Base):
     rejection_reason: Mapped[str | None] = mapped_column(Text)
 
     source: Mapped[str] = mapped_column(String(50), default="direct")
+    agency_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("agencies.id"))
     rating: Mapped[int | None] = mapped_column(Integer)
     is_starred: Mapped[bool] = mapped_column(Boolean, default=False)
     assigned_to: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))

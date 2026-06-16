@@ -11,6 +11,7 @@ import { Search, LayoutGrid, List, Star, GripVertical, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { applicationsApi } from '@/api/applications';
 import { jobsApi } from '@/api/jobs';
+import { agenciesApi } from '@/api/agencies';
 
 const PIPELINE_STAGES = [
   { key: 'applied',    label: 'Applied',    color: 'bg-blue-100 text-blue-800' },
@@ -311,8 +312,14 @@ export default function ApplicantsPage() {
   const [view, setView] = useState('kanban');
   const [selectedJobId, setSelectedJobId] = useState('');
   const [stageFilter, setStageFilter] = useState('');
+  const [agencyFilter, setAgencyFilter] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
+
+  const { data: agenciesData } = useQuery({
+    queryKey: ['agencies'],
+    queryFn: () => agenciesApi.list().then((r) => r.data),
+  });
 
   const { data: jobsData } = useQuery({
     queryKey: ['hr-jobs-list'],
@@ -322,6 +329,7 @@ export default function ApplicantsPage() {
   const queryParams = {
     jobId: selectedJobId,
     stage: view === 'kanban' ? '' : stageFilter,
+    agencyId: agencyFilter,
     search,
     page: view === 'kanban' ? 1 : page,
   };
@@ -335,6 +343,7 @@ export default function ApplicantsPage() {
         .list({
           job_id: selectedJobId || undefined,
           stage: view === 'kanban' ? undefined : stageFilter || undefined,
+          agency_id: agencyFilter || undefined,
           search: search || undefined,
           page: view === 'kanban' ? 1 : page,
           limit: view === 'kanban' ? 200 : 20,
@@ -405,6 +414,20 @@ export default function ApplicantsPage() {
             <option value="">All stages</option>
             {PIPELINE_STAGES.map((s) => (
               <option key={s.key} value={s.key}>{s.label}</option>
+            ))}
+          </select>
+        )}
+
+        {/* Agency filter */}
+        {agenciesData?.length > 0 && (
+          <select
+            value={agencyFilter}
+            onChange={(e) => { setAgencyFilter(e.target.value); setPage(1); }}
+            className="text-sm border border-surface-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+          >
+            <option value="">All sources</option>
+            {agenciesData.map((a) => (
+              <option key={a.id} value={a.id}>{a.name}</option>
             ))}
           </select>
         )}

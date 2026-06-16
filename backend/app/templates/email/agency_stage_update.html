@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Candidate Update – Nablon AI Careers{% endblock %}
+
+{% block content %}
+<h2>Hi {{ agency_name }},</h2>
+
+<p>
+  This is an update regarding one of the candidates you submitted for the
+  <strong>{{ job_title }}</strong> role at Nablon AI.
+</p>
+
+<table style="width:100%; border-collapse:collapse; margin:20px 0;">
+  <tr>
+    <td style="padding:10px; background:#f8f8f8; font-weight:bold; width:40%;">Candidate</td>
+    <td style="padding:10px; background:#f8f8f8;">{{ candidate_name }}</td>
+  </tr>
+  <tr>
+    <td style="padding:10px; font-weight:bold;">Role</td>
+    <td style="padding:10px;">{{ job_title }}</td>
+  </tr>
+  <tr>
+    <td style="padding:10px; background:#f8f8f8; font-weight:bold;">Current Stage</td>
+    <td style="padding:10px; background:#f8f8f8;"><strong>{{ stage_label }}</strong></td>
+  </tr>
+</table>
+
+<p>
+  You can view all candidates you have submitted and their current stages in your agency portal:
+</p>
+
+<p style="text-align:center; margin:30px 0;">
+  <a href="{{ portal_url }}" style="background:#4F46E5; color:#ffffff; padding:12px 28px; border-radius:8px; text-decoration:none; font-weight:600; font-size:15px;">
+    View Agency Portal
+  </a>
+</p>
+
+<p style="color:#6B7280; font-size:13px;">
+  If you have any questions, please reach out to the Nablon AI hiring team.
+</p>
+{% endblock %}

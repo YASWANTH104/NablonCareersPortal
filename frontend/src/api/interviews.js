@@ -10,4 +10,7 @@ export const interviewsApi = {
   cancel: (id) => client.delete(`/interviews/${id}`),
   submitFeedback: (id, data) => client.post(`/interviews/${id}/feedback`, data),
   getFeedback: (id) => client.get(`/interviews/${id}/feedback`),
+  submitSelfFeedback: (id, data) => client.post(`/interviews/${id}/self-feedback`, data),
+  getSelfFeedback: (id) => client.get(`/interviews/${id}/self-feedback`),
+  getCandidateSummary: (id) => client.get(`/interviews/${id}/candidate-summary`),
 };

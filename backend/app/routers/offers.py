@@ -1,15 +1,16 @@
 import uuid
 from typing import Optional
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user, require_roles, Role
+from typing import Optional
 from app.schemas.offer import (
     OfferTemplateCreate, OfferTemplateUpdate, OfferTemplateResponse,
     OfferLetterCreate, OfferLetterUpdate, OfferLetterResponse,
-    OfferLetterListResponse, OfferRespondRequest,
+    OfferLetterListResponse, OfferRespondRequest, CandidateOfferResponse,
 )
 from app.services import offer_service
 
@@ -78,6 +79,70 @@ async def list_offers(
     return await offer_service.list_offers(db, status=status, page=page, limit=limit)
 
 
+# ── Applicant portal routes (authenticated) — must come before /{offer_id} ───
+
+@router.get("/mine/{application_id}", response_model=Optional[CandidateOfferResponse])
+async def get_my_offer(
+    application_id: uuid.UUID,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await offer_service.get_offer_for_applicant(db, application_id, current_user.id)
+
+
+@router.post("/mine/{application_id}/respond", response_model=CandidateOfferResponse)
+async def respond_my_offer(
+    application_id: uuid.UUID,
+    data: OfferRespondRequest,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await offer_service.respond_offer_for_applicant(
+        db, application_id, current_user.id, data.decision, data.candidate_signature
+    )
+
+
+@router.get("/mine/{application_id}/view")
+async def view_my_offer_html(
+    application_id: uuid.UUID,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models.offer import OfferLetter
+    from sqlalchemy import select as _select
+    from fastapi import HTTPException
+    offer = (await db.execute(
+        _select(OfferLetter).where(OfferLetter.application_id == application_id)
+    )).scalar_one_or_none()
+    if not offer or offer.status not in ("sent", "accepted", "rejected", "expired", "revoked"):
+        raise HTTPException(404, "Offer not found or not yet sent")
+    html = await offer_service.build_offer_html(db, offer.id)
+    return Response(content=html, media_type="text/html; charset=utf-8")
+
+
+@router.get("/mine/{application_id}/download")
+async def download_my_offer_pdf(
+    application_id: uuid.UUID,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models.offer import OfferLetter
+    from sqlalchemy import select as _select
+    from fastapi import HTTPException
+    offer = (await db.execute(
+        _select(OfferLetter).where(OfferLetter.application_id == application_id)
+    )).scalar_one_or_none()
+    if not offer or offer.status not in ("sent", "accepted", "rejected", "expired", "revoked"):
+        raise HTTPException(404, "Offer not found or not yet sent")
+    pdf_bytes = await offer_service.build_offer_pdf(db, offer.id)
+    filename = "offer_letter_signed.pdf" if offer.candidate_signature else "offer_letter.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # IMPORTANT: /respond/:token must come before /{offer_id} to avoid routing conflict
 @router.post("/respond/{token}", response_model=OfferLetterResponse)
 async def respond_offer(
@@ -87,6 +152,50 @@ async def respond_offer(
 ):
     return await offer_service.respond_offer(
         db, token, data.decision, data.candidate_signature
+    )
+
+
+@router.get("/by-application/{application_id}", response_model=Optional[OfferLetterResponse])
+async def get_offer_by_application(
+    application_id: uuid.UUID,
+    user=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await offer_service.get_offer_by_application(db, application_id)
+
+
+@router.get("/{offer_id}/view")
+async def view_offer_html(
+    offer_id: uuid.UUID,
+    user=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models.offer import OfferLetter
+    from fastapi import HTTPException as _HTTPException
+    offer = await db.get(OfferLetter, offer_id)
+    if not offer:
+        raise _HTTPException(404, "Offer not found")
+    html = await offer_service.build_offer_html(db, offer_id)
+    return Response(content=html, media_type="text/html; charset=utf-8")
+
+
+@router.get("/{offer_id}/download")
+async def download_offer_pdf(
+    offer_id: uuid.UUID,
+    user=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models.offer import OfferLetter
+    from fastapi import HTTPException as _HTTPException
+    offer = await db.get(OfferLetter, offer_id)
+    if not offer:
+        raise _HTTPException(404, "Offer not found")
+    pdf_bytes = await offer_service.build_offer_pdf(db, offer_id)
+    filename = "offer_letter_signed.pdf" if offer.candidate_signature else "offer_letter.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
@@ -135,12 +244,3 @@ async def revoke_offer(
     db: AsyncSession = Depends(get_db),
 ):
     return await offer_service.revoke_offer(db, offer_id)
-
-
-@router.get("/by-application/{application_id}", response_model=Optional[OfferLetterResponse])
-async def get_offer_by_application(
-    application_id: uuid.UUID,
-    user=Depends(require_roles(*_HR_ROLES)),
-    db: AsyncSession = Depends(get_db),
-):
-    return await offer_service.get_offer_by_application(db, application_id)

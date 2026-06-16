@@ -1,4 +1,5 @@
-import { Link, useParams, useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Link, useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { MapPin, Briefcase, Clock, Users, ArrowLeft, Building2, DollarSign, ExternalLink } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
@@ -12,7 +13,21 @@ function formatEmploymentType(val) {
 export default function JobDetailPage() {
   const { slug } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
   const { accessToken } = useAuthStore();
+  const isAgencyMode = location.pathname.startsWith('/agency-apply');
+
+  useEffect(() => {
+    const ref = searchParams.get('ref');
+    if (ref) {
+      sessionStorage.setItem('agency_ref', ref);
+      if (!isAgencyMode) {
+        // Redirect to focused apply layout
+        navigate(`/agency-apply/${slug}`, { replace: true });
+      }
+    }
+  }, [searchParams]);
 
   const { data: job, isLoading, isError } = useQuery({
     queryKey: ['job', slug],
@@ -20,10 +35,12 @@ export default function JobDetailPage() {
   });
 
   const handleApply = () => {
+    const applyPath = isAgencyMode ? `/agency-apply/${slug}/apply` : `/jobs/${slug}/apply`;
     if (!accessToken) {
-      navigate('/register', { state: { from: { pathname: `/jobs/${slug}/apply` } } });
+      sessionStorage.setItem('agency_return_to', applyPath);
+      navigate('/register', { state: { from: { pathname: applyPath } } });
     } else {
-      navigate(`/jobs/${slug}/apply`);
+      navigate(applyPath);
     }
   };
 
@@ -58,11 +75,13 @@ export default function JobDetailPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-10">
-      {/* Back */}
-      <Link to="/jobs" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-6">
-        <ArrowLeft className="w-4 h-4" />
-        All openings
-      </Link>
+      {/* Back — hidden in agency focused mode */}
+      {!isAgencyMode && (
+        <Link to="/jobs" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-6">
+          <ArrowLeft className="w-4 h-4" />
+          All openings
+        </Link>
+      )}
 
       <div className="flex flex-col lg:flex-row gap-8">
         {/* Main content */}

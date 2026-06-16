@@ -17,6 +17,47 @@ export const offersApi = {
   preview: (id) => client.get(`/offers/${id}/preview`),
   revoke: (id) => client.post(`/offers/${id}/revoke`),
 
-  // Public — no auth
+  // Public — no auth (legacy/fallback)
   respond: (token, data) => client.post(`/offers/respond/${token}`, data),
+
+  // Candidate portal (authenticated)
+  getMyOffer: (applicationId) => client.get(`/offers/mine/${applicationId}`),
+  respondMyOffer: (applicationId, data) => client.post(`/offers/mine/${applicationId}/respond`, data),
+
+  // Inline HTML view — no WeasyPrint, instant
+  fetchMyHtmlBlob: async (applicationId) => {
+    const res = await client.get(`/offers/mine/${applicationId}/view`, { responseType: 'blob' });
+    return URL.createObjectURL(new Blob([res.data], { type: 'text/html' }));
+  },
+
+  // HR inline HTML view
+  fetchHtmlBlob: async (offerId) => {
+    const res = await client.get(`/offers/${offerId}/view`, { responseType: 'blob' });
+    return URL.createObjectURL(new Blob([res.data], { type: 'text/html' }));
+  },
+
+  // Forces a file-save PDF download (uses WeasyPrint)
+  downloadMyPdf: async (applicationId) => {
+    const res = await client.get(`/offers/mine/${applicationId}/download`, { responseType: 'blob' });
+    const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'offer_letter.pdf';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  },
+
+  downloadPdf: async (offerId) => {
+    const res = await client.get(`/offers/${offerId}/download`, { responseType: 'blob' });
+    const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'offer_letter.pdf';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  },
 };

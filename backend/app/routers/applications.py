@@ -35,7 +35,7 @@ async def my_applications(
 @router.post("", response_model=ApplicationResponse, status_code=201)
 async def submit_application(
     data: ApplicationCreate,
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_roles(Role.APPLICANT)),
     db: AsyncSession = Depends(get_db),
 ):
     return await application_service.submit_application(db, data, applicant_id=current_user.id)
@@ -68,13 +68,14 @@ async def list_applications(
     job_id: Optional[uuid.UUID] = Query(None),
     stage: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
+    agency_id: Optional[uuid.UUID] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=500),
     user=Depends(require_roles(*_HR_AND_INTERVIEWER)),
     db: AsyncSession = Depends(get_db),
 ):
     return await application_service.get_all_applications(
-        db, job_id=job_id, stage=stage, search=search, page=page, limit=limit
+        db, job_id=job_id, stage=stage, search=search, agency_id=agency_id, page=page, limit=limit
     )
 
 
@@ -104,7 +105,7 @@ async def move_stage(
     user=Depends(require_roles(*_HR_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
-    return await application_service.move_stage(db, application_id, data.stage, user.id, data.notes)
+    return await application_service.move_stage(db, application_id, data.stage, user.id, data.notes, data.rejection_reason)
 
 
 @router.patch("/{application_id}/star", response_model=ApplicationResponse)
@@ -162,3 +163,13 @@ async def withdraw(
     db: AsyncSession = Depends(get_db),
 ):
     await application_service.withdraw_application(db, application_id, current_user.id)
+
+
+@router.get("/{application_id}/interviews")
+async def get_my_interviews(
+    application_id: uuid.UUID,
+    current_user=Depends(require_roles(Role.APPLICANT)),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services import interview_service
+    return await interview_service.list_candidate_interviews(db, application_id, current_user.id)

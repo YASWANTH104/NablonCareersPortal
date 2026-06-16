@@ -35,7 +35,13 @@ async def send_email(
         return False
 
 
-async def _send_via_acs(to_email: str, subject: str, html_content: str) -> bool:
+async def _send_via_acs(
+    to_email: str,
+    subject: str,
+    html_content: str,
+    attachments: list[dict] | None = None,
+) -> bool:
+    import asyncio
     from azure.communication.email import EmailClient
 
     client = EmailClient.from_connection_string(settings.AZURE_COMMUNICATION_CONNECTION_STRING)
@@ -48,10 +54,38 @@ async def _send_via_acs(to_email: str, subject: str, html_content: str) -> bool:
             "html": html_content,
         },
     }
+    if attachments:
+        message["attachments"] = attachments
 
-    poller = client.begin_send(message)
-    result = poller.result()
-    return result.get("status", "").lower() == "succeeded"
+    def _sync_send():
+        poller = client.begin_send(message)
+        result = poller.result()
+        return result.get("status", "").lower() == "succeeded"
+
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _sync_send)
+
+
+async def send_email_with_attachment(
+    to_email: str,
+    subject: str,
+    template_name: str,
+    context: dict,
+    attachments: list[dict] | None = None,
+) -> bool:
+    """Send email with optional attachments. Each attachment: {name, attachmentType, contentInBase64}."""
+    try:
+        template = jinja_env.get_template(f"{template_name}.html")
+        html_content = template.render(**context)
+
+        if settings.AZURE_COMMUNICATION_CONNECTION_STRING and settings.AZURE_EMAIL_SENDER:
+            return await _send_via_acs(to_email, subject, html_content, attachments)
+        else:
+            logger.info(f"[DEV] Email+attachment to {to_email}: {subject} (attachments: {len(attachments or [])})")
+            return True
+    except Exception as exc:
+        logger.error(f"Failed to send email+attachment to {to_email}: {exc}")
+        return False
 
 
 async def send_verification_email(to_email: str, full_name: str, token: str) -> bool:

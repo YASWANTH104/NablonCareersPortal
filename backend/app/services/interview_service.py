@@ -4,10 +4,12 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 
-from app.models.interview import Interview, InterviewPanelist, InterviewFeedback
+from app.models.interview import Interview, InterviewPanelist, InterviewFeedback, CandidateInterviewSelfFeedback
 from app.schemas.interview import (
     InterviewCreate, InterviewUpdate, InterviewFeedbackCreate,
     InterviewResponse, InterviewFeedbackResponse, PanelistResponse,
+    CandidateSelfFeedbackCreate, CandidateSelfFeedbackResponse,
+    CandidateInterviewSummary,
 )
 
 
@@ -34,6 +36,23 @@ def _panelist_to_dict(p: InterviewPanelist) -> dict:
     return {"interview_id": p.interview_id, "user_id": p.user_id, "role": p.role}
 
 
+def _self_feedback_to_dict(sf: CandidateInterviewSelfFeedback) -> dict:
+    return {
+        "id": sf.id,
+        "interview_id": sf.interview_id,
+        "candidate_id": sf.candidate_id,
+        "overall_score": sf.overall_score,
+        "communication_score": sf.communication_score,
+        "technical_confidence": sf.technical_confidence,
+        "was_prepared": sf.was_prepared,
+        "would_recommend": sf.would_recommend,
+        "difficulty": sf.difficulty,
+        "experience_rating": sf.experience_rating,
+        "comments": sf.comments,
+        "created_at": sf.created_at,
+    }
+
+
 def _interview_to_response(
     interview: Interview,
     panelists: list[InterviewPanelist],
@@ -41,6 +60,7 @@ def _interview_to_response(
     candidate_name: Optional[str] = None,
     candidate_email: Optional[str] = None,
     job_id: Optional[uuid.UUID] = None,
+    self_feedback: Optional[CandidateInterviewSelfFeedback] = None,
 ) -> InterviewResponse:
     d = {
         "id": interview.id,
@@ -62,6 +82,7 @@ def _interview_to_response(
         "candidate_name": candidate_name,
         "candidate_email": candidate_email,
         "job_id": job_id,
+        "candidate_self_feedback": _self_feedback_to_dict(self_feedback) if self_feedback else None,
     }
     return InterviewResponse.model_validate(d)
 
@@ -289,12 +310,15 @@ async def list_interviews(
 
     interview_ids = [row[0].id for row in rows]
 
-    # Batch-load panelists and feedback
+    # Batch-load panelists, feedback, and candidate self-feedback
     all_panelists = (await db.execute(
         select(InterviewPanelist).where(InterviewPanelist.interview_id.in_(interview_ids))
     )).scalars().all()
     all_feedback = (await db.execute(
         select(InterviewFeedback).where(InterviewFeedback.interview_id.in_(interview_ids))
+    )).scalars().all()
+    all_self_feedback = (await db.execute(
+        select(CandidateInterviewSelfFeedback).where(CandidateInterviewSelfFeedback.interview_id.in_(interview_ids))
     )).scalars().all()
 
     panelists_by = {}
@@ -303,6 +327,7 @@ async def list_interviews(
     feedback_by = {}
     for f in all_feedback:
         feedback_by.setdefault(f.interview_id, []).append(f)
+    self_feedback_by = {sf.interview_id: sf for sf in all_self_feedback}
 
     items = []
     for interview, full_name, email, job_id in rows:
@@ -313,6 +338,7 @@ async def list_interviews(
             candidate_name=full_name,
             candidate_email=email,
             job_id=job_id,
+            self_feedback=self_feedback_by.get(interview.id),
         ))
 
     return {"items": items, "total": total, "page": page, "limit": limit, "pages": max(1, -(-total // limit))}
@@ -593,3 +619,119 @@ async def get_feedback(
         select(InterviewFeedback).where(InterviewFeedback.interview_id == interview_id)
     )).scalars().all()
     return list(rows)
+
+
+async def submit_self_feedback(
+    db: AsyncSession,
+    interview_id: uuid.UUID,
+    data: CandidateSelfFeedbackCreate,
+    candidate_id: uuid.UUID,
+) -> CandidateInterviewSelfFeedback:
+    interview = await db.get(Interview, interview_id)
+    if not interview:
+        raise HTTPException(404, "Interview not found")
+
+    from app.models.application import Application
+    app = await db.get(Application, interview.application_id)
+    if not app or app.applicant_id != candidate_id:
+        raise HTTPException(403, "Not your interview")
+
+    existing = (await db.execute(
+        select(CandidateInterviewSelfFeedback).where(
+            CandidateInterviewSelfFeedback.interview_id == interview_id
+        )
+    )).scalar_one_or_none()
+
+    if existing:
+        for field, val in data.model_dump(exclude_unset=True).items():
+            setattr(existing, field, val)
+        await db.commit()
+        await db.refresh(existing)
+        return existing
+
+    row = CandidateInterviewSelfFeedback(
+        interview_id=interview_id,
+        candidate_id=candidate_id,
+        **data.model_dump(),
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+async def get_self_feedback(
+    db: AsyncSession,
+    interview_id: uuid.UUID,
+    candidate_id: uuid.UUID,
+) -> CandidateInterviewSelfFeedback | None:
+    interview = await db.get(Interview, interview_id)
+    if not interview:
+        raise HTTPException(404, "Interview not found")
+
+    from app.models.application import Application
+    app = await db.get(Application, interview.application_id)
+    if not app or app.applicant_id != candidate_id:
+        raise HTTPException(403, "Not your interview")
+
+    return (await db.execute(
+        select(CandidateInterviewSelfFeedback).where(
+            CandidateInterviewSelfFeedback.interview_id == interview_id
+        )
+    )).scalar_one_or_none()
+
+
+async def list_candidate_interviews(
+    db: AsyncSession,
+    application_id: Optional[uuid.UUID],
+    candidate_id: uuid.UUID,
+    interview_id: Optional[uuid.UUID] = None,
+) -> list[dict]:
+    from app.models.application import Application
+
+    if application_id is not None:
+        app = await db.get(Application, application_id)
+        if not app or app.applicant_id != candidate_id:
+            raise HTTPException(403, "Not your application")
+
+    if interview_id is not None:
+        # Fetch a single interview and verify ownership
+        iv = await db.get(Interview, interview_id)
+        if not iv:
+            return []
+        app = await db.get(Application, iv.application_id)
+        if not app or app.applicant_id != candidate_id:
+            return []
+        rows = [iv]
+    else:
+        rows = (await db.execute(
+            select(Interview).where(
+                Interview.application_id == application_id
+            ).order_by(Interview.scheduled_at.asc())
+        )).scalars().all()
+
+    if not rows:
+        return []
+
+    interview_ids = [r.id for r in rows]
+    self_feedbacks = (await db.execute(
+        select(CandidateInterviewSelfFeedback).where(
+            CandidateInterviewSelfFeedback.interview_id.in_(interview_ids)
+        )
+    )).scalars().all()
+    submitted_ids = {sf.interview_id for sf in self_feedbacks}
+
+    return [
+        {
+            "id": r.id,
+            "application_id": r.application_id,
+            "round_number": r.round_number,
+            "title": r.title,
+            "interview_type": r.interview_type,
+            "scheduled_at": r.scheduled_at,
+            "duration_mins": r.duration_mins,
+            "status": r.status,
+            "self_feedback_submitted": r.id in submitted_ids,
+        }
+        for r in rows
+    ]
