@@ -10,6 +10,8 @@ from app.schemas.interview import (
     InterviewCreate, InterviewUpdate, InterviewResponse,
     InterviewFeedbackCreate, InterviewFeedbackResponse,
     InterviewListResponse,
+    CandidateSelfFeedbackCreate, CandidateSelfFeedbackResponse,
+    CandidateInterviewSummary,
 )
 
 
@@ -114,3 +116,39 @@ async def get_feedback(
     db: AsyncSession = Depends(get_db),
 ):
     return await interview_service.get_feedback(db, interview_id)
+
+
+@router.get("/{interview_id}/candidate-summary", response_model=CandidateInterviewSummary)
+async def get_candidate_interview_summary(
+    interview_id: uuid.UUID,
+    user=Depends(require_roles(Role.APPLICANT)),
+    db: AsyncSession = Depends(get_db),
+):
+    rows = await interview_service.list_candidate_interviews(db, None, user.id, interview_id=interview_id)
+    if not rows:
+        from fastapi import HTTPException
+        raise HTTPException(404, "Interview not found or not yours")
+    return rows[0]
+
+
+@router.post("/{interview_id}/self-feedback", response_model=CandidateSelfFeedbackResponse, status_code=201)
+async def submit_self_feedback(
+    interview_id: uuid.UUID,
+    data: CandidateSelfFeedbackCreate,
+    user=Depends(require_roles(Role.APPLICANT)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await interview_service.submit_self_feedback(db, interview_id, data, candidate_id=user.id)
+
+
+@router.get("/{interview_id}/self-feedback", response_model=CandidateSelfFeedbackResponse)
+async def get_self_feedback(
+    interview_id: uuid.UUID,
+    user=Depends(require_roles(Role.APPLICANT)),
+    db: AsyncSession = Depends(get_db),
+):
+    row = await interview_service.get_self_feedback(db, interview_id, candidate_id=user.id)
+    if not row:
+        from fastapi import HTTPException
+        raise HTTPException(404, "No self-feedback submitted yet")
+    return row

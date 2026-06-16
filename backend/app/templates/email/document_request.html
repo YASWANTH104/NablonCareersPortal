@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Document Submission Required – Nablon AI Careers{% endblock %}
+
+{% block content %}
+<h2>Hi {{ full_name }},</h2>
+
+<p>
+  Congratulations on progressing to the offer stage for the <strong>{{ job_title }}</strong>
+  position at Nablon AI! We are excited about the prospect of you joining our team.
+</p>
+
+<p>
+  Before we can proceed with rolling out your formal offer letter, we kindly request you to
+  submit the following documents through our secure portal. This is a standard part of our
+  onboarding process and helps us complete the necessary background and compliance checks.
+</p>
+
+<div style="background:#F8F9FC; border-radius:10px; padding:24px 28px; margin:24px 0;">
+  <p style="margin:0 0 16px; font-weight:700; color:#111827; font-size:15px;">Documents Required</p>
+  <table style="width:100%; border-collapse:collapse;">
+    {% for doc in required_documents %}
+    <tr>
+      <td style="padding:10px 0; border-bottom:1px solid #E5E7EB; vertical-align:middle; width:28px;">
+        <div style="width:20px; height:20px; border-radius:50%; background:#EEF0FF; border:2px solid #4F5EFF; display:inline-block; vertical-align:middle;"></div>
+      </td>
+      <td style="padding:10px 12px; border-bottom:1px solid #E5E7EB; color:#374151; font-size:14px;">
+        {{ doc.label }}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<p>
+  Please upload all documents within <strong>{{ expires_days }} days</strong> using the
+  secure link below. Accepted formats: PDF, JPG, PNG, and Word documents (max 10 MB each).
+</p>
+
+<a href="{{ upload_url }}" class="cta">Submit My Documents</a>
+
+<p style="margin-top:28px; color:#6B7280; font-size:13px;">
+  If you have any questions or face any issues while uploading, please reach out to our HR
+  team and we will be happy to assist you.
+</p>
+
+<p style="color:#6B7280; font-size:13px;">
+  We look forward to welcoming you to Nablon AI!
+</p>
+{% endblock %}

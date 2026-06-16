@@ -5,4 +5,5 @@ export const reportsApi = {
   sourceAnalysis: (params) => client.get('/reports/source-analysis', { params }),
   referralPerformance: (params) => client.get('/reports/referral-performance', { params }),
   timeToHire: (params) => client.get('/reports/time-to-hire', { params }),
+  agencyPerformance: (params) => client.get('/reports/agency-performance', { params }),
 };

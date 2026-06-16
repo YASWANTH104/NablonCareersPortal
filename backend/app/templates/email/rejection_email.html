@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block title %}Application Update – Nablon AI Careers{% endblock %}
+
+{% block content %}
+<h2>Hi {{ full_name }},</h2>
+
+{% if from_stage == "tr1" %}
+<p>
+  Thank you for taking the time to interview with us for the <strong>{{ job_title }}</strong>
+  role at Nablon AI. Following your <strong>Technical Round 1</strong> interview, our team has
+  carefully evaluated your performance and, after considerable deliberation, we have decided not
+  to advance your candidacy to the next stage.
+</p>
+{% elif from_stage == "tr2" %}
+<p>
+  Thank you for your continued engagement in our hiring process for the <strong>{{ job_title }}</strong>
+  role at Nablon AI. Following your <strong>Technical Round 2</strong> interview, our team has
+  thoughtfully reviewed all aspects of your candidacy and, regrettably, we have decided not to
+  move forward at this time.
+</p>
+{% elif from_stage == "hr" %}
+<p>
+  Thank you for investing your time in our process for the <strong>{{ job_title }}</strong>
+  position at Nablon AI. Following your <strong>HR interview</strong>, we have carefully considered
+  your profile against our current requirements and have decided not to proceed with your application.
+</p>
+{% elif from_stage == "assessment" %}
+<p>
+  Thank you for completing the assessment for the <strong>{{ job_title }}</strong> position at Nablon AI.
+  After a thorough review of your submission, our team has decided not to advance your application
+  to the next stage at this time.
+</p>
+{% elif from_stage == "offer" %}
+<p>
+  Thank you for your continued interest in the <strong>{{ job_title }}</strong> role at Nablon AI.
+  After careful deliberation following the offer stage, we have decided not to proceed further
+  with your candidacy. We sincerely appreciate the time and trust you placed in us throughout
+  this process.
+</p>
+{% else %}
+<p>
+  Thank you for your interest in the <strong>{{ job_title }}</strong> role at Nablon AI and for
+  taking the time to go through our initial review process. After carefully considering your
+  application alongside many strong candidates, we have decided not to move forward with your
+  candidacy at this stage.
+</p>
+{% endif %}
+
+<p>
+  We want you to know that this was not an easy decision. We genuinely appreciate the effort,
+  preparation, and enthusiasm you brought to our process, and we have great respect for your
+  background and capabilities.
+</p>
+
+{% if feedback and (feedback.strengths or feedback.weaknesses or feedback.notes) %}
+<div style="background:#F8F9FC; border-left:4px solid #4F5EFF; border-radius:8px; padding:24px 28px; margin:28px 0;">
+  <p style="margin:0 0 4px; font-weight:700; color:#111827; font-size:15px;">Interviewer Feedback</p>
+  <p style="margin:0 0 20px; font-size:13px; color:#6B7280;">
+    Our interviewer has shared the following observations to support your professional development.
+  </p>
+
+  {% if feedback.strengths %}
+  <div style="margin-bottom:18px;">
+    <p style="margin:0 0 6px; font-weight:600; color:#374151; font-size:13px; text-transform:uppercase; letter-spacing:0.05em;">Strengths Observed</p>
+    <p style="margin:0; color:#374151; font-size:14px; line-height:1.6;">{{ feedback.strengths }}</p>
+  </div>
+  {% endif %}
+
+  {% if feedback.weaknesses %}
+  <div style="margin-bottom:18px;">
+    <p style="margin:0 0 6px; font-weight:600; color:#374151; font-size:13px; text-transform:uppercase; letter-spacing:0.05em;">Areas for Growth</p>
+    <p style="margin:0; color:#374151; font-size:14px; line-height:1.6;">{{ feedback.weaknesses }}</p>
+  </div>
+  {% endif %}
+
+  {% if feedback.notes %}
+  <div>
+    <p style="margin:0 0 6px; font-weight:600; color:#374151; font-size:13px; text-transform:uppercase; letter-spacing:0.05em;">Additional Notes</p>
+    <p style="margin:0; color:#374151; font-size:14px; line-height:1.6;">{{ feedback.notes }}</p>
+  </div>
+  {% endif %}
+</div>
+{% elif rejection_reason %}
+<div style="background:#F8F9FC; border-left:4px solid #E5E7EB; border-radius:8px; padding:20px 24px; margin:28px 0;">
+  <p style="margin:0 0 8px; font-weight:600; color:#374151; font-size:13px; text-transform:uppercase; letter-spacing:0.05em;">Note from Our Team</p>
+  <p style="margin:0; color:#374151; font-size:14px; line-height:1.6;">{{ rejection_reason }}</p>
+</div>
+{% endif %}
+
+<p>
+  We sincerely encourage you to keep building on your strengths. Talent like yours finds its
+  right fit, and we would be delighted to consider your profile for future opportunities that
+  align with your skills. You are always welcome to apply again.
+</p>
+
+<a href="{{ portal_url }}" class="cta">View Your Applications</a>
+
+{% if feedback_url %}
+<div style="background:#F0F4FF; border:1px solid #C7D2FE; border-radius:12px; padding:24px 28px; margin:32px 0; text-align:center;">
+  <p style="margin:0 0 6px; font-weight:700; color:#1E1B4B; font-size:15px;">How did your interview go?</p>
+  <p style="margin:0 0 20px; color:#4B5563; font-size:13px; line-height:1.6;">
+    We'd love to hear about your experience. Your feedback helps us improve our hiring process
+    and is completely anonymous to the hiring team.
+  </p>
+  <a href="{{ feedback_url }}"
+     style="display:inline-block; background:#4F5EFF; color:#ffffff; font-weight:600; font-size:14px;
+            padding:12px 28px; border-radius:8px; text-decoration:none;">
+    Share Your Experience →
+  </a>
+  <p style="margin:16px 0 0; color:#6B7280; font-size:12px;">Takes less than 2 minutes</p>
+</div>
+{% endif %}
+
+<p style="margin-top:28px; color:#6B7280; font-size:13px;">
+  We wish you every success in your career journey ahead. Thank you once again for considering
+  Nablon AI as a place to grow.
+</p>
+{% endblock %}

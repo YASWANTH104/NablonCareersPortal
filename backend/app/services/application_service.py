@@ -41,6 +41,7 @@ def _app_to_dict(app: Application) -> dict:
         "stage": app.stage,
         "rejection_reason": app.rejection_reason,
         "source": app.source,
+        "agency_id": app.agency_id,
         "rating": app.rating,
         "is_starred": app.is_starred,
         "assigned_to": app.assigned_to,
@@ -65,11 +66,24 @@ async def submit_application(
     if existing.scalar_one_or_none():
         raise HTTPException(409, "You have already applied for this job")
 
-    source = "referral" if data.referral_id else "direct"
+    agency_id = None
+    agency_ref = data.agency_ref
+    if agency_ref:
+        from app.models.agency import JobAgencyAssignment
+        from app.models.application import Application as App
+        assignment = (await db.execute(
+            select(JobAgencyAssignment).where(JobAgencyAssignment.ref_token == agency_ref)
+        )).scalar_one_or_none()
+        if assignment and str(assignment.job_id) == str(data.job_id):
+            agency_id = assignment.agency_id
+
+    source = "referral" if data.referral_id else ("agency" if agency_id else "direct")
+    create_data = data.model_dump(exclude={"agency_ref"})
     application = Application(
         applicant_id=applicant_id,
         source=source,
-        **data.model_dump(),
+        agency_id=agency_id,
+        **create_data,
     )
     db.add(application)
     await db.commit()
@@ -165,6 +179,7 @@ async def get_all_applications(
     job_id: Optional[uuid.UUID] = None,
     stage: Optional[str] = None,
     search: Optional[str] = None,
+    agency_id: Optional[uuid.UUID] = None,
     page: int = 1,
     limit: int = 20,
 ) -> dict:
@@ -182,6 +197,8 @@ async def get_all_applications(
         filters.append(Application.stage == stage)
     if search:
         filters.append(User.full_name.ilike(f"%{search}%"))
+    if agency_id:
+        filters.append(Application.agency_id == agency_id)
 
     if filters:
         base = base.where(and_(*filters))
@@ -267,6 +284,7 @@ async def move_stage(
     new_stage: str,
     moved_by: uuid.UUID,
     notes: Optional[str] = None,
+    rejection_reason: Optional[str] = None,
 ) -> Application:
     app = await db.get(Application, application_id)
     if not app:
@@ -276,9 +294,23 @@ async def move_stage(
     if new_stage not in allowed:
         raise HTTPException(400, f"Cannot move from '{app.stage}' to '{new_stage}'")
 
+    if new_stage == "hired":
+        from app.models.offer import OfferLetter
+        from sqlalchemy import select as _select
+        offer = (await db.execute(
+            _select(OfferLetter).where(OfferLetter.application_id == application_id)
+        )).scalar_one_or_none()
+        if not offer or offer.status != "accepted" or not offer.candidate_signature:
+            raise HTTPException(
+                400,
+                "Cannot mark as hired — candidate must accept and digitally sign the offer letter first."
+            )
+
+    from_stage = app.stage
+
     history = ApplicationStageHistory(
         application_id=application_id,
-        from_stage=app.stage,
+        from_stage=from_stage,
         to_stage=new_stage,
         changed_by=moved_by,
         notes=notes,
@@ -287,6 +319,8 @@ async def move_stage(
 
     app.stage = new_stage
     app.stage_updated_at = datetime.utcnow()
+    if new_stage == "rejected" and rejection_reason:
+        app.rejection_reason = rejection_reason
 
     _STAGE_LABELS = {
         "screening": "Screening", "assessment": "Assessment",
@@ -313,9 +347,35 @@ async def move_stage(
 
     try:
         from app.tasks.email_tasks import send_stage_update_email
-        send_stage_update_email.delay(str(application_id), new_stage)
+        send_stage_update_email.delay(str(application_id), new_stage, from_stage)
     except Exception:
         pass
+
+    if app.agency_id:
+        try:
+            from app.tasks.email_tasks import send_agency_stage_update_email
+            send_agency_stage_update_email.delay(str(application_id), new_stage)
+        except Exception:
+            pass
+
+    if new_stage == "offer":
+        try:
+            from app.services.document_service import get_or_create_request
+            await get_or_create_request(db, application_id)
+            from app.tasks.email_tasks import send_document_request_email_task
+            send_document_request_email_task.delay(str(application_id))
+        except Exception:
+            pass
+
+    if new_stage == "hired":
+        try:
+            from app.models.user import User
+            candidate = await db.get(User, app.applicant_id)
+            if candidate and candidate.role == "applicant":
+                candidate.role = "employee"
+                await db.commit()
+        except Exception:
+            pass
 
     return app
 

@@ -13,6 +13,7 @@ const toOptionalNum = (v) => (v === '' || v === null || v === undefined ? undefi
 
 const schema = z.object({
   title: z.string().min(1, 'Title is required'),
+  department_id: z.string().optional(),
   location: z.string().optional(),
   location_type: z.string().optional(),
   employment_type: z.string().optional(),
@@ -94,6 +95,11 @@ export default function JobEditPage() {
     enabled: isEdit,
   });
 
+  const { data: departments = [] } = useQuery({
+    queryKey: ['departments'],
+    queryFn: () => jobsApi.listDepartments().then((r) => r.data),
+  });
+
   const {
     register,
     handleSubmit,
@@ -103,6 +109,7 @@ export default function JobEditPage() {
     resolver: zodResolver(schema),
     defaultValues: {
       title: '',
+      department_id: '',
       location: '',
       location_type: '',
       employment_type: '',
@@ -128,6 +135,7 @@ export default function JobEditPage() {
         : '';
       reset({
         title: existing.title ?? '',
+        department_id: existing.department_id ?? '',
         location: existing.location ?? '',
         location_type: existing.location_type ?? '',
         employment_type: existing.employment_type ?? '',
@@ -190,6 +198,7 @@ export default function JobEditPage() {
 
   const buildPayload = (values) => ({
     ...values,
+    department_id: values.department_id || null,
     experience_min: values.experience_min ?? null,
     experience_max: values.experience_max ?? null,
     salary_min: values.salary_min ?? null,
@@ -284,10 +293,21 @@ export default function JobEditPage() {
         <section className="bg-white rounded-xl border border-surface-200 p-6 space-y-5">
           <h2 className="font-display font-semibold text-gray-900 text-base">Basic info</h2>
 
-          <div>
-            <FieldLabel required>Job title</FieldLabel>
-            <Input {...register('title')} placeholder="e.g. Senior ML Engineer" />
-            <ErrorMsg message={errors.title?.message} />
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <FieldLabel required>Job title</FieldLabel>
+              <Input {...register('title')} placeholder="e.g. Senior ML Engineer" />
+              <ErrorMsg message={errors.title?.message} />
+            </div>
+            <div>
+              <FieldLabel>Department</FieldLabel>
+              <Select {...register('department_id')}>
+                <option value="">No department</option>
+                {departments.map((d) => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </Select>
+            </div>
           </div>
 
           <div className="grid sm:grid-cols-2 gap-4">

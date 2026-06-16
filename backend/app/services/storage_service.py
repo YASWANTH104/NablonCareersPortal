@@ -91,8 +91,26 @@ async def _upload_to_azure(content: bytes, blob_name: str, content_type: str) ->
         raise HTTPException(500, f"Azure upload failed: {exc}") from exc
 
 
+async def upload_document(file: UploadFile, folder: str, document_type: str) -> str:
+    """Upload a candidate document (any file type up to 20 MB)."""
+    content = await file.read()
+
+    if len(content) > 20 * 1024 * 1024:
+        raise HTTPException(400, "File too large. Max 20 MB allowed.")
+
+    ext = Path(file.filename or "document.pdf").suffix or ".pdf"
+    safe_type = "".join(c for c in document_type if c.isalnum() or c in "-_")
+    blob_name = f"documents/{folder}/{safe_type}/{uuid.uuid4()}{ext}"
+
+    if _azure_configured():
+        return await _upload_to_azure(content, blob_name, file.content_type or "application/octet-stream")
+    return await _save_locally(content, blob_name)
+
+
 async def _save_locally(content: bytes, relative_path: str) -> str:
-    file_path = Path("/app/uploads") / relative_path
+    # In local dev use a writable path next to the backend source tree
+    base = Path(__file__).resolve().parent.parent.parent / "uploads"
+    file_path = base / relative_path
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(file_path, "wb") as fh:

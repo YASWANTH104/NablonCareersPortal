@@ -10,6 +10,7 @@ from app.dependencies import require_roles, Role
 from app.models.application import Application
 from app.models.job import Job, Department
 from app.models.referral import Referral
+from app.models.agency import Agency
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 _HR_ROLES = (Role.HR_MANAGER, Role.ADMIN, Role.SUPER_ADMIN)
@@ -133,3 +134,48 @@ async def time_to_hire_report(
         }
         for r in rows
     ]
+
+
+@router.get("/agency-performance")
+async def agency_performance(
+    days: int = Query(90, ge=7, le=365),
+    _=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    agencies = (await db.execute(select(Agency).where(Agency.is_active == True))).scalars().all()
+
+    result = []
+    for agency in agencies:
+        rows = (await db.execute(
+            select(Application.stage, func.count().label("count"))
+            .where(
+                Application.agency_id == agency.id,
+                Application.applied_at >= since,
+            )
+            .group_by(Application.stage)
+        )).all()
+
+        stage_map = {r.stage: r.count for r in rows}
+        total = sum(stage_map.values())
+        hired = stage_map.get("hired", 0)
+        rejected = stage_map.get("rejected", 0)
+        in_progress = total - hired - rejected
+
+        result.append({
+            "agency_id": str(agency.id),
+            "agency_name": agency.name,
+            "contact_email": agency.contact_email,
+            "total_submitted": total,
+            "in_progress": in_progress,
+            "hired": hired,
+            "rejected": rejected,
+            "conversion_rate": round((hired / total) * 100, 1) if total > 0 else 0,
+            "by_stage": [{"stage": s, "count": stage_map.get(s, 0)} for s in [
+                "applied", "screening", "assessment", "tr1", "tr2", "hr", "offer", "hired", "rejected"
+            ]],
+        })
+
+    result.sort(key=lambda x: x["total_submitted"], reverse=True)
+    return result

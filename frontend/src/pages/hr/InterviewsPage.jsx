@@ -8,7 +8,7 @@ import { format, isToday, isTomorrow, isThisWeek, parseISO } from 'date-fns';
 import toast from 'react-hot-toast';
 import {
   Calendar, Clock, Video, Phone, MapPin, Users, ExternalLink,
-  UserCheck, Star, CheckCircle2, Loader2, ChevronDown, ChevronUp, RefreshCw,
+  UserCheck, Star, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, RefreshCw,
 } from 'lucide-react';
 import { interviewsApi } from '@/api/interviews';
 import { useAuthStore } from '@/store/authStore';
@@ -172,11 +172,109 @@ function groupByDate(interviews) {
   return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
 }
 
-// ── Inline Feedback Form ──────────────────────────────────────────────────────
+// ── Shared components ─────────────────────────────────────────────────────────
+
+const SCORE_DIMENSIONS = [
+  { key: 'technical_score',       label: 'Technical' },
+  { key: 'communication_score',   label: 'Communication' },
+  { key: 'cultural_fit_score',    label: 'Culture Fit' },
+  { key: 'problem_solving_score', label: 'Problem Solving' },
+];
+
+function ScoreSelector({ value, onChange }) {
+  return (
+    <div className="flex gap-1.5">
+      {[1, 2, 3, 4, 5].map((n) => (
+        <button
+          key={n}
+          type="button"
+          onClick={() => onChange(value === n ? null : n)}
+          className={`w-7 h-7 rounded-full border-2 text-xs font-bold transition-all ${
+            value != null && n <= value
+              ? 'bg-brand-500 border-brand-500 text-white'
+              : 'border-surface-300 text-gray-400 hover:border-brand-400 hover:text-brand-500'
+          }`}
+        >
+          {n}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function InterviewFeedbackCard({ fb }) {
+  const rec = RECOMMENDATION_LABELS[fb.recommendation];
+  const scores = [
+    { label: 'Technical',       val: fb.technical_score },
+    { label: 'Communication',   val: fb.communication_score },
+    { label: 'Culture Fit',     val: fb.cultural_fit_score },
+    { label: 'Problem Solving', val: fb.problem_solving_score },
+  ].filter((s) => s.val != null);
+
+  return (
+    <div className="bg-surface-50 rounded-xl border border-surface-200 p-4">
+      <div className="flex items-center gap-2 mb-3">
+        {fb.overall_rating && (
+          <div className="flex gap-0.5">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Star key={i} className={`w-3.5 h-3.5 ${i < fb.overall_rating ? 'text-yellow-400 fill-yellow-400' : 'text-gray-200'}`} />
+            ))}
+          </div>
+        )}
+        {rec && (
+          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${rec.color}`}>
+            {rec.label}
+          </span>
+        )}
+      </div>
+
+      {scores.length > 0 && (
+        <div className="grid grid-cols-4 gap-2 mb-3">
+          {scores.map(({ label, val }) => (
+            <div key={label} className="bg-white rounded-lg p-2 text-center border border-surface-100">
+              <p className="text-sm font-bold text-gray-900">{val}<span className="text-xs text-gray-400 font-normal">/5</span></p>
+              <p className="text-xs text-gray-500 mt-0.5">{label}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {(fb.strengths || fb.weaknesses) && (
+        <div className="grid grid-cols-2 gap-3 text-xs mb-3">
+          {fb.strengths && (
+            <div>
+              <p className="font-semibold text-green-700 mb-1 flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3" /> Strengths
+              </p>
+              <p className="text-gray-700">{fb.strengths}</p>
+            </div>
+          )}
+          {fb.weaknesses && (
+            <div>
+              <p className="font-semibold text-orange-700 mb-1 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" /> Areas to improve
+              </p>
+              <p className="text-gray-700">{fb.weaknesses}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {fb.notes && <p className="text-xs text-gray-600 bg-white rounded-lg p-2.5 border border-surface-100">{fb.notes}</p>}
+    </div>
+  );
+}
+
+// ── Feedback Form ─────────────────────────────────────────────────────────────
 
 function InlineFeedbackForm({ interviewId, onSuccess, onCancel }) {
-  const { register, handleSubmit, watch, setValue, formState: { isSubmitting } } = useForm();
-  const selectedRating = watch('overall_rating');
+  const { register, handleSubmit, formState: { isSubmitting } } = useForm();
+  const [overallRating,  setOverallRating]  = useState(null);
+  const [recommendation, setRecommendation] = useState('');
+  const [scores, setScores] = useState({
+    technical_score: null, communication_score: null,
+    cultural_fit_score: null, problem_solving_score: null,
+  });
 
   const submitMut = useMutation({
     mutationFn: (data) => interviewsApi.submitFeedback(interviewId, data),
@@ -184,54 +282,91 @@ function InlineFeedbackForm({ interviewId, onSuccess, onCancel }) {
     onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to submit feedback'),
   });
 
-  const onSubmit = (values) => {
-    const payload = {};
-    Object.entries(values).forEach(([k, v]) => {
-      if (v !== '' && v !== undefined && v !== null) {
-        payload[k] = typeof v === 'string' && !isNaN(v) && v !== '' ? Number(v) : v;
-      }
-    });
+  const onSubmit = (textValues) => {
+    const payload = { ...textValues };
+    if (overallRating)  payload.overall_rating  = overallRating;
+    if (recommendation) payload.recommendation  = recommendation;
+    Object.entries(scores).forEach(([k, v]) => { if (v != null) payload[k] = v; });
+    Object.keys(payload).forEach((k) => { if (payload[k] === '' || payload[k] == null) delete payload[k]; });
     submitMut.mutate(payload);
   };
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="mt-4 pt-4 border-t border-surface-100 space-y-3">
-      <h4 className="text-xs font-semibold text-gray-700">Submit Feedback</h4>
+    <form onSubmit={handleSubmit(onSubmit)} className="mt-4 pt-4 border-t border-surface-100 space-y-5">
+      <h4 className="text-sm font-semibold text-gray-900">Submit Feedback</h4>
 
       {/* Overall rating */}
       <div>
-        <label className="block text-xs text-gray-500 mb-1">Overall Rating</label>
+        <p className="text-xs font-medium text-gray-600 mb-2">Overall Rating</p>
         <div className="flex gap-1">
           {[1, 2, 3, 4, 5].map((n) => (
-            <button key={n} type="button" onClick={() => setValue('overall_rating', n)} className="p-0.5">
-              <Star className={`w-5 h-5 ${n <= (selectedRating ?? 0) ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300'}`} />
+            <button key={n} type="button" onClick={() => setOverallRating(overallRating === n ? null : n)} className="p-0.5">
+              <Star className={`w-5 h-5 ${n <= (overallRating ?? 0) ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300'}`} />
             </button>
           ))}
         </div>
       </div>
 
-      {/* Recommendation */}
+      {/* Recommendation — pill buttons */}
       <div>
-        <label className="block text-xs text-gray-500 mb-1">Recommendation</label>
-        <select
-          {...register('recommendation')}
-          className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
-        >
-          <option value="">Select…</option>
+        <p className="text-xs font-medium text-gray-600 mb-2">Recommendation</p>
+        <div className="flex flex-wrap gap-2">
           {Object.entries(RECOMMENDATION_LABELS).map(([k, v]) => (
-            <option key={k} value={k}>{v.label}</option>
+            <button
+              key={k}
+              type="button"
+              onClick={() => setRecommendation(recommendation === k ? '' : k)}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                recommendation === k
+                  ? v.color + ' border-transparent'
+                  : 'bg-white text-gray-500 border-surface-300 hover:border-gray-400'
+              }`}
+            >
+              {v.label}
+            </button>
           ))}
-        </select>
+        </div>
       </div>
 
-      {/* Notes */}
+      {/* Scores — dot selectors */}
+      <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+        {SCORE_DIMENSIONS.map(({ key, label }) => (
+          <div key={key}>
+            <p className="text-xs font-medium text-gray-600 mb-1.5">{label}</p>
+            <ScoreSelector
+              value={scores[key]}
+              onChange={(v) => setScores((s) => ({ ...s, [key]: v }))}
+            />
+          </div>
+        ))}
+      </div>
+
+      {/* Text fields */}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Strengths</label>
+          <textarea
+            {...register('strengths')}
+            rows={2}
+            className="w-full px-3 py-1.5 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Areas to improve</label>
+          <textarea
+            {...register('weaknesses')}
+            rows={2}
+            className="w-full px-3 py-1.5 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+          />
+        </div>
+      </div>
+
       <div>
-        <label className="block text-xs text-gray-500 mb-1">Notes</label>
+        <label className="block text-xs font-medium text-gray-600 mb-1">Additional notes</label>
         <textarea
           {...register('notes')}
           rows={2}
-          placeholder="Key observations…"
-          className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+          className="w-full px-3 py-1.5 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
         />
       </div>
 
@@ -242,7 +377,7 @@ function InlineFeedbackForm({ interviewId, onSuccess, onCancel }) {
           className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white font-semibold rounded-lg text-sm hover:bg-brand-600 disabled:opacity-60"
         >
           {(isSubmitting || submitMut.isPending) && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-          Submit
+          Submit feedback
         </button>
         <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">
           Cancel
@@ -374,26 +509,9 @@ function InterviewCard({ interview, onCandidateClick, canComplete, canCancel, on
           </button>
           {showAllFeedback && (
             <div className="mt-2 space-y-2">
-              {interview.feedback.map((fb) => {
-                const rec = RECOMMENDATION_LABELS[fb.recommendation];
-                return (
-                  <div key={fb.id} className="bg-surface-50 rounded-lg p-2.5 text-xs space-y-1">
-                    {rec && (
-                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${rec.color}`}>
-                        {rec.label}
-                      </span>
-                    )}
-                    {fb.overall_rating && (
-                      <div className="flex gap-0.5 mt-1">
-                        {Array.from({ length: 5 }).map((_, i) => (
-                          <Star key={i} className={`w-3 h-3 ${i < fb.overall_rating ? 'text-yellow-400 fill-yellow-400' : 'text-gray-200'}`} />
-                        ))}
-                      </div>
-                    )}
-                    {fb.notes && <p className="text-gray-600">{fb.notes}</p>}
-                  </div>
-                );
-              })}
+              {interview.feedback.map((fb) => (
+                <InterviewFeedbackCard key={fb.id} fb={fb} />
+              ))}
             </div>
           )}
         </div>
@@ -439,6 +557,7 @@ export default function InterviewsPage() {
   const [activeTab, setActiveTab] = useState('scheduled');
   const [page, setPage] = useState(1);
   const [rescheduleFor, setRescheduleFor] = useState(null);
+  const [confirmCompleteId, setConfirmCompleteId] = useState(null);
 
   const isInterviewer = user?.role === ROLES.INTERVIEWER;
   const isHR = HR_ROLES.includes(user?.role);
@@ -458,8 +577,10 @@ export default function InterviewsPage() {
   const completeMut = useMutation({
     mutationFn: (id) => interviewsApi.complete(id),
     onSuccess: () => {
+      setConfirmCompleteId(null);
       toast.success('Interview marked as completed');
       qc.invalidateQueries({ queryKey: ['hr-interviews'] });
+      qc.invalidateQueries({ queryKey: ['application-interviews'] });
     },
     onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to complete interview'),
   });
@@ -546,7 +667,7 @@ export default function InterviewsPage() {
                     onCandidateClick={(appId) => navigate(`/hr/applicants/${appId}?tab=interviews`)}
                     canComplete={canComplete}
                     canCancel={canCancel}
-                    onComplete={(id) => completeMut.mutate(id)}
+                    onComplete={(id) => setConfirmCompleteId(id)}
                     onReschedule={(iv) => setRescheduleFor(iv)}
                     onRefetch={refetch}
                   />
@@ -587,6 +708,39 @@ export default function InterviewsPage() {
             refetch();
           }}
         />
+      )}
+
+      {confirmCompleteId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/40" onClick={() => setConfirmCompleteId(null)} />
+          <div className="relative bg-white rounded-2xl shadow-modal w-full max-w-sm z-10 p-6">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-9 h-9 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                <CheckCircle2 className="w-5 h-5 text-green-600" />
+              </div>
+              <div>
+                <h3 className="font-display font-semibold text-gray-900">Mark interview as completed?</h3>
+                <p className="text-sm text-gray-500 mt-0.5">This will update the interview status to completed.</p>
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setConfirmCompleteId(null)}
+                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => completeMut.mutate(confirmCompleteId)}
+                disabled={completeMut.isPending}
+                className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 disabled:opacity-60 transition-colors"
+              >
+                {completeMut.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Yes, complete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

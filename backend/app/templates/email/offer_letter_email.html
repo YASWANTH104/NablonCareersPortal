@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Your Offer Letter – Nablon AI{% endblock %}
+
+{% block content %}
+<h2>Hi {{ candidate_name }},</h2>
+
+<p>
+  Congratulations! We are delighted to extend an offer of employment for the
+  <strong>{{ designation }}</strong> role at Nablon AI.
+</p>
+
+<p>
+  Please find your formal offer letter attached to this email as a PDF. Review
+  the details carefully and respond to the offer from your portal.
+</p>
+
+<table style="width:100%; border-collapse:collapse; margin:20px 0; font-size:14px;">
+  <tr style="border-bottom:1px solid #E5E7EB;">
+    <td style="padding:8px 4px; color:#6B7280; width:40%;">Role</td>
+    <td style="padding:8px 4px; font-weight:600; color:#111827;">{{ designation }}</td>
+  </tr>
+  {% if department %}
+  <tr style="border-bottom:1px solid #E5E7EB;">
+    <td style="padding:8px 4px; color:#6B7280;">Department</td>
+    <td style="padding:8px 4px; font-weight:600; color:#111827;">{{ department }}</td>
+  </tr>
+  {% endif %}
+  {% if salary_ctc %}
+  <tr style="border-bottom:1px solid #E5E7EB;">
+    <td style="padding:8px 4px; color:#6B7280;">CTC</td>
+    <td style="padding:8px 4px; font-weight:600; color:#111827;">{{ salary_currency }} {{ salary_ctc }}</td>
+  </tr>
+  {% endif %}
+  {% if joining_date %}
+  <tr style="border-bottom:1px solid #E5E7EB;">
+    <td style="padding:8px 4px; color:#6B7280;">Joining Date</td>
+    <td style="padding:8px 4px; font-weight:600; color:#111827;">{{ joining_date }}</td>
+  </tr>
+  {% endif %}
+  {% if work_location %}
+  <tr style="border-bottom:1px solid #E5E7EB;">
+    <td style="padding:8px 4px; color:#6B7280;">Location</td>
+    <td style="padding:8px 4px; font-weight:600; color:#111827;">{{ work_location }}</td>
+  </tr>
+  {% endif %}
+  {% if offer_expiry %}
+  <tr>
+    <td style="padding:8px 4px; color:#6B7280;">Offer Valid Until</td>
+    <td style="padding:8px 4px; font-weight:600; color:#D97706;">{{ offer_expiry }}</td>
+  </tr>
+  {% endif %}
+</table>
+
+<p>
+  To accept or decline, please log in to your portal and provide your digital
+  signature:
+</p>
+
+<p style="text-align:center; margin:30px 0;">
+  <a href="{{ portal_url }}" style="background:#4F46E5; color:#ffffff; padding:12px 28px; border-radius:8px; text-decoration:none; font-weight:600; font-size:15px;">
+    Review &amp; Sign Offer
+  </a>
+</p>
+
+<p style="color:#6B7280; font-size:13px;">
+  If you have any questions, please reach out to your HR contact.
+  We look forward to welcoming you to Nablon AI!
+</p>
+{% endblock %}

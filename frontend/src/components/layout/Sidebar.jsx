@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Briefcase, Users, Star, Calendar,
   FileText, BarChart2, Settings, LogOut, ChevronLeft,
-  ChevronRight, UserCheck, Award, AlertTriangle,
+  ChevronRight, UserCheck, Award, AlertTriangle, Building2,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { useUIStore } from '@/store/uiStore';
@@ -18,6 +18,7 @@ const NAV_ITEMS = {
     { to: '/hr/interviews',  label: 'Interviews',   icon: Calendar },
     { to: '/hr/referrals',   label: 'Referrals',    icon: UserCheck },
     { to: '/hr/offers',      label: 'Offers',       icon: FileText },
+    { to: '/hr/agencies',    label: 'Agencies',     icon: Building2 },
     { to: '/hr/reports',     label: 'Reports',      icon: BarChart2 },
     { to: '/hr/settings',    label: 'Settings',     icon: Settings },
   ],

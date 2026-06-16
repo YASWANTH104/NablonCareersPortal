@@ -71,3 +71,32 @@ class InterviewFeedback(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
     interview: Mapped["Interview"] = relationship("Interview", back_populates="feedback")
+
+
+class CandidateInterviewSelfFeedback(Base):
+    """Candidate's own post-interview self-assessment."""
+    __tablename__ = "candidate_interview_self_feedback"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    interview_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("interviews.id"), nullable=False, unique=True)
+    candidate_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+
+    # Heatmap scores 0-10
+    overall_score: Mapped[int | None] = mapped_column(Integer)
+    communication_score: Mapped[int | None] = mapped_column(Integer)
+    technical_confidence: Mapped[int | None] = mapped_column(Integer)
+
+    # Yes / No
+    was_prepared: Mapped[bool | None] = mapped_column(Boolean)
+    would_recommend: Mapped[bool | None] = mapped_column(Boolean)
+
+    # Multiple choice
+    difficulty: Mapped[str | None] = mapped_column(String(20))
+    # easy | medium | hard | very_hard
+    experience_rating: Mapped[str | None] = mapped_column(String(20))
+    # excellent | good | average | poor
+
+    comments: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+    interview: Mapped["Interview"] = relationship("Interview")

@@ -10,7 +10,7 @@ from app.models.offer import OfferLetter, OfferTemplate
 from app.schemas.offer import (
     OfferTemplateCreate, OfferTemplateUpdate, OfferTemplateResponse,
     OfferLetterCreate, OfferLetterUpdate, OfferLetterResponse,
-    OfferLetterListResponse,
+    OfferLetterListResponse, CandidateOfferResponse,
 )
 
 
@@ -131,10 +131,6 @@ async def create_offer(
     data: OfferLetterCreate,
     created_by: uuid.UUID,
 ) -> OfferLetterResponse:
-    from app.models.application import Application
-    from app.models.user import User
-    from app.models.job import Job, Department
-
     # One offer per application (UNIQUE constraint)
     existing = (await db.execute(
         select(OfferLetter).where(OfferLetter.application_id == data.application_id)
@@ -147,23 +143,7 @@ async def create_offer(
     await db.commit()
     await db.refresh(offer)
 
-    # Enrich
-    row = (await db.execute(
-        select(User.full_name, User.email, Job.title, Department.name)
-        .join(Application, Application.id == offer.application_id)
-        .join(User, User.id == Application.applicant_id)
-        .join(Job, Job.id == Application.job_id)
-        .outerjoin(Department, Department.id == offer.department_id)
-        .where(Application.id == offer.application_id)
-    )).first()
-
-    d = _offer_to_dict(offer)
-    if row:
-        d["candidate_name"] = row[0]
-        d["candidate_email"] = row[1]
-        d["job_title"] = row[2]
-        d["department_name"] = row[3]
-    return OfferLetterResponse.model_validate(d)
+    return await get_offer(db, offer.id)
 
 
 async def list_offers(
@@ -246,12 +226,29 @@ async def get_offer(db: AsyncSession, offer_id: uuid.UUID) -> OfferLetterRespons
 
 
 async def get_offer_by_application(db: AsyncSession, application_id: uuid.UUID) -> Optional[OfferLetterResponse]:
-    offer = (await db.execute(
-        select(OfferLetter).where(OfferLetter.application_id == application_id)
-    )).scalar_one_or_none()
-    if not offer:
+    from app.models.application import Application
+    from app.models.user import User
+    from app.models.job import Job, Department
+
+    row = (await db.execute(
+        select(OfferLetter, User.full_name, User.email, Job.title, Department.name)
+        .join(Application, Application.id == OfferLetter.application_id)
+        .join(User, User.id == Application.applicant_id)
+        .join(Job, Job.id == Application.job_id)
+        .outerjoin(Department, Department.id == OfferLetter.department_id)
+        .where(OfferLetter.application_id == application_id)
+    )).first()
+
+    if not row:
         return None
-    return await get_offer(db, offer.id)
+
+    offer, candidate_name, candidate_email, job_title, dept_name = row
+    d = _offer_to_dict(offer)
+    d["candidate_name"] = candidate_name
+    d["candidate_email"] = candidate_email
+    d["job_title"] = job_title
+    d["department_name"] = dept_name
+    return OfferLetterResponse.model_validate(d)
 
 
 async def update_offer(
@@ -280,11 +277,25 @@ async def send_offer(db: AsyncSession, offer_id: uuid.UUID) -> OfferLetterRespon
     if offer.status != "draft":
         raise HTTPException(400, f"Only draft offers can be sent (current status: {offer.status})")
 
+    from app.services.document_service import is_documents_complete
+    if not await is_documents_complete(db, offer.application_id):
+        raise HTTPException(
+            400,
+            "Cannot send offer letter — candidate has not submitted all required documents yet."
+        )
+
     offer.candidate_token = secrets.token_urlsafe(32)
     offer.status = "sent"
     offer.sent_at = datetime.now(timezone.utc)
     offer.updated_at = datetime.now(timezone.utc)
     await db.commit()
+
+    try:
+        from app.tasks.email_tasks import send_offer_email
+        send_offer_email.delay(str(offer_id))
+    except Exception:
+        pass
+
     return await get_offer(db, offer_id)
 
 
@@ -326,6 +337,179 @@ async def revoke_offer(db: AsyncSession, offer_id: uuid.UUID) -> OfferLetterResp
     return await get_offer(db, offer_id)
 
 
+def _build_offer_full_html(offer, template, candidate_name: str, dept_name: Optional[str]) -> str:
+    body_html = "<p>No template content available.</p>"
+    if template and template.body_html:
+        variables = _build_variables(offer, candidate_name or "", dept_name)
+        body_html = _render_template(template.body_html, variables)
+
+    signature_block = ""
+    if offer.candidate_signature:
+        signed_label = (
+            offer.signed_at.strftime("%d %B %Y") if offer.signed_at else "Signed"
+        )
+        signature_block = f"""
+<div style="margin-top:48px;border-top:1px solid #e5e7eb;padding-top:24px;">
+  <p style="font-size:12px;color:#6b7280;margin-bottom:8px;">Candidate Signature</p>
+  <img src="{offer.candidate_signature}"
+       style="max-height:80px;border:1px solid #e5e7eb;border-radius:6px;padding:6px;background:#fff;" />
+  <p style="font-size:11px;color:#9ca3af;margin-top:4px;">Signed on {signed_label}</p>
+</div>"""
+
+    return (
+        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+        "<style>"
+        "body{font-family:Arial,sans-serif;font-size:14px;line-height:1.6;"
+        "color:#111827;margin:0;padding:40px;max-width:860px;}"
+        "h1,h2,h3{color:#111827;}"
+        "table{width:100%;border-collapse:collapse;}"
+        "td,th{padding:8px;border:1px solid #e5e7eb;}"
+        "</style></head>"
+        f"<body>{body_html}{signature_block}</body></html>"
+    )
+
+
+async def _fetch_offer_render_row(db: AsyncSession, offer_id: uuid.UUID):
+    from app.models.application import Application
+    from app.models.user import User
+    from app.models.job import Department
+    row = (await db.execute(
+        select(OfferLetter, OfferTemplate, User.full_name, Department.name)
+        .join(Application, Application.id == OfferLetter.application_id)
+        .join(User, User.id == Application.applicant_id)
+        .outerjoin(OfferTemplate, OfferTemplate.id == OfferLetter.template_id)
+        .outerjoin(Department, Department.id == OfferLetter.department_id)
+        .where(OfferLetter.id == offer_id)
+    )).first()
+    if not row:
+        raise HTTPException(404, "Offer not found")
+    return row
+
+
+async def build_offer_html(db: AsyncSession, offer_id: uuid.UUID) -> str:
+    offer, template, candidate_name, dept_name = await _fetch_offer_render_row(db, offer_id)
+    return _build_offer_full_html(offer, template, candidate_name, dept_name)
+
+
+async def build_offer_pdf(db: AsyncSession, offer_id: uuid.UUID) -> bytes:
+    from weasyprint import HTML as WeasyprintHTML
+    offer, template, candidate_name, dept_name = await _fetch_offer_render_row(db, offer_id)
+    full_html = _build_offer_full_html(offer, template, candidate_name, dept_name)
+    return WeasyprintHTML(string=full_html).write_pdf()
+
+
+async def get_offer_for_applicant(
+    db: AsyncSession,
+    application_id: uuid.UUID,
+    applicant_id: uuid.UUID,
+) -> Optional[CandidateOfferResponse]:
+    from app.models.application import Application
+    from app.models.user import User
+    from app.models.job import Job, Department
+
+    app_row = (await db.execute(
+        select(Application).where(
+            Application.id == application_id,
+            Application.applicant_id == applicant_id,
+        )
+    )).scalar_one_or_none()
+    if not app_row:
+        raise HTTPException(404, "Application not found")
+
+    offer = (await db.execute(
+        select(OfferLetter).where(OfferLetter.application_id == application_id)
+    )).scalar_one_or_none()
+
+    if not offer or offer.status not in ("sent", "accepted", "rejected", "expired", "revoked"):
+        return None
+
+    row = (await db.execute(
+        select(Job.title, Department.name)
+        .select_from(Application)
+        .join(Job, Job.id == Application.job_id)
+        .outerjoin(Department, Department.id == offer.department_id)
+        .where(Application.id == application_id)
+    )).first()
+
+    body_html = None
+    if offer.template_id:
+        template = await db.get(OfferTemplate, offer.template_id)
+        if template:
+            user_name = (await db.execute(
+                select(User.full_name).where(User.id == applicant_id)
+            )).scalar_one_or_none() or "Candidate"
+            variables = _build_variables(offer, user_name, row[1] if row else None)
+            body_html = _render_template(template.body_html, variables)
+
+    return CandidateOfferResponse(
+        id=offer.id,
+        application_id=offer.application_id,
+        designation=offer.designation,
+        department_name=row[1] if row else None,
+        joining_date=offer.joining_date,
+        salary_ctc=float(offer.salary_ctc) if offer.salary_ctc else None,
+        salary_currency=offer.salary_currency,
+        probation_months=offer.probation_months,
+        work_location=offer.work_location,
+        status=offer.status,
+        sent_at=offer.sent_at,
+        accepted_at=offer.accepted_at,
+        expires_at=offer.expires_at,
+        candidate_signature=offer.candidate_signature,
+        signed_at=offer.signed_at,
+        body_html=body_html,
+        job_title=row[0] if row else None,
+    )
+
+
+async def respond_offer_for_applicant(
+    db: AsyncSession,
+    application_id: uuid.UUID,
+    applicant_id: uuid.UUID,
+    decision: str,
+    candidate_signature: Optional[str] = None,
+) -> CandidateOfferResponse:
+    from app.models.application import Application
+
+    app_row = (await db.execute(
+        select(Application).where(
+            Application.id == application_id,
+            Application.applicant_id == applicant_id,
+        )
+    )).scalar_one_or_none()
+    if not app_row:
+        raise HTTPException(404, "Application not found")
+
+    offer = (await db.execute(
+        select(OfferLetter).where(OfferLetter.application_id == application_id)
+    )).scalar_one_or_none()
+
+    if not offer:
+        raise HTTPException(404, "No offer found for this application")
+    if offer.status != "sent":
+        raise HTTPException(400, f"This offer is already {offer.status}")
+    if decision not in ("accepted", "rejected"):
+        raise HTTPException(422, "Decision must be 'accepted' or 'rejected'")
+
+    if offer.expires_at and offer.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        offer.status = "expired"
+        await db.commit()
+        raise HTTPException(400, "This offer has expired")
+
+    if decision == "accepted" and not candidate_signature:
+        raise HTTPException(422, "A digital signature is required to accept the offer")
+
+    offer.status = decision
+    offer.accepted_at = datetime.now(timezone.utc)
+    if decision == "accepted":
+        offer.candidate_signature = candidate_signature
+        offer.signed_at = datetime.now(timezone.utc)
+    offer.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    return await get_offer_for_applicant(db, application_id, applicant_id)
+
+
 async def respond_offer(
     db: AsyncSession,
     token: str,
@@ -348,9 +532,12 @@ async def respond_offer(
         await db.commit()
         raise HTTPException(400, "This offer has expired")
 
+    if decision == "accepted" and not candidate_signature:
+        raise HTTPException(422, "A digital signature is required to accept the offer")
+
     offer.status = decision
     offer.accepted_at = datetime.now(timezone.utc)
-    if decision == "accepted" and candidate_signature:
+    if decision == "accepted":
         offer.candidate_signature = candidate_signature
         offer.signed_at = datetime.now(timezone.utc)
     offer.updated_at = datetime.now(timezone.utc)

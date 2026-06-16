@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -9,7 +9,7 @@ import toast from 'react-hot-toast';
 import {
   ArrowLeft, Star, ExternalLink, FileText, Calendar, MessageSquare,
   Clock, User, Github, Linkedin, Globe, ChevronDown, Plus, Loader2,
-  Video, Phone, MapPin, CheckCircle2, XCircle, AlertCircle, Send,
+  Video, Phone, MapPin, CheckCircle2, XCircle, AlertCircle, Send, FolderOpen, Download, Eye, X,
 } from 'lucide-react';
 import { applicationsApi } from '@/api/applications';
 import { interviewsApi } from '@/api/interviews';
@@ -17,6 +17,7 @@ import { assessmentsApi } from '@/api/assessments';
 import { jobsApi } from '@/api/jobs';
 import { offersApi } from '@/api/offers';
 import { usersApi } from '@/api/users';
+import { documentsApi } from '@/api/documents';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -331,6 +332,18 @@ function ScheduleInterviewDialog({ applicationId, onClose, onSuccess }) {
 
 // ── Schedule Assessment Dialog ────────────────────────────────────────────────
 
+// UPDATE_URLS: replace placeholder hrefs with your actual assessment platform links
+const ASSESSMENT_PRESETS = [
+  { label: 'AI Intern',       url: 'https://assessment.nablon.ai/ai-intern' },
+  { label: 'AI Engineer 1',   url: 'https://assessment.nablon.ai/ai-engineer-1' },
+  { label: 'AI Engineer 2',   url: 'https://assessment.nablon.ai/ai-engineer-2' },
+  { label: 'Data Engineer 1', url: 'https://assessment.nablon.ai/data-engineer-1' },
+  { label: 'Data Engineer 2', url: 'https://assessment.nablon.ai/data-engineer-2' },
+  { label: 'ML Engineer',     url: 'https://assessment.nablon.ai/ml-engineer' },
+  { label: 'Backend Engineer',url: 'https://assessment.nablon.ai/backend-engineer' },
+  { label: 'Custom link',     url: '__custom__' },
+];
+
 const ASSESSMENT_TYPES = [
   { value: 'online_test', label: 'Online Test' },
   { value: 'coding_challenge', label: 'Coding Challenge' },
@@ -349,14 +362,20 @@ const assessmentSchema = z.object({
 });
 
 function ScheduleAssessmentDialog({ applicationId, onClose, onSuccess }) {
+  const [presetSelection, setPresetSelection] = useState('');
+
   const {
     register,
     handleSubmit,
+    setValue,
+    control,
     formState: { errors, isSubmitting },
   } = useForm({
     resolver: zodResolver(assessmentSchema),
     defaultValues: { assessment_type: 'online_test' },
   });
+
+  const platformLink = useWatch({ control, name: 'platform_link' });
 
   const createMutation = useMutation({
     mutationFn: (data) => assessmentsApi.create(data),
@@ -376,6 +395,16 @@ function ScheduleAssessmentDialog({ applicationId, onClose, onSuccess }) {
       duration_mins: values.duration_mins ? Number(values.duration_mins) : undefined,
       instructions: values.instructions || undefined,
     });
+  };
+
+  const handlePresetChange = (e) => {
+    const selected = e.target.value;
+    setPresetSelection(selected);
+    if (selected === '__custom__') {
+      setValue('platform_link', '', { shouldValidate: false });
+    } else {
+      setValue('platform_link', selected, { shouldValidate: true });
+    }
   };
 
   return (
@@ -432,12 +461,27 @@ function ScheduleAssessmentDialog({ applicationId, onClose, onSuccess }) {
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Assessment Link <span className="text-red-500">*</span>
             </label>
-            <input
-              {...register('platform_link')}
-              type="url"
-              placeholder="https://hackerrank.com/test/..."
-              className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-            />
+            {/* hidden field that react-hook-form validates */}
+            <input type="hidden" {...register('platform_link')} />
+            <select
+              value={presetSelection}
+              onChange={handlePresetChange}
+              className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
+            >
+              <option value="" disabled>— Select role assessment —</option>
+              {ASSESSMENT_PRESETS.map((p) => (
+                <option key={p.url} value={p.url}>{p.label}</option>
+              ))}
+            </select>
+            {presetSelection === '__custom__' && (
+              <input
+                value={platformLink ?? ''}
+                onChange={(e) => setValue('platform_link', e.target.value, { shouldValidate: true })}
+                type="url"
+                placeholder="https://..."
+                className="mt-2 w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              />
+            )}
             {errors.platform_link && <p className="mt-1 text-xs text-red-500">{errors.platform_link.message}</p>}
           </div>
 
@@ -574,24 +618,43 @@ function RescheduleInterviewDialog({ interview, onClose, onSuccess }) {
 
 // ── Feedback Form ─────────────────────────────────────────────────────────────
 
-const feedbackSchema = z.object({
-  overall_rating: z.coerce.number().min(1).max(5).optional(),
-  recommendation: z.string().optional(),
-  technical_score: z.coerce.number().min(1).max(5).optional().or(z.literal('')),
-  communication_score: z.coerce.number().min(1).max(5).optional().or(z.literal('')),
-  cultural_fit_score: z.coerce.number().min(1).max(5).optional().or(z.literal('')),
-  problem_solving_score: z.coerce.number().min(1).max(5).optional().or(z.literal('')),
-  strengths: z.string().optional(),
-  weaknesses: z.string().optional(),
-  notes: z.string().optional(),
-});
+const SCORE_DIMENSIONS = [
+  { key: 'technical_score',       label: 'Technical' },
+  { key: 'communication_score',   label: 'Communication' },
+  { key: 'cultural_fit_score',    label: 'Culture Fit' },
+  { key: 'problem_solving_score', label: 'Problem Solving' },
+];
+
+function ScoreSelector({ value, onChange }) {
+  return (
+    <div className="flex gap-1.5">
+      {[1, 2, 3, 4, 5].map((n) => (
+        <button
+          key={n}
+          type="button"
+          onClick={() => onChange(value === n ? null : n)}
+          className={`w-7 h-7 rounded-full border-2 text-xs font-bold transition-all ${
+            value != null && n <= value
+              ? 'bg-brand-500 border-brand-500 text-white'
+              : 'border-surface-300 text-gray-400 hover:border-brand-400 hover:text-brand-500'
+          }`}
+        >
+          {n}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function FeedbackForm({ interviewId, onSuccess }) {
-  const { register, handleSubmit, watch, setValue, formState: { isSubmitting } } = useForm({
-    resolver: zodResolver(feedbackSchema),
-  });
+  const { register, handleSubmit, formState: { isSubmitting } } = useForm();
 
-  const selectedRating = watch('overall_rating');
+  const [overallRating,      setOverallRating]      = useState(null);
+  const [recommendation,     setRecommendation]     = useState('');
+  const [scores, setScores] = useState({
+    technical_score: null, communication_score: null,
+    cultural_fit_score: null, problem_solving_score: null,
+  });
 
   const submitMutation = useMutation({
     mutationFn: (data) => interviewsApi.submitFeedback(interviewId, data),
@@ -599,96 +662,393 @@ function FeedbackForm({ interviewId, onSuccess }) {
     onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to submit'),
   });
 
-  const onSubmit = (values) => {
-    const payload = {};
-    Object.entries(values).forEach(([k, v]) => {
-      if (v !== '' && v !== undefined) payload[k] = typeof v === 'string' && !isNaN(v) ? Number(v) : v;
-    });
+  const onSubmit = (textValues) => {
+    const payload = { ...textValues };
+    if (overallRating)  payload.overall_rating  = overallRating;
+    if (recommendation) payload.recommendation  = recommendation;
+    Object.entries(scores).forEach(([k, v]) => { if (v != null) payload[k] = v; });
+    Object.keys(payload).forEach((k) => { if (payload[k] === '' || payload[k] == null) delete payload[k]; });
     submitMutation.mutate(payload);
   };
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 p-4 bg-surface-50 rounded-xl border border-surface-200">
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-5 p-4 bg-surface-50 rounded-xl border border-surface-200">
       <h4 className="text-sm font-semibold text-gray-900">Submit Feedback</h4>
 
       {/* Overall rating */}
       <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1.5">Overall Rating</label>
+        <p className="text-xs font-medium text-gray-600 mb-2">Overall Rating</p>
         <div className="flex gap-1">
           {[1, 2, 3, 4, 5].map((n) => (
             <button
               key={n}
               type="button"
-              onClick={() => setValue('overall_rating', n)}
+              onClick={() => setOverallRating(overallRating === n ? null : n)}
               className="p-0.5"
             >
-              <Star className={`w-5 h-5 ${n <= (selectedRating ?? 0) ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300'}`} />
+              <Star className={`w-5 h-5 ${n <= (overallRating ?? 0) ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300'}`} />
             </button>
           ))}
         </div>
       </div>
 
-      {/* Recommendation */}
+      {/* Recommendation — pill buttons */}
       <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1.5">Recommendation</label>
-        <select
-          {...register('recommendation')}
-          className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
-        >
-          <option value="">Select...</option>
+        <p className="text-xs font-medium text-gray-600 mb-2">Recommendation</p>
+        <div className="flex flex-wrap gap-2">
           {Object.entries(RECOMMENDATION_LABELS).map(([k, v]) => (
-            <option key={k} value={k}>{v.label}</option>
+            <button
+              key={k}
+              type="button"
+              onClick={() => setRecommendation(recommendation === k ? '' : k)}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                recommendation === k
+                  ? v.color + ' border-transparent'
+                  : 'bg-white text-gray-500 border-surface-300 hover:border-gray-400'
+              }`}
+            >
+              {v.label}
+            </button>
           ))}
-        </select>
+        </div>
       </div>
 
-      {/* Scores */}
-      <div className="grid grid-cols-2 gap-3">
-        {[
-          { name: 'technical_score', label: 'Technical' },
-          { name: 'communication_score', label: 'Communication' },
-          { name: 'cultural_fit_score', label: 'Culture Fit' },
-          { name: 'problem_solving_score', label: 'Problem Solving' },
-        ].map(({ name, label }) => (
-          <div key={name}>
-            <label className="block text-xs font-medium text-gray-600 mb-1">{label} (1-5)</label>
-            <input
-              {...register(name)}
-              type="number"
-              min="1"
-              max="5"
-              placeholder="—"
-              className="w-full px-3 py-1.5 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+      {/* Scores — dot selectors matching the display grid */}
+      <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+        {SCORE_DIMENSIONS.map(({ key, label }) => (
+          <div key={key}>
+            <p className="text-xs font-medium text-gray-600 mb-1.5">{label}</p>
+            <ScoreSelector
+              value={scores[key]}
+              onChange={(v) => setScores((s) => ({ ...s, [key]: v }))}
             />
           </div>
         ))}
       </div>
 
+      {/* Text fields */}
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Strengths</label>
-          <textarea {...register('strengths')} rows={2} className="w-full px-3 py-1.5 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none" />
+          <textarea
+            {...register('strengths')}
+            rows={2}
+            className="w-full px-3 py-1.5 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+          />
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Weaknesses</label>
-          <textarea {...register('weaknesses')} rows={2} className="w-full px-3 py-1.5 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none" />
+          <label className="block text-xs font-medium text-gray-600 mb-1">Areas to improve</label>
+          <textarea
+            {...register('weaknesses')}
+            rows={2}
+            className="w-full px-3 py-1.5 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+          />
         </div>
       </div>
 
       <div>
         <label className="block text-xs font-medium text-gray-600 mb-1">Additional notes</label>
-        <textarea {...register('notes')} rows={2} className="w-full px-3 py-1.5 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none" />
+        <textarea
+          {...register('notes')}
+          rows={2}
+          className="w-full px-3 py-1.5 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+        />
       </div>
 
       <button
         type="submit"
-        disabled={isSubmitting}
+        disabled={isSubmitting || submitMutation.isPending}
         className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white font-semibold rounded-lg text-sm hover:bg-brand-600 disabled:opacity-60"
       >
-        {isSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+        {(isSubmitting || submitMutation.isPending) && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
         Submit feedback
       </button>
     </form>
+  );
+}
+
+// ── Candidate Self-Assessment Card ───────────────────────────────────────────
+
+const DIFFICULTY_LABEL = { easy: 'Easy', medium: 'Medium', hard: 'Hard', very_hard: 'Very Hard' };
+const EXPERIENCE_LABEL = { excellent: 'Excellent', good: 'Good', average: 'Average', poor: 'Poor' };
+
+function ScoreBar({ label, value }) {
+  if (value == null) return null;
+  const color = value <= 3 ? 'bg-red-400' : value <= 6 ? 'bg-yellow-400' : 'bg-green-500';
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-xs text-gray-500 w-32 flex-shrink-0">{label}</span>
+      <div className="flex-1 bg-surface-100 rounded-full h-1.5">
+        <div className={`h-1.5 rounded-full ${color}`} style={{ width: `${(value / 10) * 100}%` }} />
+      </div>
+      <span className={`text-xs font-semibold w-5 text-right ${value <= 3 ? 'text-red-500' : value <= 6 ? 'text-yellow-500' : 'text-green-600'}`}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function CandidateSelfAssessment({ sf }) {
+  const [open, setOpen] = useState(false);
+  const hasScores = sf.overall_score != null || sf.communication_score != null || sf.technical_confidence != null;
+  return (
+    <div className="mt-4 pt-4 border-t border-surface-100">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center justify-between w-full text-left"
+      >
+        <p className="text-xs font-semibold text-indigo-700">Candidate's self-assessment</p>
+        <ChevronDown className={`w-3.5 h-3.5 text-indigo-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="mt-3 space-y-3">
+          {hasScores && (
+            <div className="space-y-1.5">
+              <ScoreBar label="Overall performance" value={sf.overall_score} />
+              <ScoreBar label="Communication" value={sf.communication_score} />
+              <ScoreBar label="Technical confidence" value={sf.technical_confidence} />
+            </div>
+          )}
+          <div className="flex flex-wrap gap-3 text-xs">
+            {sf.difficulty && (
+              <span className="px-2 py-1 bg-surface-100 rounded-full text-gray-600">
+                Difficulty: <span className="font-medium">{DIFFICULTY_LABEL[sf.difficulty] ?? sf.difficulty}</span>
+              </span>
+            )}
+            {sf.experience_rating && (
+              <span className="px-2 py-1 bg-surface-100 rounded-full text-gray-600">
+                Experience: <span className="font-medium">{EXPERIENCE_LABEL[sf.experience_rating] ?? sf.experience_rating}</span>
+              </span>
+            )}
+            {sf.was_prepared != null && (
+              <span className="px-2 py-1 bg-surface-100 rounded-full text-gray-600">
+                Prepared: <span className={`font-medium ${sf.was_prepared ? 'text-green-600' : 'text-red-500'}`}>{sf.was_prepared ? 'Yes' : 'No'}</span>
+              </span>
+            )}
+            {sf.would_recommend != null && (
+              <span className="px-2 py-1 bg-surface-100 rounded-full text-gray-600">
+                Would recommend: <span className={`font-medium ${sf.would_recommend ? 'text-green-600' : 'text-red-500'}`}>{sf.would_recommend ? 'Yes' : 'No'}</span>
+              </span>
+            )}
+          </div>
+          {sf.comments && (
+            <p className="text-xs text-gray-600 bg-indigo-50 rounded-lg p-2.5 italic">"{sf.comments}"</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Shared Interview Feedback Card ────────────────────────────────────────────
+
+function InterviewFeedbackCard({ fb, interview }) {
+  const rec = RECOMMENDATION_LABELS[fb.recommendation];
+  const scores = [
+    { label: 'Technical',       val: fb.technical_score },
+    { label: 'Communication',   val: fb.communication_score },
+    { label: 'Culture Fit',     val: fb.cultural_fit_score },
+    { label: 'Problem Solving', val: fb.problem_solving_score },
+  ].filter((s) => s.val != null);
+
+  return (
+    <div className="bg-white rounded-xl border border-surface-200 p-5">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          {interview && (
+            <>
+              <p className="text-sm font-semibold text-gray-900">
+                {interview.title || `Round ${interview.round_number}`}
+              </p>
+              <p className="text-xs text-gray-400">{format(new Date(interview.scheduled_at), 'PPP')}</p>
+            </>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {fb.overall_rating && (
+            <div className="flex gap-0.5">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <Star key={i} className={`w-4 h-4 ${i < fb.overall_rating ? 'text-yellow-400 fill-yellow-400' : 'text-gray-200'}`} />
+              ))}
+            </div>
+          )}
+          {rec && (
+            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${rec.color}`}>
+              {rec.label}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Scores grid */}
+      {scores.length > 0 && (
+        <div className="grid grid-cols-4 gap-3 mb-4">
+          {scores.map(({ label, val }) => (
+            <div key={label} className="bg-surface-50 rounded-lg p-3 text-center">
+              <p className="text-lg font-bold text-gray-900">{val}<span className="text-xs text-gray-400 font-normal">/5</span></p>
+              <p className="text-xs text-gray-500 mt-0.5">{label}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Strengths / Weaknesses */}
+      {(fb.strengths || fb.weaknesses) && (
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          {fb.strengths && (
+            <div>
+              <p className="text-xs font-semibold text-green-700 mb-1 flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3" /> Strengths
+              </p>
+              <p className="text-gray-700 text-xs">{fb.strengths}</p>
+            </div>
+          )}
+          {fb.weaknesses && (
+            <div>
+              <p className="text-xs font-semibold text-orange-700 mb-1 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" /> Areas to improve
+              </p>
+              <p className="text-gray-700 text-xs">{fb.weaknesses}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {fb.notes && (
+        <p className="mt-3 text-xs text-gray-600 bg-surface-50 rounded-lg p-3">{fb.notes}</p>
+      )}
+    </div>
+  );
+}
+
+// ── Reject Dialog ─────────────────────────────────────────────────────────────
+
+function ScoreDot({ score, max = 5 }) {
+  return (
+    <div className="flex gap-0.5">
+      {Array.from({ length: max }, (_, i) => (
+        <span
+          key={i}
+          className={`w-2 h-2 rounded-full ${i < score ? 'bg-brand-500' : 'bg-surface-200'}`}
+        />
+      ))}
+    </div>
+  );
+}
+
+function RejectDialog({ candidateName, interviews, onConfirm, onCancel, isPending }) {
+  const withFeedback = interviews.filter((iv) => iv.feedback?.length > 0);
+  const noFeedback = interviews.filter((iv) => !iv.feedback?.length);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="fixed inset-0 bg-black/40" onClick={onCancel} />
+      <div className="relative bg-white rounded-2xl shadow-modal w-full max-w-lg z-10 flex flex-col max-h-[90vh]">
+
+        {/* Header */}
+        <div className="flex items-start gap-3 p-6 pb-4 flex-shrink-0">
+          <div className="w-9 h-9 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+            <XCircle className="w-5 h-5 text-red-600" />
+          </div>
+          <div>
+            <h3 className="font-display font-semibold text-gray-900">Reject <span className="text-red-600">{candidateName}</span></h3>
+            <p className="text-sm text-gray-500 mt-0.5">Review interviewer feedback before confirming.</p>
+          </div>
+        </div>
+
+        {/* Feedback body — scrollable */}
+        <div className="overflow-y-auto px-6 pb-2 space-y-4 flex-1">
+          {interviews.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-6">No interviews on record for this candidate.</p>
+          ) : (
+            <>
+              {withFeedback.map((iv) => (
+                <div key={iv.id} className="border border-surface-200 rounded-xl overflow-hidden">
+                  <div className="bg-surface-50 px-4 py-2.5 flex items-center justify-between">
+                    <span className="text-sm font-semibold text-gray-800">
+                      Round {iv.round_number}{iv.title ? ` — ${iv.title}` : ''}
+                    </span>
+                    <span className="text-xs text-gray-400">{iv.feedback.length} response{iv.feedback.length !== 1 ? 's' : ''}</span>
+                  </div>
+                  <div className="divide-y divide-surface-100">
+                    {iv.feedback.map((fb, idx) => {
+                      const rec = RECOMMENDATION_LABELS[fb.recommendation];
+                      return (
+                        <div key={fb.id ?? idx} className="px-4 py-3 space-y-2.5">
+                          {rec && (
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${rec.color}`}>
+                              {rec.label}
+                            </span>
+                          )}
+                          <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
+                            {[
+                              ['Technical',       fb.technical_score],
+                              ['Communication',   fb.communication_score],
+                              ['Culture Fit',     fb.cultural_fit_score],
+                              ['Problem Solving', fb.problem_solving_score],
+                            ].filter(([, v]) => v != null).map(([label, val]) => (
+                              <div key={label} className="flex items-center justify-between gap-2">
+                                <span className="text-xs text-gray-500">{label}</span>
+                                <ScoreDot score={val} />
+                              </div>
+                            ))}
+                          </div>
+                          {fb.strengths && (
+                            <div>
+                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Strengths</p>
+                              <p className="text-sm text-gray-700 leading-relaxed">{fb.strengths}</p>
+                            </div>
+                          )}
+                          {fb.weaknesses && (
+                            <div>
+                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Areas for Growth</p>
+                              <p className="text-sm text-gray-700 leading-relaxed">{fb.weaknesses}</p>
+                            </div>
+                          )}
+                          {fb.notes && (
+                            <div>
+                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Notes</p>
+                              <p className="text-sm text-gray-700 leading-relaxed">{fb.notes}</p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+              {noFeedback.map((iv) => (
+                <div key={iv.id} className="border border-dashed border-surface-300 rounded-xl px-4 py-3 flex items-center gap-2 text-sm text-gray-400">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  Round {iv.round_number}{iv.title ? ` — ${iv.title}` : ''}: no feedback submitted yet
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex gap-3 justify-end px-6 py-4 border-t border-surface-100 flex-shrink-0">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-4 py-2 text-sm font-medium text-gray-700 bg-surface-100 hover:bg-surface-200 rounded-lg transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => onConfirm()}
+            disabled={isPending}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-60 transition-colors"
+          >
+            {isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+            Confirm rejection
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -698,7 +1058,7 @@ export default function ApplicationDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') ?? 'overview');
   const [stageMenuOpen, setStageMenuOpen] = useState(false);
@@ -706,7 +1066,10 @@ export default function ApplicationDetailPage() {
   const [showScheduleAssessment, setShowScheduleAssessment] = useState(false);
   const [showRescheduleFor, setShowRescheduleFor] = useState(null);
   const [showFeedbackFor, setShowFeedbackFor] = useState(null);
+  const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [noteText, setNoteText] = useState('');
+  const [offerPdfUrl, setOfferPdfUrl] = useState(null);
+  const [offerPdfLoading, setOfferPdfLoading] = useState(false);
 
   const { data: app, isLoading } = useQuery({
     queryKey: ['application-detail', id],
@@ -717,6 +1080,7 @@ export default function ApplicationDetailPage() {
     queryKey: ['application-interviews', id],
     queryFn: () => interviewsApi.list({ application_id: id, limit: 50 }).then((r) => r.data),
     enabled: !!id,
+    refetchInterval: 15000,
   });
 
   const { data: jobData } = useQuery({
@@ -725,11 +1089,29 @@ export default function ApplicationDetailPage() {
     enabled: !!app?.job_id,
   });
 
-  const { data: offerData, refetch: refetchOffer } = useQuery({
+  const { data: offerData, refetch: refetchOffer, isLoading: offerLoading } = useQuery({
     queryKey: ['application-offer', id],
     queryFn: () => offersApi.getByApplication(id).then((r) => r.data),
     enabled: !!id,
     retry: false,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+  });
+
+  const { data: docsData, refetch: refetchDocs } = useQuery({
+    queryKey: ['application-documents', id],
+    queryFn: () => documentsApi.getByApplication(id).then((r) => r.data),
+    enabled: !!id,
+    retry: false,
+  });
+
+  const sendDocRequestMutation = useMutation({
+    mutationFn: () => documentsApi.sendRequest(id),
+    onSuccess: () => {
+      refetchDocs();
+      toast.success('Document request email sent to candidate');
+    },
+    onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to send request'),
   });
 
   const { data: assessmentsData, refetch: refetchAssessments } = useQuery({
@@ -739,12 +1121,21 @@ export default function ApplicationDetailPage() {
   });
 
   const stageMutation = useMutation({
-    mutationFn: ({ stage }) => applicationsApi.moveStage(id, stage),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['application-detail', id] });
+    mutationFn: ({ stage, notes, rejection_reason }) =>
+      applicationsApi.moveStage(id, stage, notes, rejection_reason),
+    onSuccess: (res) => {
+      // Merge only stage fields into the cached detail — preserves rich applicant/job_title
+      // that the lean PATCH response doesn't include
+      queryClient.setQueryData(['application-detail', id], (old) => {
+        if (!old) return old;
+        return { ...old, stage: res.data.stage, stage_updated_at: res.data.stage_updated_at };
+      });
+      // Background refetch to get fresh stage_history
+      queryClient.invalidateQueries({ queryKey: ['application-detail', id], exact: true });
       queryClient.invalidateQueries({ queryKey: ['hr-applications'] });
       toast.success('Stage updated');
       setStageMenuOpen(false);
+      setShowRejectDialog(false);
     },
     onError: (err) => toast.error(err.response?.data?.detail ?? 'Cannot move to this stage'),
   });
@@ -761,6 +1152,18 @@ export default function ApplicationDetailPage() {
       setNoteText('');
       toast.success('Note added');
     },
+  });
+
+  const [confirmCompleteId, setConfirmCompleteId] = useState(null);
+
+  const completeInterviewMutation = useMutation({
+    mutationFn: (interviewId) => interviewsApi.complete(interviewId),
+    onSuccess: () => {
+      setConfirmCompleteId(null);
+      refetchInterviews();
+      toast.success('Interview marked as completed');
+    },
+    onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to complete interview'),
   });
 
   const cancelInterviewMutation = useMutation({
@@ -823,6 +1226,7 @@ export default function ApplicationDetailPage() {
     { key: 'feedback', label: 'Feedback' },
     { key: 'timeline', label: 'Timeline' },
     { key: 'notes', label: `Notes${notes.length ? ` (${notes.length})` : ''}` },
+    { key: 'documents', label: `Documents${docsData?.documents?.length ? ` (${docsData.documents.length})` : ''}${docsData?.status === 'complete' ? ' ✓' : ''}` },
     { key: 'offer', label: `Offer${offerData ? ' ●' : ''}` },
   ];
 
@@ -892,14 +1296,34 @@ export default function ApplicationDetailPage() {
                     <p className="px-3 pt-1 pb-1.5 text-xs text-gray-400 font-medium">Move to</p>
                     {validNext.map((stage) => {
                       const s = STAGE_MAP[stage];
+                      const offerSigned =
+                        offerData?.status === 'accepted' && !!offerData?.candidate_signature;
+                      const blockedHired = stage === 'hired' && !offerSigned;
                       return (
                         <button
                           key={stage}
-                          onClick={() => stageMutation.mutate({ stage })}
-                          className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"
+                          disabled={blockedHired}
+                          title={blockedHired ? 'Candidate must accept and sign the offer letter first' : undefined}
+                          onClick={() => {
+                            if (blockedHired) return;
+                            if (stage === 'rejected') {
+                              setStageMenuOpen(false);
+                              setShowRejectDialog(true);
+                            } else {
+                              stageMutation.mutate({ stage });
+                            }
+                          }}
+                          className={`flex items-center gap-2 w-full px-3 py-2 text-sm text-left ${
+                            blockedHired
+                              ? 'text-gray-300 cursor-not-allowed'
+                              : 'text-gray-700 hover:bg-surface-50'
+                          }`}
                         >
-                          <span className={`w-2 h-2 rounded-full ${s?.color.split(' ')[0] ?? 'bg-gray-200'}`} />
-                          {s?.label ?? stage}
+                          <span className={`w-2 h-2 rounded-full ${s?.color.split(' ')[0] ?? 'bg-gray-200'} ${blockedHired ? 'opacity-30' : ''}`} />
+                          <span>{s?.label ?? stage}</span>
+                          {blockedHired && (
+                            <span className="ml-auto text-xs text-gray-300">Awaiting signature</span>
+                          )}
                         </button>
                       );
                     })}
@@ -932,7 +1356,7 @@ export default function ApplicationDetailPage() {
         {TABS.map((tab) => (
           <button
             key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
+            onClick={() => { setActiveTab(tab.key); setSearchParams({ tab: tab.key }, { replace: true }); }}
             className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors -mb-px ${
               activeTab === tab.key
                 ? 'border-brand-500 text-brand-600'
@@ -1110,6 +1534,12 @@ export default function ApplicationDetailPage() {
                       {['scheduled', 'rescheduled'].includes(interview.status) && (
                         <>
                           <button
+                            onClick={() => setConfirmCompleteId(interview.id)}
+                            className="flex items-center gap-1 text-xs text-green-600 hover:text-green-700 font-medium"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" /> Complete
+                          </button>
+                          <button
                             onClick={() => setShowRescheduleFor(interview)}
                             className="text-xs text-brand-600 hover:text-brand-700 font-medium"
                           >
@@ -1156,33 +1586,19 @@ export default function ApplicationDetailPage() {
 
                   {/* Feedback for this interview */}
                   {interview.feedback?.length > 0 && (
-                    <div className="mt-4 pt-4 border-t border-surface-100">
-                      <p className="text-xs font-semibold text-gray-600 mb-2">
+                    <div className="mt-4 pt-4 border-t border-surface-100 space-y-3">
+                      <p className="text-xs font-semibold text-gray-600">
                         Feedback ({interview.feedback.length})
                       </p>
-                      {interview.feedback.map((fb) => {
-                        const rec = RECOMMENDATION_LABELS[fb.recommendation];
-                        return (
-                          <div key={fb.id} className="text-xs bg-surface-50 rounded-lg p-3 space-y-1">
-                            {fb.recommendation && rec && (
-                              <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${rec.color}`}>
-                                {rec.label}
-                              </span>
-                            )}
-                            {fb.overall_rating && (
-                              <div className="flex gap-0.5 mt-1">
-                                {Array.from({ length: 5 }).map((_, i) => (
-                                  <Star key={i} className={`w-3 h-3 ${i < fb.overall_rating ? 'text-yellow-400 fill-yellow-400' : 'text-gray-200'}`} />
-                                ))}
-                              </div>
-                            )}
-                            {fb.strengths && <p><span className="text-gray-400">Strengths: </span>{fb.strengths}</p>}
-                            {fb.weaknesses && <p><span className="text-gray-400">Areas: </span>{fb.weaknesses}</p>}
-                            {fb.notes && <p className="text-gray-600">{fb.notes}</p>}
-                          </div>
-                        );
-                      })}
+                      {interview.feedback.map((fb) => (
+                        <InterviewFeedbackCard key={fb.id} fb={fb} interview={null} />
+                      ))}
                     </div>
+                  )}
+
+                  {/* Candidate self-assessment */}
+                  {interview.candidate_self_feedback && (
+                    <CandidateSelfAssessment sf={interview.candidate_self_feedback} />
                   )}
 
                   {/* Submit feedback button */}
@@ -1308,7 +1724,7 @@ export default function ApplicationDetailPage() {
       {/* ── Feedback Tab ── */}
       {activeTab === 'feedback' && (
         <div className="space-y-4">
-          {interviews.every((i) => !i.feedback?.length) ? (
+          {interviews.every((i) => !i.feedback?.length && !i.candidate_self_feedback) ? (
             <div className="bg-surface-50 rounded-xl border border-dashed border-surface-300 py-16 text-center">
               <MessageSquare className="w-10 h-10 text-gray-300 mx-auto mb-2" />
               <p className="text-sm text-gray-500">No feedback submitted yet</p>
@@ -1320,79 +1736,24 @@ export default function ApplicationDetailPage() {
               </button>
             </div>
           ) : (
-            interviews.map((interview) =>
-              interview.feedback?.map((fb) => {
-                const rec = RECOMMENDATION_LABELS[fb.recommendation];
-                return (
-                  <div key={fb.id} className="bg-white rounded-xl border border-surface-200 p-5">
-                    <div className="flex items-center justify-between mb-4">
-                      <div>
-                        <p className="text-sm font-semibold text-gray-900">
-                          {interview.title || `Round ${interview.round_number}`}
-                        </p>
-                        <p className="text-xs text-gray-400">
-                          {format(new Date(interview.scheduled_at), 'PPP')}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {fb.overall_rating && (
-                          <div className="flex gap-0.5">
-                            {Array.from({ length: 5 }).map((_, i) => (
-                              <Star key={i} className={`w-4 h-4 ${i < fb.overall_rating ? 'text-yellow-400 fill-yellow-400' : 'text-gray-200'}`} />
-                            ))}
-                          </div>
-                        )}
-                        {rec && (
-                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${rec.color}`}>
-                            {rec.label}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Scores grid */}
-                    {(fb.technical_score || fb.communication_score || fb.cultural_fit_score || fb.problem_solving_score) && (
-                      <div className="grid grid-cols-4 gap-3 mb-4">
-                        {[
-                          { label: 'Technical', val: fb.technical_score },
-                          { label: 'Communication', val: fb.communication_score },
-                          { label: 'Culture Fit', val: fb.cultural_fit_score },
-                          { label: 'Problem Solving', val: fb.problem_solving_score },
-                        ].filter((s) => s.val).map(({ label, val }) => (
-                          <div key={label} className="bg-surface-50 rounded-lg p-3 text-center">
-                            <p className="text-lg font-bold text-gray-900">{val}<span className="text-xs text-gray-400 font-normal">/5</span></p>
-                            <p className="text-xs text-gray-500 mt-0.5">{label}</p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      {fb.strengths && (
-                        <div>
-                          <p className="text-xs font-semibold text-green-700 mb-1 flex items-center gap-1">
-                            <CheckCircle2 className="w-3 h-3" /> Strengths
-                          </p>
-                          <p className="text-gray-700 text-xs">{fb.strengths}</p>
-                        </div>
-                      )}
-                      {fb.weaknesses && (
-                        <div>
-                          <p className="text-xs font-semibold text-orange-700 mb-1 flex items-center gap-1">
-                            <AlertCircle className="w-3 h-3" /> Areas to improve
-                          </p>
-                          <p className="text-gray-700 text-xs">{fb.weaknesses}</p>
-                        </div>
-                      )}
-                    </div>
-
-                    {fb.notes && (
-                      <p className="mt-3 text-xs text-gray-600 bg-surface-50 rounded-lg p-3">{fb.notes}</p>
-                    )}
-                  </div>
-                );
-              })
-            )
+            interviews.map((interview) => {
+              const hasFeedback = interview.feedback?.length > 0;
+              const hasSelf = !!interview.candidate_self_feedback;
+              if (!hasFeedback && !hasSelf) return null;
+              return (
+                <div key={interview.id} className="bg-white rounded-xl border border-surface-200 p-5 space-y-3">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    {interview.title || `Round ${interview.round_number}`}
+                  </p>
+                  {interview.feedback?.map((fb) => (
+                    <InterviewFeedbackCard key={fb.id} fb={fb} interview={interview} />
+                  ))}
+                  {hasSelf && (
+                    <CandidateSelfAssessment sf={interview.candidate_self_feedback} />
+                  )}
+                </div>
+              );
+            })
           )}
         </div>
       )}
@@ -1483,14 +1844,131 @@ export default function ApplicationDetailPage() {
         </div>
       )}
 
+      {/* ── Documents Tab ── */}
+      {activeTab === 'documents' && (
+        <div className="space-y-4">
+          {/* Status bar */}
+          {docsData ? (
+            <>
+              <div className={`flex items-center justify-between p-4 rounded-xl border ${
+                docsData.status === 'complete'
+                  ? 'bg-green-50 border-green-200'
+                  : 'bg-amber-50 border-amber-200'
+              }`}>
+                <div className="flex items-center gap-3">
+                  {docsData.status === 'complete'
+                    ? <CheckCircle2 className="w-5 h-5 text-green-600" />
+                    : <AlertCircle className="w-5 h-5 text-amber-500" />}
+                  <div>
+                    <p className={`text-sm font-semibold ${docsData.status === 'complete' ? 'text-green-800' : 'text-amber-800'}`}>
+                      {docsData.status === 'complete'
+                        ? 'All documents submitted — offer letter can be sent'
+                        : `Documents pending (${docsData.documents.length} / ${docsData.required_types.length} submitted)`}
+                    </p>
+                    {docsData.email_sent_at && (
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        Request sent {new Date(docsData.email_sent_at).toLocaleDateString()}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={() => sendDocRequestMutation.mutate()}
+                  disabled={sendDocRequestMutation.isPending}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-surface-300 rounded-lg text-gray-600 hover:bg-white transition-colors disabled:opacity-50"
+                >
+                  {sendDocRequestMutation.isPending
+                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    : <Send className="w-3.5 h-3.5" />}
+                  Resend Email
+                </button>
+              </div>
+
+              {/* Required documents list */}
+              <div className="bg-white rounded-xl border border-surface-200 divide-y divide-surface-100">
+                {docsData.required_types.map((req) => {
+                  const uploaded = docsData.documents.find((d) => d.document_type === req.type);
+                  return (
+                    <div key={req.type} className="flex items-center justify-between px-5 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                          uploaded ? 'bg-green-100' : 'bg-surface-100'
+                        }`}>
+                          {uploaded
+                            ? <CheckCircle2 className="w-4 h-4 text-green-600" />
+                            : <FileText className="w-4 h-4 text-gray-400" />}
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-gray-800">{req.label}</p>
+                          {uploaded && (
+                            <p className="text-xs text-gray-400 mt-0.5">
+                              {uploaded.file_name} · {new Date(uploaded.uploaded_at).toLocaleDateString()}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      {uploaded ? (
+                        <a
+                          href={uploaded.file_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 text-xs text-brand-600 hover:underline font-medium"
+                        >
+                          <ExternalLink className="w-3 h-3" /> View
+                        </a>
+                      ) : (
+                        <span className="text-xs text-amber-600 font-medium">Pending</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <div className="bg-surface-50 rounded-xl border border-dashed border-surface-300 py-16 text-center">
+              <FolderOpen className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+              <p className="text-sm font-medium text-gray-600 mb-1">No document request sent yet</p>
+              <p className="text-xs text-gray-400 mb-5">
+                Move the candidate to the Offer stage to automatically trigger the document request,
+                or send it manually below.
+              </p>
+              <button
+                onClick={() => sendDocRequestMutation.mutate()}
+                disabled={sendDocRequestMutation.isPending}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-brand-500 text-white text-sm font-semibold rounded-xl hover:bg-brand-600 transition-colors disabled:opacity-50"
+              >
+                {sendDocRequestMutation.isPending
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : <Send className="w-4 h-4" />}
+                Send Document Request
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Offer Tab ── */}
       {activeTab === 'offer' && (
         <div className="space-y-4">
-          {!offerData ? (
+          {offerLoading ? (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="w-6 h-6 animate-spin text-gray-300" />
+            </div>
+          ) : !offerData ? (
             <div className="bg-surface-50 rounded-xl border border-dashed border-surface-300 py-16 text-center">
               <FileText className="w-10 h-10 text-gray-300 mx-auto mb-3" />
               <p className="text-sm font-medium text-gray-600 mb-1">No offer letter yet</p>
-              <p className="text-xs text-gray-400 mb-5">Generate an offer for this candidate once they reach the offer stage</p>
+              {docsData?.status !== 'complete' && (
+                <div className="inline-flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-full mb-4">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  Waiting for candidate to submit all required documents
+                </div>
+              )}
+              <p className="text-xs text-gray-400 mb-5">
+                {docsData?.status === 'complete'
+                  ? 'All documents received — you can now generate the offer letter.'
+                  : 'The offer letter can only be sent after the candidate submits all required documents.'}
+              </p>
               <button
                 onClick={() => navigate(`/hr/offers/new/${id}`)}
                 className="inline-flex items-center gap-2 px-5 py-2.5 bg-brand-500 text-white text-sm font-semibold rounded-xl hover:bg-brand-600 transition-colors"
@@ -1501,19 +1979,41 @@ export default function ApplicationDetailPage() {
           ) : (
             <div className="bg-white rounded-xl border border-surface-200 p-6 space-y-5">
               {/* Status header */}
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-2">
                 <div>
                   <p className="text-xs text-gray-400 mb-1">Status</p>
                   <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold capitalize ${OFFER_STATUS_COLORS[offerData.status] ?? 'bg-gray-100 text-gray-600'}`}>
                     {offerData.status}
                   </span>
                 </div>
-                <button
-                  onClick={() => navigate(`/hr/offers/${offerData.id}`)}
-                  className="flex items-center gap-2 px-4 py-2 border border-surface-200 text-sm text-gray-600 rounded-xl hover:bg-surface-50 transition-colors"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" /> Open Offer Builder
-                </button>
+                <div className="flex items-center gap-2">
+                  {['sent', 'accepted', 'rejected', 'expired', 'revoked'].includes(offerData.status) && (
+                    <button
+                      onClick={async () => {
+                        if (offerPdfUrl) { setOfferPdfUrl(null); return; }
+                        setOfferPdfLoading(true);
+                        try {
+                          const url = await offersApi.fetchHtmlBlob(offerData.id);
+                          setOfferPdfUrl(url);
+                        } catch { toast.error('Could not load PDF'); }
+                        finally { setOfferPdfLoading(false); }
+                      }}
+                      disabled={offerPdfLoading}
+                      className="flex items-center gap-1.5 px-3 py-2 border border-surface-200 text-sm text-gray-600 rounded-xl hover:bg-surface-50 transition-colors disabled:opacity-60"
+                    >
+                      {offerPdfLoading
+                        ? <><span className="w-3.5 h-3.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" /> Loading…</>
+                        : <><Eye className="w-3.5 h-3.5" />{offerData.candidate_signature ? 'View Signed Offer' : 'View Offer'}</>
+                      }
+                    </button>
+                  )}
+                  <button
+                    onClick={() => navigate(`/hr/offers/${offerData.id}`)}
+                    className="flex items-center gap-2 px-4 py-2 border border-surface-200 text-sm text-gray-600 rounded-xl hover:bg-surface-50 transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" /> Open Offer Builder
+                  </button>
+                </div>
               </div>
 
               {/* Details grid */}
@@ -1579,6 +2079,29 @@ export default function ApplicationDetailPage() {
                   />
                 </div>
               )}
+
+              {offerPdfUrl && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+                  <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl flex flex-col" style={{ height: '90vh' }}>
+                    <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200 flex-shrink-0">
+                      <h3 className="font-display font-semibold text-gray-900">
+                        {offerData.candidate_signature ? 'Signed Offer Letter' : 'Offer Letter'}
+                      </h3>
+                      <button
+                        onClick={() => setOfferPdfUrl(null)}
+                        className="p-1.5 rounded-lg hover:bg-surface-100 text-gray-400 hover:text-gray-600"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <iframe
+                      src={offerPdfUrl}
+                      title="Offer Letter"
+                      className="flex-1 w-full rounded-b-2xl"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1608,6 +2131,51 @@ export default function ApplicationDetailPage() {
           interview={showRescheduleFor}
           onClose={() => setShowRescheduleFor(null)}
           onSuccess={() => refetchInterviews()}
+        />
+      )}
+
+      {/* Complete Interview Confirmation */}
+      {confirmCompleteId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/40" onClick={() => setConfirmCompleteId(null)} />
+          <div className="relative bg-white rounded-2xl shadow-modal w-full max-w-sm z-10 p-6">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-9 h-9 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                <CheckCircle2 className="w-5 h-5 text-green-600" />
+              </div>
+              <div>
+                <h3 className="font-display font-semibold text-gray-900">Mark interview as completed?</h3>
+                <p className="text-sm text-gray-500 mt-0.5">This will update the interview status to completed.</p>
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setConfirmCompleteId(null)}
+                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => completeInterviewMutation.mutate(confirmCompleteId)}
+                disabled={completeInterviewMutation.isPending}
+                className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 disabled:opacity-60 transition-colors"
+              >
+                {completeInterviewMutation.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Yes, complete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reject Candidate Dialog */}
+      {showRejectDialog && (
+        <RejectDialog
+          candidateName={app?.candidate_name ?? 'this candidate'}
+          interviews={interviews}
+          onConfirm={() => stageMutation.mutate({ stage: 'rejected' })}
+          onCancel={() => setShowRejectDialog(false)}
+          isPending={stageMutation.isPending}
         />
       )}
     </div>

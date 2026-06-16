@@ -38,8 +38,12 @@ import InterviewsPage from '@/pages/hr/InterviewsPage';
 import OffersPage from '@/pages/hr/OffersPage';
 import OfferBuilderPage from '@/pages/hr/OfferBuilderPage';
 import OfferRespondPage from '@/pages/public/OfferRespondPage';
+import DocumentUploadPage from '@/pages/public/DocumentUploadPage';
 import ReportsPage from '@/pages/hr/ReportsPage';
 import SettingsPage from '@/pages/hr/SettingsPage';
+import AgenciesPage from '@/pages/hr/AgenciesPage';
+import AgencyPortalPage from '@/pages/public/AgencyPortalPage';
+import AgencyApplyLayout from '@/components/layout/AgencyApplyLayout';
 
 const router = createBrowserRouter([
   // ── PUBLIC ──────────────────────────────────────────────────
@@ -108,6 +112,7 @@ const router = createBrowserRouter([
           { path: '/hr/offers/:offerId', element: <OfferBuilderPage /> },
           { path: '/hr/reports', element: <ReportsPage /> },
           { path: '/hr/settings', element: <SettingsPage /> },
+          { path: '/hr/agencies', element: <AgenciesPage /> },
         ],
       },
     ],
@@ -115,6 +120,22 @@ const router = createBrowserRouter([
 
   // ── PUBLIC OFFER RESPOND ────────────────────────────────────
   { path: '/offers/respond/:token', element: <OfferRespondPage /> },
+
+  // ── PUBLIC DOCUMENT SUBMISSION ──────────────────────────────
+  { path: '/docs/submit/:token', element: <DocumentUploadPage /> },
+
+  // ── AGENCY PORTAL ───────────────────────────────────────────
+  { path: '/agency/:portalToken', element: <AgencyPortalPage /> },
+
+  // ── AGENCY APPLY (focused, no nav) ──────────────────────────
+  {
+    path: '/agency-apply',
+    element: <AgencyApplyLayout />,
+    children: [
+      { path: ':slug', element: <JobDetailPage /> },
+      { path: ':slug/apply', element: <ApplyPage /> },
+    ],
+  },
 
   // ── FALLBACK ────────────────────────────────────────────────
   { path: '*', element: <Navigate to="/jobs" replace /> },
