@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}Feedback Reminder – Nablon AI Careers{% endblock %}
+
+{% block content %}
+<h2>Hi {{ full_name }}, a quick reminder!</h2>
+<p>
+  Your interview with <strong>{{ candidate_name }}</strong> for the
+  <strong>{{ job_title }}</strong> role (<em>{{ interview_title }}</em>) ended about an hour ago.
+</p>
+<p>
+  We noticed you haven't submitted your feedback yet. Timely feedback helps the hiring team
+  make faster, fairer decisions for the candidate.
+</p>
+
+<a href="{{ interviews_url }}" class="cta">Submit Feedback Now</a>
+
+<p style="margin-top: 24px; color: #6B7280; font-size: 14px;">
+  If you've already submitted or the interview didn't take place, please ignore this reminder.
+</p>
+{% endblock %}

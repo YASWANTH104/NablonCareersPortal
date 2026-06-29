@@ -80,7 +80,7 @@ const router = createBrowserRouter([
 
   // ── EMPLOYEE HUB ────────────────────────────────────────────
   {
-    element: <ProtectedRoute roles={['employee', 'hr_manager', 'admin', 'super_admin']} />,
+    element: <ProtectedRoute roles={['employee', 'hr_manager', 'admin', 'super_admin', 'interviewer']} />,
     children: [
       {
         element: <AppShell />,
@@ -94,7 +94,7 @@ const router = createBrowserRouter([
 
   // ── HR CONSOLE ──────────────────────────────────────────────
   {
-    element: <ProtectedRoute roles={['hr_manager', 'admin', 'super_admin', 'interviewer']} />,
+    element: <ProtectedRoute roles={['hr_manager', 'admin', 'super_admin']} />,
     children: [
       {
         element: <AppShell />,
@@ -106,13 +106,25 @@ const router = createBrowserRouter([
           { path: '/hr/applicants', element: <ApplicantsPage /> },
           { path: '/hr/applicants/:id', element: <ApplicationDetailPage /> },
           { path: '/hr/referrals', element: <ReferralsPage /> },
-          { path: '/hr/interviews', element: <InterviewsPage /> },
           { path: '/hr/offers', element: <OffersPage /> },
           { path: '/hr/offers/new/:applicationId', element: <OfferBuilderPage /> },
           { path: '/hr/offers/:offerId', element: <OfferBuilderPage /> },
           { path: '/hr/reports', element: <ReportsPage /> },
           { path: '/hr/settings', element: <SettingsPage /> },
           { path: '/hr/agencies', element: <AgenciesPage /> },
+        ],
+      },
+    ],
+  },
+
+  // ── INTERVIEWER ─────────────────────────────────────────────
+  {
+    element: <ProtectedRoute roles={['interviewer']} />,
+    children: [
+      {
+        element: <AppShell />,
+        children: [
+          { path: '/hr/interviews', element: <InterviewsPage /> },
         ],
       },
     ],

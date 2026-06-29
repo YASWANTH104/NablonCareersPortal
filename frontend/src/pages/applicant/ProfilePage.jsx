@@ -11,7 +11,13 @@ import { useAuthStore } from '@/store/authStore';
 const profileSchema = z.object({
   full_name: z.string().min(2, 'Name is required'),
   phone: z.string().optional(),
-  department: z.string().optional(),
+  date_of_birth: z.string().optional(),
+  current_location: z.string().optional(),
+  current_company: z.string().optional(),
+  current_designation: z.string().optional(),
+  total_experience: z.string().optional(),
+  education: z.string().optional(),
+  skills: z.string().optional(),
 });
 
 const ROLE_LABELS = {
@@ -33,31 +39,56 @@ export default function ProfilePage() {
     queryFn: () => usersApi.me().then((r) => r.data),
   });
 
+  const { data: career } = useQuery({
+    queryKey: ['my-career-profile'],
+    queryFn: () => usersApi.myProfile().then((r) => r.data),
+  });
+
   const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm({
     resolver: zodResolver(profileSchema),
     values: profile ? {
       full_name: profile.full_name,
       phone: profile.phone ?? '',
-      department: profile.department ?? '',
+      date_of_birth: profile.date_of_birth ?? '',
+      current_location: career?.current_location ?? '',
+      current_company: career?.current_company ?? '',
+      current_designation: career?.current_designation ?? '',
+      total_experience: career?.total_experience ?? '',
+      education: career?.education ?? '',
+      skills: career?.skills ?? '',
     } : undefined,
   });
 
   const updateMut = useMutation({
-    mutationFn: (data) => usersApi.updateMe(data),
+    mutationFn: (values) => {
+      const userPayload = { full_name: values.full_name };
+      userPayload.phone = values.phone || null;
+      userPayload.date_of_birth = values.date_of_birth || null;
+      const profilePayload = {
+        current_location: values.current_location || null,
+        current_company: values.current_company || null,
+        current_designation: values.current_designation || null,
+        total_experience: values.total_experience || null,
+        education: values.education || null,
+        skills: values.skills || null,
+      };
+      return Promise.all([
+        usersApi.updateMe(userPayload),
+        usersApi.updateMyProfile(profilePayload),
+      ]).then(([userRes]) => userRes);
+    },
     onSuccess: (res) => {
       toast.success('Profile updated');
       setEditing(false);
       qc.invalidateQueries({ queryKey: ['my-profile'] });
+      qc.invalidateQueries({ queryKey: ['my-career-profile'] });
       if (setUser) setUser(res.data);
     },
     onError: () => toast.error('Failed to update profile'),
   });
 
   const onSubmit = (values) => {
-    const payload = { full_name: values.full_name };
-    if (values.phone) payload.phone = values.phone;
-    if (values.department) payload.department = values.department;
-    updateMut.mutate(payload);
+    updateMut.mutate(values);
   };
 
   if (isLoading) {
@@ -111,6 +142,63 @@ export default function ProfilePage() {
                   placeholder="+91 98765 43210"
                 />
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Date of birth</label>
+                <input
+                  {...register('date_of_birth')}
+                  type="date"
+                  className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Current location</label>
+                <input
+                  {...register('current_location')}
+                  className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  placeholder="Bengaluru, India"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Current company</label>
+                <input
+                  {...register('current_company')}
+                  className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  placeholder="Company name (or 'Fresher')"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Current designation</label>
+                <input
+                  {...register('current_designation')}
+                  className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  placeholder="e.g. Senior Data Scientist"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Total experience</label>
+                <input
+                  {...register('total_experience')}
+                  className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  placeholder="e.g. 5 years"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Education</label>
+                <input
+                  {...register('education')}
+                  className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  placeholder="e.g. B.Tech, CSE, IIT Delhi"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Skills</label>
+                <textarea
+                  {...register('skills')}
+                  rows={2}
+                  className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+                  placeholder="e.g. Python, PyTorch, LLMs, SQL"
+                />
+              </div>
 
               <div className="flex gap-3 pt-2">
                 <button
@@ -156,6 +244,23 @@ export default function ProfilePage() {
                     </div>
                   </div>
                 )}
+                {[
+                  ['Date of birth', profile?.date_of_birth],
+                  ['Current location', career?.current_location],
+                  ['Current company', career?.current_company],
+                  ['Current designation', career?.current_designation],
+                  ['Total experience', career?.total_experience],
+                  ['Education', career?.education],
+                  ['Skills', career?.skills],
+                ].filter(([, v]) => v).map(([label, value]) => (
+                  <div key={label} className="flex items-center gap-3 text-sm">
+                    <User className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                    <div>
+                      <p className="text-xs text-gray-400 mb-0.5">{label}</p>
+                      <p className="text-gray-900">{value}</p>
+                    </div>
+                  </div>
+                ))}
               </div>
 
               <div className="mt-6 pt-4 border-t border-surface-100">

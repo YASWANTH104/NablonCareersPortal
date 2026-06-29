@@ -1,6 +1,6 @@
 import uuid
-from datetime import datetime
-from sqlalchemy import String, Boolean, Text, DateTime
+from datetime import datetime, date
+from sqlalchemy import String, Boolean, Text, DateTime, Date
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -14,6 +14,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    date_of_birth: Mapped[date | None] = mapped_column(Date)
     role: Mapped[str] = mapped_column(
         String(50), nullable=False,
         # super_admin | admin | hr_manager | interviewer | employee | applicant

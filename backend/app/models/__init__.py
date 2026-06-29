@@ -1,4 +1,5 @@
 from app.models.user import User
+from app.models.candidate_profile import CandidateProfile
 from app.models.job import Job, Department, JobQuestion
 from app.models.application import Application, ApplicationStageHistory
 from app.models.referral import Referral
@@ -11,6 +12,7 @@ from app.models.agency import Agency, JobAgencyAssignment
 
 __all__ = [
     "User",
+    "CandidateProfile",
     "Job", "Department", "JobQuestion",
     "Application", "ApplicationStageHistory",
     "Referral",

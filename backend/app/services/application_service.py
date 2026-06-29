@@ -57,6 +57,25 @@ async def submit_application(
     data: ApplicationCreate,
     applicant_id: uuid.UUID,
 ) -> Application:
+    from datetime import datetime, timezone, timedelta
+
+    # Block reapplication within 6 months of any rejection
+    cooloff_start = datetime.now(timezone.utc) - timedelta(days=183)
+    recent_rejection = (await db.execute(
+        select(Application).where(
+            Application.applicant_id == applicant_id,
+            Application.stage == "rejected",
+            Application.stage_updated_at >= cooloff_start,
+        )
+    )).scalar_one_or_none()
+
+    if recent_rejection:
+        eligible_date = (recent_rejection.stage_updated_at + timedelta(days=183)).strftime("%d %B %Y")
+        raise HTTPException(
+            403,
+            f"You are not eligible to apply at this time. You may reapply after {eligible_date}.",
+        )
+
     existing = await db.execute(
         select(Application).where(
             Application.job_id == data.job_id,
@@ -77,8 +96,29 @@ async def submit_application(
         if assignment and str(assignment.job_id) == str(data.job_id):
             agency_id = assignment.agency_id
 
+    # Persist candidate profile fields (profile is the source of truth)
+    from app.schemas.application import PROFILE_FIELDS
+    from app.models.candidate_profile import CandidateProfile
+    from app.models.user import User as UserModel
+
+    user = await db.get(UserModel, applicant_id)
+    if user and data.date_of_birth:
+        user.date_of_birth = data.date_of_birth
+
+    profile = await db.get(CandidateProfile, applicant_id)
+    if not profile:
+        profile = CandidateProfile(user_id=applicant_id)
+        db.add(profile)
+    profile.current_company = data.current_company
+    profile.current_designation = data.current_designation
+    profile.total_experience = data.total_experience
+    profile.current_location = data.current_location
+    profile.education = data.education
+    if data.skills is not None:
+        profile.skills = data.skills
+
     source = "referral" if data.referral_id else ("agency" if agency_id else "direct")
-    create_data = data.model_dump(exclude={"agency_ref"})
+    create_data = data.model_dump(exclude={"agency_ref", *PROFILE_FIELDS})
     application = Application(
         applicant_id=applicant_id,
         source=source,
@@ -233,9 +273,10 @@ async def get_all_applications(
 async def get_application_by_id(db: AsyncSession, application_id: uuid.UUID) -> ApplicationDetailResponse:
     from app.models.user import User
     from app.models.interview import Interview
+    from app.models.candidate_profile import CandidateProfile
 
     row = (await db.execute(
-        select(Application, User.full_name, User.email, User.avatar_url)
+        select(Application, User.full_name, User.email, User.avatar_url, User.date_of_birth)
         .join(User, User.id == Application.applicant_id)
         .where(Application.id == application_id)
     )).first()
@@ -243,7 +284,8 @@ async def get_application_by_id(db: AsyncSession, application_id: uuid.UUID) -> 
     if not row:
         raise HTTPException(404, "Application not found")
 
-    app, full_name, email, avatar_url = row
+    app, full_name, email, avatar_url, date_of_birth = row
+    profile = await db.get(CandidateProfile, app.applicant_id)
 
     history = (await db.execute(
         select(ApplicationStageHistory)
@@ -274,6 +316,15 @@ async def get_application_by_id(db: AsyncSession, application_id: uuid.UUID) -> 
         for h in history
     ]
     d["interview_count"] = interview_count
+    d["date_of_birth"] = date_of_birth
+    d["candidate_profile"] = {
+        "current_company": profile.current_company if profile else None,
+        "current_designation": profile.current_designation if profile else None,
+        "total_experience": profile.total_experience if profile else None,
+        "current_location": profile.current_location if profile else None,
+        "skills": profile.skills if profile else None,
+        "education": profile.education if profile else None,
+    }
 
     return ApplicationDetailResponse.model_validate(d)
 

@@ -10,9 +10,17 @@ import { ArrowLeft, Upload, FileText, X, Loader2, CheckCircle } from 'lucide-rea
 import { jobsApi } from '@/api/jobs';
 import { applicationsApi } from '@/api/applications';
 import { uploadsApi } from '@/api/uploads';
+import { usersApi } from '@/api/users';
 import { useAuthStore } from '@/store/authStore';
 
 const schema = z.object({
+  date_of_birth: z.string().min(1, 'Date of birth is required'),
+  current_location: z.string().min(1, 'Location is required'),
+  total_experience: z.string().min(1, 'Total experience is required'),
+  current_company: z.string().min(1, 'Current company is required'),
+  current_designation: z.string().min(1, 'Current designation is required'),
+  education: z.string().min(1, 'Education is required'),
+  skills: z.string().optional(),
   cover_letter: z.string().optional(),
   linkedin_url: z.string().url('Enter a valid URL').optional().or(z.literal('')),
   portfolio_url: z.string().url('Enter a valid URL').optional().or(z.literal('')),
@@ -32,11 +40,38 @@ export default function ApplyPage() {
     queryFn: () => jobsApi.getBySlug(slug).then((r) => r.data),
   });
 
+  const { data: me } = useQuery({
+    queryKey: ['me'],
+    queryFn: () => usersApi.me().then((r) => r.data),
+    enabled: !!accessToken,
+  });
+
+  const { data: careerProfile } = useQuery({
+    queryKey: ['my-profile'],
+    queryFn: () => usersApi.myProfile().then((r) => r.data),
+    enabled: !!accessToken,
+  });
+
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
-  } = useForm({ resolver: zodResolver(schema) });
+  } = useForm({
+    resolver: zodResolver(schema),
+    values: (me || careerProfile) ? {
+      date_of_birth: me?.date_of_birth ?? '',
+      current_location: careerProfile?.current_location ?? '',
+      total_experience: careerProfile?.total_experience ?? '',
+      current_company: careerProfile?.current_company ?? '',
+      current_designation: careerProfile?.current_designation ?? '',
+      education: careerProfile?.education ?? '',
+      skills: careerProfile?.skills ?? '',
+      cover_letter: '',
+      linkedin_url: '',
+      portfolio_url: '',
+      github_url: '',
+    } : undefined,
+  });
 
   const onDrop = useCallback((accepted) => {
     if (accepted[0]) setResumeFile(accepted[0]);
@@ -115,6 +150,13 @@ export default function ApplyPage() {
       await applicationsApi.submit({
         job_id: job.id,
         resume_url: resumeUrl,
+        date_of_birth: values.date_of_birth,
+        current_location: values.current_location,
+        total_experience: values.total_experience,
+        current_company: values.current_company,
+        current_designation: values.current_designation,
+        education: values.education,
+        skills: values.skills || undefined,
         cover_letter: values.cover_letter || undefined,
         linkedin_url: values.linkedin_url || undefined,
         portfolio_url: values.portfolio_url || undefined,
@@ -200,6 +242,92 @@ export default function ApplyPage() {
               </button>
             </div>
           )}
+        </div>
+
+        {/* Candidate details */}
+        <div className="space-y-4 p-5 bg-surface-50 border border-surface-200 rounded-xl">
+          <p className="text-sm font-semibold text-gray-900">Your details</p>
+
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Date of birth <span className="text-red-500">*</span>
+              </label>
+              <input
+                {...register('date_of_birth')}
+                type="date"
+                className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+              />
+              {errors.date_of_birth && <p className="mt-1 text-xs text-red-500">{errors.date_of_birth.message}</p>}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Current location <span className="text-red-500">*</span>
+              </label>
+              <input
+                {...register('current_location')}
+                placeholder="Bengaluru, India"
+                className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+              />
+              {errors.current_location && <p className="mt-1 text-xs text-red-500">{errors.current_location.message}</p>}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Current company <span className="text-red-500">*</span>
+              </label>
+              <input
+                {...register('current_company')}
+                placeholder="Company name (or 'Fresher')"
+                className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+              />
+              {errors.current_company && <p className="mt-1 text-xs text-red-500">{errors.current_company.message}</p>}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Current designation <span className="text-red-500">*</span>
+              </label>
+              <input
+                {...register('current_designation')}
+                placeholder="e.g. Senior Data Scientist"
+                className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+              />
+              {errors.current_designation && <p className="mt-1 text-xs text-red-500">{errors.current_designation.message}</p>}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Total experience <span className="text-red-500">*</span>
+              </label>
+              <input
+                {...register('total_experience')}
+                placeholder="e.g. 5 years"
+                className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+              />
+              {errors.total_experience && <p className="mt-1 text-xs text-red-500">{errors.total_experience.message}</p>}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Education <span className="text-red-500">*</span>
+              </label>
+              <input
+                {...register('education')}
+                placeholder="e.g. B.Tech, CSE, IIT Delhi"
+                className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+              />
+              {errors.education && <p className="mt-1 text-xs text-red-500">{errors.education.message}</p>}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              Skills <span className="text-gray-400 font-normal">(optional)</span>
+            </label>
+            <textarea
+              {...register('skills')}
+              rows={2}
+              placeholder="e.g. Python, PyTorch, LLMs, SQL, Agentic AI"
+              className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent resize-none"
+            />
+          </div>
         </div>
 
         {/* Cover letter */}

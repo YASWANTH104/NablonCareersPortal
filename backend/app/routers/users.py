@@ -7,7 +7,11 @@ from sqlalchemy import select, and_
 from app.database import get_db
 from app.dependencies import get_current_user, require_roles, Role
 from app.models.user import User
-from app.schemas.user import UserResponse, UserUpdate, UserInvite
+from app.models.candidate_profile import CandidateProfile
+from app.schemas.user import (
+    UserResponse, UserUpdate, UserInvite,
+    CandidateProfileResponse, CandidateProfileUpdate,
+)
 from app.utils.security import hash_password, generate_token
 from pydantic import BaseModel
 
@@ -39,6 +43,32 @@ async def update_me(
     await db.commit()
     await db.refresh(current_user)
     return current_user
+
+
+@router.get("/me/profile", response_model=CandidateProfileResponse)
+async def get_my_profile(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    profile = await db.get(CandidateProfile, current_user.id)
+    return profile or CandidateProfile(user_id=current_user.id)
+
+
+@router.patch("/me/profile", response_model=CandidateProfileResponse)
+async def update_my_profile(
+    data: CandidateProfileUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    profile = await db.get(CandidateProfile, current_user.id)
+    if not profile:
+        profile = CandidateProfile(user_id=current_user.id)
+        db.add(profile)
+    for field, val in data.model_dump(exclude_unset=True).items():
+        setattr(profile, field, val)
+    await db.commit()
+    await db.refresh(profile)
+    return profile
 
 
 @router.get("", response_model=list[UserResponse])

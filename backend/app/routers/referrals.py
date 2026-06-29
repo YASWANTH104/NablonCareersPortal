@@ -14,7 +14,7 @@ from app.services import referral_service
 router = APIRouter(prefix="/referrals", tags=["referrals"])
 
 _HR_ROLES = (Role.HR_MANAGER, Role.ADMIN, Role.SUPER_ADMIN)
-_EMPLOYEE_PLUS = (Role.EMPLOYEE, Role.HR_MANAGER, Role.ADMIN, Role.SUPER_ADMIN)
+_EMPLOYEE_PLUS = (Role.EMPLOYEE, Role.INTERVIEWER, Role.HR_MANAGER, Role.ADMIN, Role.SUPER_ADMIN)
 
 
 @router.post("", response_model=ReferralResponse, status_code=201)

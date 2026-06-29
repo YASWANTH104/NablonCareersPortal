@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block title %}You've been referred to Nablon AI{% endblock %}
+
+{% block content %}
+<h2>Hi {{ candidate_name }},</h2>
+<p>
+  <strong>{{ referrer_name }}</strong> thinks you'd be a great fit for the
+  <strong>{{ job_title }}</strong> role at <strong>Nablon AI</strong> and has referred you!
+</p>
+<p>
+  We'd love to hear from you. Click the button below to view the role and submit your application.
+</p>
+
+<a href="{{ apply_url }}" class="cta">View & Apply</a>
+
+<p style="margin-top: 24px; color: #6B7280; font-size: 13px;">
+  This referral link is valid for 14 days. If you have any questions, feel free to reach out to our HR team.
+</p>
+{% endblock %}

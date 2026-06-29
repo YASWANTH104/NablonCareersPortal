@@ -1,7 +1,14 @@
 import uuid
-from datetime import datetime
-from pydantic import BaseModel
+from datetime import datetime, date
+from pydantic import BaseModel, field_validator
 from typing import Optional
+
+# Profile fields collected at apply time and persisted to the candidate's profile.
+# These are NOT columns on the applications table.
+PROFILE_FIELDS = {
+    "date_of_birth", "current_location", "total_experience",
+    "current_company", "current_designation", "education", "skills",
+}
 
 
 class ApplicationCreate(BaseModel):
@@ -14,6 +21,23 @@ class ApplicationCreate(BaseModel):
     answers: dict = {}
     referral_id: Optional[uuid.UUID] = None
     agency_ref: Optional[str] = None
+
+    # Candidate profile — required at apply (skills optional)
+    date_of_birth: date
+    current_location: str
+    total_experience: str
+    current_company: str
+    current_designation: str
+    education: str
+    skills: Optional[str] = None
+
+    @field_validator("current_location", "total_experience", "current_company",
+                     "current_designation", "education")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("This field is required")
+        return v.strip()
 
 
 class ApplicationUpdate(BaseModel):
@@ -88,9 +112,20 @@ class ApplicationResponse(BaseModel):
     job_title: Optional[str] = None
 
 
+class CandidateProfileBrief(BaseModel):
+    current_company: Optional[str] = None
+    current_designation: Optional[str] = None
+    total_experience: Optional[str] = None
+    current_location: Optional[str] = None
+    skills: Optional[str] = None
+    education: Optional[str] = None
+
+
 class ApplicationDetailResponse(ApplicationResponse):
     stage_history: list[StageHistoryEntry] = []
     interview_count: int = 0
+    date_of_birth: Optional[date] = None
+    candidate_profile: Optional[CandidateProfileBrief] = None
 
 
 class ApplicationListResponse(BaseModel):

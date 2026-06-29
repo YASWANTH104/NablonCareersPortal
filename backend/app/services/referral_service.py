@@ -16,7 +16,7 @@ VALID_STATUSES = {"pending", "invited", "applied", "in_progress", "hired", "reje
 
 def _build_join_query(condition=None):
     q = (
-        select(Referral, Job.title.label("job_title"), User.full_name.label("referrer_name"))
+        select(Referral, Job.title.label("job_title"), Job.slug.label("job_slug"), User.full_name.label("referrer_name"))
         .join(Job, Referral.job_id == Job.id)
         .join(User, Referral.referred_by == User.id)
     )
@@ -29,13 +29,70 @@ def _to_dict(row) -> dict:
     r = row.Referral
     d = {c.name: getattr(r, c.name) for c in r.__table__.columns}
     d["job_title"] = row.job_title
+    d["job_slug"] = row.job_slug
     d["referrer_name"] = row.referrer_name
     if d.get("bonus_amount") is not None:
         d["bonus_amount"] = float(d["bonus_amount"])
     return d
 
 
+async def _send_referral_invite_email(referral_dict: dict) -> None:
+    from app.services.email_service import send_email
+    from app.config import settings
+
+    apply_url = f"{settings.FRONTEND_URL}/jobs/{referral_dict['job_slug']}/apply"
+    await send_email(
+        to_email=referral_dict["candidate_email"],
+        subject=f"You've been referred for a role at Nablon AI – {referral_dict['job_title']}",
+        template_name="referral_invite",
+        context={
+            "candidate_name": referral_dict["candidate_name"],
+            "referrer_name": referral_dict["referrer_name"],
+            "job_title": referral_dict["job_title"],
+            "apply_url": apply_url,
+        },
+    )
+
+
 async def create_referral(db: AsyncSession, data: ReferralCreate, referrer_id: uuid.UUID) -> dict:
+    from datetime import datetime, timezone, timedelta
+    from app.models.application import Application
+
+    # Block referral if candidate was rejected within the last 6 months
+    candidate_user = (await db.execute(
+        select(User).where(User.email == data.candidate_email)
+    )).scalar_one_or_none()
+
+    if candidate_user:
+        cooloff_start = datetime.now(timezone.utc) - timedelta(days=183)
+        recent_rejection = (await db.execute(
+            select(Application).where(
+                Application.applicant_id == candidate_user.id,
+                Application.stage == "rejected",
+                Application.stage_updated_at >= cooloff_start,
+            )
+        )).scalar_one_or_none()
+
+        if recent_rejection:
+            eligible_date = (recent_rejection.stage_updated_at + timedelta(days=183)).strftime("%d %B %Y")
+            raise HTTPException(
+                403,
+                f"This candidate is not eligible for referral at this time. They may be referred again after {eligible_date}.",
+            )
+
+    existing = (await db.execute(
+        select(Referral).where(
+            Referral.job_id == data.job_id,
+            Referral.candidate_email == data.candidate_email,
+        )
+    )).scalar_one_or_none()
+
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"This candidate has already been referred for this role by {'another employee' if existing.referred_by != referrer_id else 'you'}.",
+        )
+
     referral = Referral(
         job_id=data.job_id,
         referred_by=referrer_id,
@@ -52,7 +109,9 @@ async def create_referral(db: AsyncSession, data: ReferralCreate, referrer_id: u
     await db.flush()
     row = (await db.execute(_build_join_query(Referral.id == referral.id))).first()
     await db.commit()
-    return _to_dict(row)
+    result = _to_dict(row)
+    await _send_referral_invite_email(result)
+    return result
 
 
 async def list_referrals(
@@ -135,4 +194,6 @@ async def resend_invite(db: AsyncSession, referral_id: uuid.UUID) -> dict:
     referral.expires_at = datetime.now(timezone.utc) + timedelta(days=14)
     referral.updated_at = datetime.now(timezone.utc)
     await db.commit()
-    return await get_referral(db, referral_id)
+    result = await get_referral(db, referral_id)
+    await _send_referral_invite_email(result)
+    return result

@@ -54,10 +54,19 @@ async def _send_stage_update_email_async(application_id: str, new_stage: str, fr
     from app.models.job import Job
     from app.models.interview import Interview, InterviewFeedback, CandidateInterviewSelfFeedback
     from app.services.email_service import send_email
+    from app.services.ai_rejection_service import generate_rejection_content
     from app.config import settings
     from sqlalchemy import select
 
     app_uuid = uuid.UUID(application_id)
+
+    _ROUND_LABELS = {
+        "screening": "Screening",
+        "assessment": "Assessment",
+        "tr1": "Technical Round 1",
+        "tr2": "Technical Round 2",
+        "hr": "HR Interview",
+    }
 
     async with _task_session() as db:
         row = (await db.execute(
@@ -72,47 +81,59 @@ async def _send_stage_update_email_async(application_id: str, new_stage: str, fr
             return
 
         app, full_name, candidate_email, job_title = row
+        rejection_reason = app.rejection_reason if hasattr(app, "rejection_reason") else None
 
-        rejection_reason = None
-        if hasattr(app, "rejection_reason"):
-            rejection_reason = app.rejection_reason
+        # Collect all interviews + all feedback across every round
+        all_interviews = (await db.execute(
+            select(Interview)
+            .where(Interview.application_id == app_uuid)
+            .order_by(Interview.scheduled_at.asc())
+        )).scalars().all()
 
-        feedback = None
+        raw_feedbacks = []
         feedback_url = None
-        interview_stages = {"screening", "assessment", "tr1", "tr2", "hr"}
-        if from_stage in interview_stages:
-            interview_row = (await db.execute(
-                select(Interview)
-                .where(Interview.application_id == app_uuid)
-                .order_by(Interview.scheduled_at.desc())
-                .limit(1)
+        last_interview = None
+
+        for interview in all_interviews:
+            feedback_rows = (await db.execute(
+                select(InterviewFeedback)
+                .where(InterviewFeedback.interview_id == interview.id)
+                .order_by(InterviewFeedback.created_at.asc())
+            )).scalars().all()
+
+            for fb in feedback_rows:
+                raw_feedbacks.append({
+                    "round_label": interview.title or _ROUND_LABELS.get(from_stage, f"Round {interview.round_number}"),
+                    "overall_rating": fb.overall_rating,
+                    "technical_score": fb.technical_score,
+                    "communication_score": fb.communication_score,
+                    "cultural_fit_score": fb.cultural_fit_score,
+                    "problem_solving_score": fb.problem_solving_score,
+                    "strengths": fb.strengths,
+                    "weaknesses": fb.weaknesses,
+                    "notes": fb.notes,
+                    "recommendation": fb.recommendation,
+                })
+            last_interview = interview
+
+        # Self-feedback URL — only if last interview and candidate hasn't submitted yet
+        if last_interview:
+            already_submitted = (await db.execute(
+                select(CandidateInterviewSelfFeedback)
+                .where(CandidateInterviewSelfFeedback.interview_id == last_interview.id)
             )).scalar_one_or_none()
+            if not already_submitted:
+                feedback_url = f"{settings.FRONTEND_URL}/portal/applications?feedback={last_interview.id}"
 
-            if interview_row:
-                feedback_row = (await db.execute(
-                    select(InterviewFeedback)
-                    .where(
-                        InterviewFeedback.interview_id == interview_row.id,
-                        InterviewFeedback.is_shared_with_candidate == True,
-                    )
-                    .order_by(InterviewFeedback.created_at.desc())
-                    .limit(1)
-                )).scalar_one_or_none()
-
-                if feedback_row:
-                    feedback = {
-                        "strengths": feedback_row.strengths,
-                        "weaknesses": feedback_row.weaknesses,
-                        "notes": feedback_row.notes,
-                    }
-
-                already_submitted = (await db.execute(
-                    select(CandidateInterviewSelfFeedback)
-                    .where(CandidateInterviewSelfFeedback.interview_id == interview_row.id)
-                )).scalar_one_or_none()
-
-                if not already_submitted:
-                    feedback_url = f"{settings.FRONTEND_URL}/portal/applications?feedback={interview_row.id}"
+        # Generate AI-personalised content if feedbacks exist
+        ai_content = None
+        if raw_feedbacks:
+            ai_content = await generate_rejection_content(
+                candidate_name=full_name,
+                job_title=job_title,
+                from_stage=from_stage or "applied",
+                feedbacks=raw_feedbacks,
+            )
 
         _STAGE_SUBJECTS = {
             "applied":    "An update on your Nablon AI application",
@@ -125,8 +146,6 @@ async def _send_stage_update_email_async(application_id: str, new_stage: str, fr
         }
         subject = _STAGE_SUBJECTS.get(from_stage or "applied", f"An update on your application for {job_title}")
 
-        portal_url = f"{settings.FRONTEND_URL}/portal/applications"
-
         await send_email(
             to_email=candidate_email,
             subject=subject,
@@ -136,13 +155,16 @@ async def _send_stage_update_email_async(application_id: str, new_stage: str, fr
                 "job_title": job_title,
                 "from_stage": from_stage or "applied",
                 "rejection_reason": rejection_reason,
-                "feedback": feedback,
+                "ai_content": ai_content,
                 "feedback_url": feedback_url,
-                "portal_url": portal_url,
+                "portal_url": f"{settings.FRONTEND_URL}/portal/applications",
             },
         )
 
-        logger.info(f"Rejection email sent: app={application_id}, from_stage={from_stage}, to={candidate_email}")
+        logger.info(
+            f"Rejection email sent: app={application_id}, from_stage={from_stage}, "
+            f"to={candidate_email}, ai={'yes' if ai_content and ai_content.get('is_ai_generated') else 'no'}"
+        )
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)

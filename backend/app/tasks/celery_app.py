@@ -20,5 +20,9 @@ celery_app.conf.update(
             "task": "auto_complete_past_interviews",
             "schedule": 900,  # every 15 minutes
         },
+        "send-feedback-reminders": {
+            "task": "send_feedback_reminders",
+            "schedule": 900,  # every 15 minutes
+        },
     },
 )

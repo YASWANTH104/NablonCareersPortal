@@ -555,20 +555,23 @@ async def complete_interview(db: AsyncSession, interview_id: uuid.UUID, notes: O
 
 async def auto_complete_past_interviews(db: AsyncSession) -> int:
     from datetime import datetime, timezone, timedelta
-    from sqlalchemy import update
+    from sqlalchemy import update, func as sa_func
 
     now = datetime.now(timezone.utc)
     result = await db.execute(
         select(Interview).where(
-            Interview.status == "scheduled",
-            Interview.scheduled_at + func.make_interval(0, 0, 0, 0, 0, Interview.duration_mins) < now,
+            Interview.status.in_(["scheduled", "rescheduled"]),
+            Interview.scheduled_at + func.make_interval(
+                0, 0, 0, 0, 0, func.coalesce(Interview.duration_mins, 60)
+            ) < now,
         )
     )
     interviews = result.scalars().all()
 
     count = 0
     for interview in interviews:
-        end_time = interview.scheduled_at + timedelta(minutes=interview.duration_mins)
+        duration = interview.duration_mins or 60
+        end_time = interview.scheduled_at + timedelta(minutes=duration)
         if end_time < now:
             interview.status = "completed"
             count += 1

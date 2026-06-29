@@ -23,8 +23,10 @@ const NAV_ITEMS = {
     { to: '/hr/settings',    label: 'Settings',     icon: Settings },
   ],
   interviewer: [
-    { to: '/hr/interviews',  label: 'My Interviews', icon: Calendar },
-    { to: '/hr/applicants',  label: 'Applicants',    icon: Users },
+    { to: '/hr/interviews',         label: 'My Interviews',     icon: Calendar },
+    { to: '/employee/refer',        label: 'Refer a Candidate', icon: UserCheck },
+    { to: '/employee/my-referrals', label: 'My Referrals',      icon: Award },
+    { to: '/jobs',                  label: 'Browse Jobs',       icon: Briefcase },
   ],
   employee: [
     { to: '/employee/refer',         label: 'Refer a Candidate', icon: UserCheck },
