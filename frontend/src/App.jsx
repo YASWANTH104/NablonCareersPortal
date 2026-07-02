@@ -119,7 +119,7 @@ const router = createBrowserRouter([
 
   // ── INTERVIEWER ─────────────────────────────────────────────
   {
-    element: <ProtectedRoute roles={['interviewer']} />,
+    element: <ProtectedRoute roles={['interviewer', 'hr_manager', 'admin', 'super_admin']} />,
     children: [
       {
         element: <AppShell />,

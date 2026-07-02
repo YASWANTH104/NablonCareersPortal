@@ -36,7 +36,7 @@ def auto_complete_past_interviews():
 def send_feedback_reminders():
     async def _run():
         from datetime import datetime, timezone, timedelta
-        from sqlalchemy import select, func, and_
+        from sqlalchemy import select, func, and_, or_
         from app.models.interview import Interview, InterviewPanelist, InterviewFeedback
         from app.models.user import User
         from app.models.application import Application
@@ -46,16 +46,26 @@ def send_feedback_reminders():
 
         async with _task_session() as db:
             now = datetime.now(timezone.utc)
-            window_start = now - timedelta(minutes=75)
-            window_end = now - timedelta(minutes=60)
+            end_time_expr = Interview.scheduled_at + func.make_interval(
+                0, 0, 0, 0, 0, func.coalesce(Interview.duration_mins, 60)
+            )
 
-            # Interviews whose end time falls in the 60–75 min ago window
+            # First reminder: 2h after end time, never reminded yet
+            # Subsequent reminders: every 24h after last reminder
             interviews = (await db.execute(
                 select(Interview).where(
                     Interview.status == "completed",
-                    Interview.scheduled_at + func.make_interval(
-                        0, 0, 0, 0, 0, func.coalesce(Interview.duration_mins, 60)
-                    ).between(window_start, window_end),
+                    or_(
+                        and_(
+                            Interview.last_feedback_reminder_sent_at.is_(None),
+                            end_time_expr + func.make_interval(0, 0, 0, 0, 2, 0) <= now,
+                        ),
+                        and_(
+                            Interview.last_feedback_reminder_sent_at.isnot(None),
+                            Interview.last_feedback_reminder_sent_at
+                                + func.make_interval(0, 0, 0, 1, 0, 0) <= now,
+                        ),
+                    ),
                 )
             )).scalars().all()
 
@@ -76,12 +86,17 @@ def send_feedback_reminders():
                     )).all()
                 }
 
+                # All panelists submitted — stop reminding
+                if panelists and all(p.user_id in submitted_by_ids for p in panelists):
+                    continue
+
                 app = await db.get(Application, interview.application_id)
                 if not app:
                     continue
                 job = await db.get(Job, app.job_id)
                 candidate = await db.get(User, app.applicant_id)
 
+                sent_any = False
                 for panelist in panelists:
                     if panelist.user_id in submitted_by_ids:
                         continue
@@ -90,7 +105,6 @@ def send_feedback_reminders():
                     if not interviewer:
                         continue
 
-                    interviews_url = f"{settings.FRONTEND_URL}/hr/interviews"
                     await send_email(
                         to_email=interviewer.email,
                         subject=f"Reminder: Please submit your feedback – {job.title if job else 'Interview'}",
@@ -100,13 +114,20 @@ def send_feedback_reminders():
                             "candidate_name": candidate.full_name if candidate else "the candidate",
                             "job_title": job.title if job else "the position",
                             "interview_title": interview.title or f"Round {interview.round_number}",
-                            "interviews_url": interviews_url,
+                            "interviews_url": f"{settings.FRONTEND_URL}/hr/interviews",
                         },
                     )
                     logger.info(
                         f"Feedback reminder sent: interview={interview.id}, interviewer={interviewer.email}"
                     )
                     reminded += 1
+                    sent_any = True
+
+                if sent_any:
+                    interview.last_feedback_reminder_sent_at = now
+
+            if reminded:
+                await db.commit()
 
             return reminded
 

@@ -1,5 +1,6 @@
 import uuid
 from typing import Optional
+from datetime import timedelta
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
@@ -11,6 +12,110 @@ from app.schemas.interview import (
     CandidateSelfFeedbackCreate, CandidateSelfFeedbackResponse,
     CandidateInterviewSummary,
 )
+
+
+async def _get_previous_rounds(
+    db: AsyncSession,
+    application_id: uuid.UUID,
+    current_round: int,
+) -> list[dict]:
+    """Feedback from all completed rounds prior to current_round for the same application."""
+    if current_round <= 1:
+        return []
+    prior = (await db.execute(
+        select(Interview).where(
+            Interview.application_id == application_id,
+            Interview.round_number < current_round,
+        ).order_by(Interview.round_number)
+    )).scalars().all()
+    if not prior:
+        return []
+    prior_ids = [iv.id for iv in prior]
+    all_fb = (await db.execute(
+        select(InterviewFeedback).where(InterviewFeedback.interview_id.in_(prior_ids))
+    )).scalars().all()
+    fb_by = {}
+    for f in all_fb:
+        fb_by.setdefault(f.interview_id, []).append(f)
+    return [
+        {"round_number": iv.round_number, "interview_title": iv.title,
+         "feedback": [_feedback_to_dict(f) for f in fb_by.get(iv.id, [])]}
+        for iv in prior
+    ]
+
+
+async def _batch_previous_rounds(db: AsyncSession, rows: list) -> dict:
+    """Batch version of _get_previous_rounds for list views. Returns {interview_id: [entries]}."""
+    needs_prev = [(row[0].application_id, row[0].round_number, row[0].id)
+                  for row in rows if row[0].round_number > 1]
+    if not needs_prev:
+        return {}
+
+    app_ids = list({t[0] for t in needs_prev})
+    all_ivs = (await db.execute(
+        select(Interview).where(
+            Interview.application_id.in_(app_ids),
+        )
+    )).scalars().all()
+
+    ivs_by_app: dict = {}
+    for iv in all_ivs:
+        ivs_by_app.setdefault(iv.application_id, []).append(iv)
+
+    prev_ids = [iv.id for iv in all_ivs]
+    all_fb = (await db.execute(
+        select(InterviewFeedback).where(InterviewFeedback.interview_id.in_(prev_ids))
+    )).scalars().all() if prev_ids else []
+    fb_by: dict = {}
+    for f in all_fb:
+        fb_by.setdefault(f.interview_id, []).append(f)
+
+    result = {}
+    for app_id, current_round, interview_id in needs_prev:
+        prior = sorted(
+            [iv for iv in ivs_by_app.get(app_id, []) if iv.round_number < current_round],
+            key=lambda x: x.round_number,
+        )
+        result[interview_id] = [
+            {"round_number": iv.round_number, "interview_title": iv.title,
+             "feedback": [_feedback_to_dict(f) for f in fb_by.get(iv.id, [])]}
+            for iv in prior
+        ]
+    return result
+
+
+async def _check_panelist_conflicts(
+    db: AsyncSession,
+    panelist_ids: list[uuid.UUID],
+    scheduled_at,
+    duration_mins: int,
+    exclude_interview_id: Optional[uuid.UUID] = None,
+) -> list[str]:
+    """Return names of panelists who already have an overlapping scheduled interview."""
+    from app.models.user import User
+
+    if not panelist_ids:
+        return []
+
+    new_end = scheduled_at + timedelta(minutes=duration_mins or 60)
+    stmt = (
+        select(User.full_name)
+        .join(InterviewPanelist, InterviewPanelist.user_id == User.id)
+        .join(Interview, Interview.id == InterviewPanelist.interview_id)
+        .where(
+            InterviewPanelist.user_id.in_(panelist_ids),
+            Interview.status.in_(["scheduled", "rescheduled"]),
+            Interview.scheduled_at < new_end,
+            Interview.scheduled_at + func.make_interval(
+                0, 0, 0, 0, 0, func.coalesce(Interview.duration_mins, 60)
+            ) > scheduled_at,
+        )
+    )
+    if exclude_interview_id:
+        stmt = stmt.where(Interview.id != exclude_interview_id)
+
+    rows = (await db.execute(stmt)).all()
+    return [row[0] for row in rows]
 
 
 def _feedback_to_dict(f: InterviewFeedback) -> dict:
@@ -61,6 +166,7 @@ def _interview_to_response(
     candidate_email: Optional[str] = None,
     job_id: Optional[uuid.UUID] = None,
     self_feedback: Optional[CandidateInterviewSelfFeedback] = None,
+    previous_rounds_feedback: Optional[list] = None,
 ) -> InterviewResponse:
     d = {
         "id": interview.id,
@@ -83,6 +189,7 @@ def _interview_to_response(
         "candidate_email": candidate_email,
         "job_id": job_id,
         "candidate_self_feedback": _self_feedback_to_dict(self_feedback) if self_feedback else None,
+        "previous_rounds_feedback": previous_rounds_feedback or [],
     }
     return InterviewResponse.model_validate(d)
 
@@ -92,6 +199,14 @@ async def create_interview(
     data: InterviewCreate,
     created_by: uuid.UUID,
 ) -> InterviewResponse:
+    if data.panelists:
+        conflicts = await _check_panelist_conflicts(
+            db, [p.user_id for p in data.panelists], data.scheduled_at, data.duration_mins
+        )
+        if conflicts:
+            names = ", ".join(conflicts)
+            raise HTTPException(409, f"Scheduling conflict: {names} already has an interview at this time slot")
+
     interview = Interview(
         application_id=data.application_id,
         round_number=data.round_number,
@@ -249,6 +364,8 @@ async def list_my_interviews(
     for f in all_feedback:
         feedback_by.setdefault(f.interview_id, []).append(f)
 
+    prev_rounds_by = await _batch_previous_rounds(db, rows)
+
     items = []
     for interview, full_name, email, job_id in rows:
         items.append(_interview_to_response(
@@ -258,6 +375,7 @@ async def list_my_interviews(
             candidate_name=full_name,
             candidate_email=email,
             job_id=job_id,
+            previous_rounds_feedback=prev_rounds_by.get(interview.id, []),
         ))
 
     return {"items": items, "total": total, "page": page, "limit": limit, "pages": max(1, -(-total // limit))}
@@ -329,6 +447,8 @@ async def list_interviews(
         feedback_by.setdefault(f.interview_id, []).append(f)
     self_feedback_by = {sf.interview_id: sf for sf in all_self_feedback}
 
+    prev_rounds_by = await _batch_previous_rounds(db, rows)
+
     items = []
     for interview, full_name, email, job_id in rows:
         items.append(_interview_to_response(
@@ -339,6 +459,7 @@ async def list_interviews(
             candidate_email=email,
             job_id=job_id,
             self_feedback=self_feedback_by.get(interview.id),
+            previous_rounds_feedback=prev_rounds_by.get(interview.id, []),
         ))
 
     return {"items": items, "total": total, "page": page, "limit": limit, "pages": max(1, -(-total // limit))}
@@ -367,7 +488,11 @@ async def get_interview(db: AsyncSession, interview_id: uuid.UUID) -> InterviewR
         select(InterviewFeedback).where(InterviewFeedback.interview_id == interview_id)
     )).scalars().all()
 
-    return _interview_to_response(interview, list(panelists), list(feedback), full_name, email, job_id)
+    prev_rounds = await _get_previous_rounds(db, interview.application_id, interview.round_number)
+    return _interview_to_response(
+        interview, list(panelists), list(feedback), full_name, email, job_id,
+        previous_rounds_feedback=prev_rounds,
+    )
 
 
 async def update_interview(
@@ -381,6 +506,20 @@ async def update_interview(
 
     update_data = data.model_dump(exclude_unset=True)
     old_scheduled_at = interview.scheduled_at
+
+    # Check panelist conflicts when time changes
+    new_scheduled_at = update_data.get("scheduled_at", interview.scheduled_at)
+    new_duration = update_data.get("duration_mins", interview.duration_mins)
+    if "scheduled_at" in update_data and update_data["scheduled_at"] != old_scheduled_at:
+        panelist_ids = [p.user_id for p in (await db.execute(
+            select(InterviewPanelist).where(InterviewPanelist.interview_id == interview_id)
+        )).scalars().all()]
+        conflicts = await _check_panelist_conflicts(
+            db, panelist_ids, new_scheduled_at, new_duration, exclude_interview_id=interview_id
+        )
+        if conflicts:
+            names = ", ".join(conflicts)
+            raise HTTPException(409, f"Scheduling conflict: {names} already has an interview at this time slot")
 
     for field, val in update_data.items():
         setattr(interview, field, val)

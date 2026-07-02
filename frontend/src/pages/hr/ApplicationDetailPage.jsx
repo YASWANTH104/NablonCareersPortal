@@ -70,6 +70,7 @@ const RECOMMENDATION_LABELS = {
 // ── Schedule Interview Dialog ─────────────────────────────────────────────────
 
 const scheduleSchema = z.object({
+  round_number: z.coerce.number().min(1),
   title: z.string().optional(),
   interview_type: z.string().min(1, 'Required'),
   scheduled_at: z.string().min(1, 'Required'),
@@ -79,7 +80,7 @@ const scheduleSchema = z.object({
   notes: z.string().optional(),
 });
 
-function ScheduleInterviewDialog({ applicationId, onClose, onSuccess }) {
+function ScheduleInterviewDialog({ applicationId, defaultRoundNumber = 1, onClose, onSuccess }) {
   const [panelists, setPanelists] = useState([]);
   const [panelistSearch, setPanelistSearch] = useState('');
   const [panelistError, setPanelistError] = useState(false);
@@ -95,7 +96,7 @@ function ScheduleInterviewDialog({ applicationId, onClose, onSuccess }) {
     formState: { errors, isSubmitting },
   } = useForm({
     resolver: zodResolver(scheduleSchema),
-    defaultValues: { duration_mins: 60, interview_type: 'video' },
+    defaultValues: { round_number: defaultRoundNumber, duration_mins: 60, interview_type: 'video' },
   });
 
   const createMutation = useMutation({
@@ -116,6 +117,7 @@ function ScheduleInterviewDialog({ applicationId, onClose, onSuccess }) {
     createMutation.mutate({
       application_id: applicationId,
       ...values,
+      round_number: Number(values.round_number),
       scheduled_at: new Date(values.scheduled_at).toISOString(),
       duration_mins: Number(values.duration_mins),
       meeting_link: values.meeting_link || undefined,
@@ -150,7 +152,16 @@ function ScheduleInterviewDialog({ applicationId, onClose, onSuccess }) {
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
         <h3 className="font-display font-bold text-gray-900 mb-5">Schedule Interview</h3>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Round #</label>
+              <input
+                {...register('round_number')}
+                type="number"
+                min="1"
+                className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              />
+            </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Title <span className="text-gray-400 font-normal">(optional)</span>
@@ -2111,6 +2122,9 @@ export default function ApplicationDetailPage() {
       {showScheduleDialog && (
         <ScheduleInterviewDialog
           applicationId={id}
+          defaultRoundNumber={
+            (interviewsData?.items ?? []).reduce((max, iv) => Math.max(max, iv.round_number), 0) + 1
+          }
           onClose={() => setShowScheduleDialog(false)}
           onSuccess={() => refetchInterviews()}
         />

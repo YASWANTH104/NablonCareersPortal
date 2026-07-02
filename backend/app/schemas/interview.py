@@ -23,6 +23,7 @@ class InterviewCreate(BaseModel):
 
 
 class InterviewUpdate(BaseModel):
+    round_number: Optional[int] = None
     title: Optional[str] = None
     interview_type: Optional[str] = None
     scheduled_at: Optional[datetime] = None
@@ -72,6 +73,12 @@ class InterviewFeedbackResponse(BaseModel):
     created_at: datetime
 
 
+class PreviousRoundFeedbackEntry(BaseModel):
+    round_number: int
+    interview_title: Optional[str] = None
+    feedback: list[InterviewFeedbackResponse]
+
+
 class InterviewResponse(BaseModel):
     model_config = {"from_attributes": True}
 
@@ -96,6 +103,7 @@ class InterviewResponse(BaseModel):
     candidate_email: Optional[str] = None
     job_id: Optional[uuid.UUID] = None
     candidate_self_feedback: Optional["CandidateSelfFeedbackResponse"] = None
+    previous_rounds_feedback: list[PreviousRoundFeedbackEntry] = []
 
 
 class InterviewListResponse(BaseModel):

@@ -18,7 +18,7 @@ celery_app.conf.update(
     beat_schedule={
         "auto-complete-past-interviews": {
             "task": "auto_complete_past_interviews",
-            "schedule": 900,  # every 15 minutes
+            "schedule": 300,  # every 5 minutes
         },
         "send-feedback-reminders": {
             "task": "send_feedback_reminders",
