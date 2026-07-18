@@ -73,6 +73,8 @@ class OfferLetterResponse(BaseModel):
     sent_at: Optional[datetime] = None
     accepted_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
+    director_signature: Optional[str] = None
+    director_approved_at: Optional[datetime] = None
     candidate_signature: Optional[str] = None
     signed_at: Optional[datetime] = None
     created_by: Optional[uuid.UUID] = None
@@ -97,6 +99,25 @@ class OfferLetterListResponse(BaseModel):
 class OfferRespondRequest(BaseModel):
     decision: str  # accepted | rejected
     candidate_signature: Optional[str] = None  # base64 data-URL
+
+
+class DirectorOfferResponse(BaseModel):
+    """Offer summary shown to the director on the public approval link — no internal tokens exposed."""
+    designation: str
+    department_name: Optional[str] = None
+    candidate_name: Optional[str] = None
+    job_title: Optional[str] = None
+    joining_date: Optional[date] = None
+    salary_ctc: Optional[float] = None
+    salary_currency: str
+    work_location: Optional[str] = None
+    status: str
+    body_html: Optional[str] = None
+
+
+class DirectorDecisionRequest(BaseModel):
+    decision: str  # approved | rejected
+    signature: Optional[str] = None  # base64 data-URL, drawn or uploaded
 
 
 class CandidateOfferResponse(BaseModel):

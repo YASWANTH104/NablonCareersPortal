@@ -4,9 +4,10 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import toast from 'react-hot-toast';
-import { Eye, EyeOff, Loader2, CheckCircle } from 'lucide-react';
+import { Eye, EyeOff, Loader2, CheckCircle, Mail, Lock, User } from 'lucide-react';
 
 import { authApi } from '@/api/auth';
+import AuthLayout, { AuthInput, AuthSubmitButton } from '@/components/layout/AuthLayout';
 
 const schema = z.object({
   full_name: z.string().min(2, 'Full name must be at least 2 characters'),
@@ -49,123 +50,106 @@ export default function RegisterPage() {
 
   if (success) {
     return (
-      <div className="min-h-screen bg-surface-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-md bg-white rounded-2xl shadow-card p-8 text-center">
-          <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-4" />
-          <h2 className="text-xl font-display font-bold text-gray-900 mb-2">Check your email</h2>
-          <p className="text-sm text-gray-500 mb-6">
-            We've sent a verification link to your email address. Click the link to activate your account.
+      <AuthLayout
+        title="Check your email"
+        subtitle="One more step to activate your account"
+      >
+        <div className="bg-white border border-surface-200 rounded-2xl shadow-card p-8 text-center">
+          <div className="w-14 h-14 rounded-2xl bg-green-50 border border-green-100 flex items-center justify-center mx-auto mb-4">
+            <CheckCircle className="w-7 h-7 text-green-500" />
+          </div>
+          <p className="text-sm text-gray-500 mb-6 leading-relaxed">
+            We've sent a verification link to your email address. Click the link to activate your
+            account, then sign in.
           </p>
           <button
             onClick={() => navigate('/login', { state: location.state })}
-            className="px-6 py-2.5 bg-brand-500 text-white rounded-lg text-sm font-medium hover:bg-brand-600 transition-colors"
+            className="w-full py-3 bg-brand-500 hover:bg-brand-400 text-white rounded-xl text-sm font-semibold shadow-[0_10px_30px_-10px_rgba(79,94,255,0.6)] transition-all"
           >
             Go to Sign in
           </button>
         </div>
-      </div>
+      </AuthLayout>
     );
   }
 
   return (
-    <div className="min-h-screen bg-surface-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        <div className="bg-white rounded-2xl shadow-card p-8">
-          <div className="flex items-center gap-3 mb-8">
-            <img src="/logo.jpg" alt="Nablon AI" className="h-10 w-auto rounded-lg object-contain" />
-            <div>
-              <p className="font-display font-bold text-gray-900 leading-tight">Nablon AI</p>
-              <p className="text-xs text-gray-500">Careers Portal</p>
-            </div>
-          </div>
-
-          <h1 className="text-2xl font-display font-bold text-gray-900 mb-1">Create account</h1>
-          <p className="text-sm text-gray-500 mb-6">Apply for roles at Nablon AI</p>
-
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Full name</label>
-              <input
-                {...register('full_name')}
-                type="text"
-                placeholder="Jane Smith"
-                autoComplete="name"
-                className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-              />
-              {errors.full_name && (
-                <p className="mt-1 text-xs text-red-500">{errors.full_name.message}</p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Email address</label>
-              <input
-                {...register('email')}
-                type="email"
-                placeholder="you@example.com"
-                autoComplete="email"
-                className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-              />
-              {errors.email && (
-                <p className="mt-1 text-xs text-red-500">{errors.email.message}</p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Password</label>
-              <div className="relative">
-                <input
-                  {...register('password')}
-                  type={showPassword ? 'text' : 'password'}
-                  placeholder="Min 8 chars, 1 uppercase, 1 number"
-                  autoComplete="new-password"
-                  className="w-full px-3 py-2.5 pr-10 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-              {errors.password && (
-                <p className="mt-1 text-xs text-red-500">{errors.password.message}</p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Confirm password</label>
-              <input
-                {...register('confirmPassword')}
-                type={showPassword ? 'text' : 'password'}
-                placeholder="••••••••"
-                autoComplete="new-password"
-                className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-              />
-              {errors.confirmPassword && (
-                <p className="mt-1 text-xs text-red-500">{errors.confirmPassword.message}</p>
-              )}
-            </div>
-
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="w-full flex items-center justify-center gap-2 py-2.5 bg-brand-500 text-white font-medium rounded-lg text-sm hover:bg-brand-600 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-            >
-              {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
-              Create account
-            </button>
-          </form>
-
-          <p className="mt-6 text-center text-sm text-gray-500">
-            Already have an account?{' '}
-            <Link to="/login" className="font-medium text-brand-600 hover:text-brand-700">
-              Sign in
-            </Link>
-          </p>
+    <AuthLayout
+      title="Create your account"
+      subtitle="Apply for roles and track your applications at Nablon AI"
+      footer={
+        <>
+          Already have an account?{' '}
+          <Link to="/login" className="font-semibold text-brand-600 hover:text-brand-700">
+            Sign in
+          </Link>
+        </>
+      }
+    >
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1.5">Full name</label>
+          <AuthInput
+            {...register('full_name')}
+            icon={User}
+            type="text"
+            placeholder="Jane Smith"
+            autoComplete="name"
+            error={errors.full_name?.message}
+          />
         </div>
-      </div>
-    </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1.5">Email address</label>
+          <AuthInput
+            {...register('email')}
+            icon={Mail}
+            type="email"
+            placeholder="you@example.com"
+            autoComplete="email"
+            error={errors.email?.message}
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1.5">Password</label>
+          <AuthInput
+            {...register('password')}
+            icon={Lock}
+            type={showPassword ? 'text' : 'password'}
+            placeholder="Min 8 chars, 1 uppercase, 1 number"
+            autoComplete="new-password"
+            error={errors.password?.message}
+            rightSlot={
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            }
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1.5">Confirm password</label>
+          <AuthInput
+            {...register('confirmPassword')}
+            icon={Lock}
+            type={showPassword ? 'text' : 'password'}
+            placeholder="••••••••"
+            autoComplete="new-password"
+            error={errors.confirmPassword?.message}
+          />
+        </div>
+
+        <AuthSubmitButton loading={isSubmitting}>
+          {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+          Create account
+        </AuthSubmitButton>
+      </form>
+    </AuthLayout>
   );
 }

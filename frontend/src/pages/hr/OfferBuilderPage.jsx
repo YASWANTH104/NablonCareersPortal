@@ -1,20 +1,38 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { ArrowLeft, Eye, Save, Send, RotateCcw, CheckCircle, XCircle, Clock, AlertCircle, ExternalLink, Copy } from 'lucide-react';
+import {
+  ArrowLeft, Eye, Save, Send, RotateCcw, XCircle,
+  AlertTriangle, ExternalLink, Copy, FileText, Check, Link2,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import { offersApi } from '@/api/offers';
 
 const STATUS_CONFIG = {
-  draft:    { icon: Clock,        label: 'Draft',    color: 'text-gray-500 bg-gray-100' },
-  sent:     { icon: Send,         label: 'Sent',     color: 'text-blue-600 bg-blue-100' },
-  accepted: { icon: CheckCircle,  label: 'Accepted', color: 'text-green-600 bg-green-100' },
-  rejected: { icon: XCircle,      label: 'Rejected', color: 'text-red-600 bg-red-100' },
-  revoked:  { icon: RotateCcw,    label: 'Revoked',  color: 'text-orange-600 bg-orange-100' },
-  expired:  { icon: AlertCircle,  label: 'Expired',  color: 'text-yellow-600 bg-yellow-100' },
+  draft:             { label: 'Draft',                      color: 'text-gray-600 bg-gray-100',   dot: 'bg-gray-400' },
+  pending_director:  { label: 'Awaiting Director Approval',  color: 'text-amber-700 bg-amber-50',  dot: 'bg-amber-400' },
+  director_rejected: { label: 'Rejected by Director',        color: 'text-red-700 bg-red-50',      dot: 'bg-red-500' },
+  sent:              { label: 'Awaiting Candidate Signature',color: 'text-blue-700 bg-blue-50',    dot: 'bg-blue-500' },
+  accepted:          { label: 'Accepted',                    color: 'text-green-700 bg-green-50',  dot: 'bg-green-500' },
+  rejected:          { label: 'Declined by Candidate',       color: 'text-red-700 bg-red-50',      dot: 'bg-red-500' },
+  revoked:           { label: 'Revoked',                     color: 'text-orange-700 bg-orange-50',dot: 'bg-orange-400' },
+  expired:           { label: 'Expired',                     color: 'text-yellow-700 bg-yellow-50',dot: 'bg-yellow-500' },
+};
+
+const BANNERS = {
+  director_rejected: { tone: 'red',    text: 'The director rejected this offer. Revise the details below and resend it for approval.' },
+  rejected:           { tone: 'red',    text: 'The candidate declined this offer.' },
+  revoked:            { tone: 'orange', text: 'This offer was revoked and is no longer active.' },
+  expired:            { tone: 'yellow', text: 'This offer expired before it was signed.' },
+};
+
+const BANNER_STYLES = {
+  red:    'bg-red-50 border-red-200 text-red-700',
+  orange: 'bg-orange-50 border-orange-200 text-orange-700',
+  yellow: 'bg-yellow-50 border-yellow-200 text-yellow-700',
 };
 
 const schema = z.object({
@@ -47,6 +65,160 @@ function renderTemplate(html, values) {
     result = result.replaceAll(`{{${k}}}`, v);
   });
   return result;
+}
+
+function formatDate(value) {
+  if (!value) return null;
+  return new Date(value).toLocaleDateString('en-IN', { dateStyle: 'long' });
+}
+
+function formatMoney(amount, currency) {
+  if (amount === null || amount === undefined || amount === '') return '—';
+  return `${currency ?? 'INR'} ${Number(amount).toLocaleString('en-IN')}`;
+}
+
+// ── Approval pipeline stepper ─────────────────────────────────────────────────
+
+function deriveSteps(offer) {
+  const status = offer?.status ?? 'draft';
+
+  let directorState = 'pending';
+  if (offer?.director_approved_at) directorState = 'complete';
+  else if (status === 'pending_director') directorState = 'current';
+  else if (status === 'director_rejected') directorState = 'error';
+  else if (status === 'revoked') directorState = 'error';
+
+  let candidateState = 'pending';
+  if (status === 'accepted') candidateState = 'complete';
+  else if (status === 'rejected') candidateState = 'error';
+  else if (status === 'expired') candidateState = 'error';
+  else if (status === 'sent') candidateState = 'current';
+  else if (status === 'revoked' && offer?.sent_at) candidateState = 'error';
+
+  return [
+    {
+      key: 'director',
+      title: 'Director Approval',
+      state: directorState,
+      complete: {
+        caption: offer?.director_approved_at ? `Approved ${formatDate(offer.director_approved_at)}` : 'Approved',
+        signature: offer?.director_signature,
+      },
+      current: { caption: 'Sent to director for review' },
+      error: {
+        caption: status === 'director_rejected' ? 'Rejected by director' : 'Revoked before approval',
+      },
+      pending: { caption: 'Not yet sent' },
+    },
+    {
+      key: 'candidate',
+      title: 'Candidate Signature',
+      state: candidateState,
+      complete: {
+        caption: offer?.signed_at ? `Signed ${formatDate(offer.signed_at)}` : 'Signed',
+        signature: offer?.candidate_signature,
+      },
+      current: { caption: 'Awaiting candidate signature' },
+      error: {
+        caption:
+          status === 'rejected' ? `Declined${offer?.accepted_at ? ' ' + formatDate(offer.accepted_at) : ''}`
+          : status === 'expired' ? 'Offer expired unsigned'
+          : 'Revoked',
+      },
+      pending: { caption: 'Not yet sent' },
+    },
+  ];
+}
+
+function StepIcon({ state }) {
+  const base = 'w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 border-2 z-10 bg-white';
+  if (state === 'complete') return <div className={`${base} bg-green-500 border-green-500 text-white`}><Check className="w-4 h-4" /></div>;
+  if (state === 'error') return <div className={`${base} border-red-400 text-red-500`}><XCircle className="w-4 h-4" /></div>;
+  if (state === 'current') return <div className={`${base} border-brand-500`}><span className="w-2.5 h-2.5 rounded-full bg-brand-500 animate-pulse" /></div>;
+  return <div className={`${base} border-surface-300 text-surface-300`}><span className="w-2 h-2 rounded-full bg-surface-300" /></div>;
+}
+
+function ApprovalStepper({ offer, respondLink, onCopyLink }) {
+  const steps = deriveSteps(offer);
+  return (
+    <div className="bg-white border border-surface-200 rounded-2xl p-5">
+      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-4">Approval Pipeline</p>
+      <div>
+        {steps.map((step, idx) => {
+          const detail = step[step.state] ?? step.pending;
+          const isLast = idx === steps.length - 1;
+          return (
+            <div key={step.key} className="flex gap-3">
+              <div className="flex flex-col items-center">
+                <StepIcon state={step.state} />
+                {!isLast && (
+                  <div className={`w-0.5 flex-1 min-h-[28px] ${step.state === 'complete' ? 'bg-green-300' : 'bg-surface-200'}`} />
+                )}
+              </div>
+              <div className={`pb-6 ${isLast ? 'pb-1' : ''} flex-1 min-w-0`}>
+                <p className={`text-sm font-semibold ${step.state === 'pending' ? 'text-gray-400' : 'text-gray-900'}`}>
+                  {step.title}
+                </p>
+                <p className={`text-xs mt-0.5 ${step.state === 'error' ? 'text-red-500' : 'text-gray-500'}`}>
+                  {detail.caption}
+                </p>
+
+                {detail.signature && (
+                  <img
+                    src={detail.signature}
+                    alt={`${step.title} signature`}
+                    className="mt-2 max-h-14 border border-surface-200 rounded-lg bg-white p-1.5"
+                  />
+                )}
+
+                {step.key === 'candidate' && step.state === 'current' && respondLink && (
+                  <div className="mt-2 flex items-center gap-1.5">
+                    <Link2 className="w-3.5 h-3.5 text-gray-300 flex-shrink-0" />
+                    <code className="text-xs bg-surface-50 border border-surface-200 rounded px-2 py-0.5 text-gray-500 truncate">
+                      {respondLink}
+                    </code>
+                    <button
+                      onClick={onCopyLink}
+                      className="p-1 hover:bg-surface-100 rounded flex-shrink-0"
+                      title="Copy candidate link"
+                    >
+                      <Copy className="w-3.5 h-3.5 text-gray-400" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Read-only summary (offer no longer editable) ──────────────────────────────
+
+function SummaryRow({ label, value }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 py-2.5 border-b border-surface-100 last:border-0">
+      <span className="text-xs text-gray-400">{label}</span>
+      <span className="text-sm font-medium text-gray-900 text-right">{value ?? '—'}</span>
+    </div>
+  );
+}
+
+function OfferSummary({ offer }) {
+  return (
+    <div className="bg-white border border-surface-200 rounded-2xl p-5">
+      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Offer Details</p>
+      <SummaryRow label="Designation" value={offer.designation} />
+      <SummaryRow label="Department" value={offer.department_name} />
+      <SummaryRow label="CTC" value={formatMoney(offer.salary_ctc, offer.salary_currency)} />
+      <SummaryRow label="Joining Date" value={offer.joining_date} />
+      <SummaryRow label="Work Location" value={offer.work_location} />
+      <SummaryRow label="Probation" value={offer.probation_months != null ? `${offer.probation_months} months` : null} />
+      <SummaryRow label="Offer Expiry" value={offer.expires_at ? formatDate(offer.expires_at) : null} />
+    </div>
+  );
 }
 
 export default function OfferBuilderPage() {
@@ -151,7 +323,7 @@ export default function OfferBuilderPage() {
   const sendMut = useMutation({
     mutationFn: () => offersApi.send(offerId),
     onSuccess: () => {
-      toast.success('Offer sent to candidate');
+      toast.success('Offer sent for director approval');
       queryClient.invalidateQueries({ queryKey: ['offer', offerId] });
       queryClient.invalidateQueries({ queryKey: ['offers'] });
       setShowConfirmSend(false);
@@ -196,13 +368,20 @@ export default function OfferBuilderPage() {
     setShowConfirmSend(true);
   }
 
-  const isReadOnly = offer && offer.status !== 'draft';
+  const isEditable = !offer || ['draft', 'director_rejected'].includes(offer.status);
   const status = offer?.status ?? 'draft';
-  const StatusIcon = STATUS_CONFIG[status]?.icon ?? Clock;
+  const statusCfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.draft;
+  const banner = BANNERS[status];
 
   const respondLink = offer?.candidate_token
     ? `${window.location.origin}/offers/respond/${offer.candidate_token}`
     : null;
+
+  function copyRespondLink() {
+    if (!respondLink) return;
+    navigator.clipboard.writeText(respondLink);
+    toast.success('Link copied');
+  }
 
   if (offerLoading) {
     return (
@@ -215,38 +394,39 @@ export default function OfferBuilderPage() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6 flex-shrink-0">
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between mb-5 flex-shrink-0">
+        <div className="flex items-center gap-3 min-w-0">
           <button
             onClick={() => {
               const appId = isNew ? applicationId : offer?.application_id;
               if (appId) navigate(`/hr/applicants/${appId}?tab=offer`);
               else navigate(-1);
             }}
-            className="p-2 hover:bg-surface-100 rounded-lg transition-colors"
+            className="p-2 hover:bg-surface-100 rounded-lg transition-colors flex-shrink-0"
           >
             <ArrowLeft className="w-5 h-5 text-gray-500" />
           </button>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="font-display text-xl font-bold text-gray-900">
-                {isNew ? 'New Offer Letter' : `Offer — ${offer?.candidate_name ?? '...'}`}
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Offer Letter</p>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h1 className="font-display text-xl font-bold text-gray-900 truncate">
+                {isNew ? 'New Offer' : offer?.candidate_name ?? '...'}
               </h1>
               {!isNew && (
-                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_CONFIG[status]?.color}`}>
-                  <StatusIcon className="w-3 h-3" />
-                  {STATUS_CONFIG[status]?.label}
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${statusCfg.color}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${statusCfg.dot}`} />
+                  {statusCfg.label}
                 </span>
               )}
             </div>
             {offer?.job_title && (
-              <p className="text-sm text-gray-500 mt-0.5">{offer.job_title}</p>
+              <p className="text-sm text-gray-500">{offer.job_title}</p>
             )}
           </div>
         </div>
 
         {/* Mobile panel toggle */}
-        <div className="flex gap-1 bg-surface-100 rounded-xl p-1 lg:hidden">
+        <div className="flex gap-1 bg-surface-100 rounded-xl p-1 lg:hidden flex-shrink-0">
           {['form', 'preview'].map((p) => (
             <button
               key={p}
@@ -261,222 +441,195 @@ export default function OfferBuilderPage() {
         </div>
       </div>
 
-      {/* Candidate info banner (edit mode) */}
-      {offer && (
-        <div className="bg-surface-50 border border-surface-200 rounded-xl px-4 py-3 mb-5 flex items-center gap-4 flex-wrap flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-brand-100 flex items-center justify-center text-brand-600 text-sm font-bold">
-              {offer.candidate_name?.[0] ?? '?'}
-            </div>
-            <div>
-              <p className="text-sm font-medium text-gray-900">{offer.candidate_name}</p>
-              <p className="text-xs text-gray-400">{offer.candidate_email}</p>
-            </div>
-          </div>
-          {respondLink && (
-            <div className="flex items-center gap-2 ml-auto">
-              <span className="text-xs text-gray-400">Candidate link:</span>
-              <code className="text-xs bg-white border border-surface-200 rounded px-2 py-0.5 text-gray-600 max-w-xs truncate">
-                {respondLink}
-              </code>
-              <button
-                onClick={() => { navigator.clipboard.writeText(respondLink); toast.success('Link copied'); }}
-                className="p-1 hover:bg-surface-100 rounded"
-              >
-                <Copy className="w-3.5 h-3.5 text-gray-400" />
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Signature display (accepted) */}
-      {offer?.candidate_signature && (
-        <div className="bg-green-50 border border-green-100 rounded-xl p-4 mb-5 flex-shrink-0">
-          <p className="text-sm font-medium text-green-700 mb-2">Candidate Signature</p>
-          <img
-            src={offer.candidate_signature}
-            alt="Candidate signature"
-            className="max-h-20 bg-white border border-green-200 rounded p-2"
-          />
-          {offer.signed_at && (
-            <p className="text-xs text-green-500 mt-1">
-              Signed on {new Date(offer.signed_at).toLocaleDateString('en-IN', { dateStyle: 'long' })}
-            </p>
-          )}
+      {/* Status banner (terminal negative states) */}
+      {banner && (
+        <div className={`flex items-start gap-2.5 rounded-xl border px-4 py-3 mb-5 flex-shrink-0 ${BANNER_STYLES[banner.tone]}`}>
+          <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+          <p className="text-sm">{banner.text}</p>
         </div>
       )}
 
       {/* Split layout */}
       <div className="flex gap-5 flex-1 min-h-0">
-        {/* Left — Form */}
-        <div className={`flex-shrink-0 w-80 overflow-y-auto ${activePanel === 'preview' ? 'hidden lg:block' : ''}`}>
-          <form onSubmit={handleSubmit(onSave)} className="space-y-4">
-            {/* Template picker */}
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Template</label>
-              <select
-                {...register('template_id')}
-                disabled={isReadOnly}
-                className="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 disabled:bg-surface-50 disabled:text-gray-400"
-              >
-                <option value="">No template</option>
-                {templates.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}{t.is_default ? ' (default)' : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Designation */}
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Designation *</label>
-              <input
-                {...register('designation')}
-                disabled={isReadOnly}
-                className="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 disabled:bg-surface-50 disabled:text-gray-400"
-                placeholder="e.g. Senior Engineer"
-              />
-              {errors.designation && <p className="text-red-500 text-xs mt-1">{errors.designation.message}</p>}
-            </div>
-
-            {/* Salary */}
-            <div className="flex gap-2">
-              <div className="flex-1">
-                <label className="block text-xs font-medium text-gray-500 mb-1">CTC</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  {...register('salary_ctc')}
-                  disabled={isReadOnly}
-                  className="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 disabled:bg-surface-50 disabled:text-gray-400"
-                  placeholder="1200000"
-                />
+        {/* Left column */}
+        <div className={`flex-shrink-0 w-96 overflow-y-auto space-y-5 ${activePanel === 'preview' ? 'hidden lg:block' : ''}`}>
+          {/* Candidate card */}
+          {offer && (
+            <div className="bg-white border border-surface-200 rounded-2xl p-4 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-brand-100 flex items-center justify-center text-brand-600 text-sm font-bold flex-shrink-0">
+                {offer.candidate_name?.[0] ?? '?'}
               </div>
-              <div className="w-20">
-                <label className="block text-xs font-medium text-gray-500 mb-1">Currency</label>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-gray-900 truncate">{offer.candidate_name}</p>
+                <p className="text-xs text-gray-400 truncate">{offer.candidate_email}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate(`/hr/applicants/${offer.application_id}?tab=offer`)}
+                className="p-1.5 hover:bg-surface-100 rounded-lg flex-shrink-0"
+                title="View application"
+              >
+                <ExternalLink className="w-4 h-4 text-gray-400" />
+              </button>
+            </div>
+          )}
+
+          {/* Approval pipeline */}
+          {offer && (
+            <ApprovalStepper offer={offer} respondLink={respondLink} onCopyLink={copyRespondLink} />
+          )}
+
+          {/* Details: editable form or read-only summary */}
+          {isEditable ? (
+            <form onSubmit={handleSubmit(onSave)} className="bg-white border border-surface-200 rounded-2xl p-5 space-y-4">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Offer Details</p>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Template</label>
                 <select
-                  {...register('salary_currency')}
-                  disabled={isReadOnly}
-                  className="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 disabled:bg-surface-50 disabled:text-gray-400"
+                  {...register('template_id')}
+                  className="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300"
                 >
-                  {['INR', 'USD', 'EUR', 'GBP', 'SGD', 'AED'].map((c) => (
-                    <option key={c} value={c}>{c}</option>
+                  <option value="">No template</option>
+                  {templates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}{t.is_default ? ' (default)' : ''}
+                    </option>
                   ))}
                 </select>
               </div>
-            </div>
 
-            {/* Joining date */}
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Joining Date</label>
-              <input
-                type="date"
-                {...register('joining_date')}
-                disabled={isReadOnly}
-                className="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 disabled:bg-surface-50 disabled:text-gray-400"
-              />
-            </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Designation *</label>
+                <input
+                  {...register('designation')}
+                  className="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300"
+                  placeholder="e.g. Senior Engineer"
+                />
+                {errors.designation && <p className="text-red-500 text-xs mt-1">{errors.designation.message}</p>}
+              </div>
 
-            {/* Work location */}
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Work Location</label>
-              <input
-                {...register('work_location')}
-                disabled={isReadOnly}
-                className="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 disabled:bg-surface-50 disabled:text-gray-400"
-                placeholder="e.g. Bangalore / Remote"
-              />
-            </div>
-
-            {/* Probation */}
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Probation (months)</label>
-              <input
-                type="number"
-                min={0}
-                max={12}
-                {...register('probation_months')}
-                disabled={isReadOnly}
-                className="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 disabled:bg-surface-50 disabled:text-gray-400"
-              />
-            </div>
-
-            {/* Expiry */}
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Offer Expiry Date</label>
-              <input
-                type="date"
-                {...register('expires_at')}
-                disabled={isReadOnly}
-                className="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 disabled:bg-surface-50 disabled:text-gray-400"
-              />
-            </div>
-
-            {/* Actions */}
-            <div className="pt-3 space-y-2 border-t border-surface-100">
-              {status === 'draft' && (
-                <>
-                  <button
-                    type="submit"
-                    disabled={createMut.isPending || updateMut.isPending}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 border border-surface-200 text-sm font-medium text-gray-700 rounded-xl hover:bg-surface-50 transition-colors disabled:opacity-50"
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-gray-500 mb-1">CTC</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    {...register('salary_ctc')}
+                    className="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300"
+                    placeholder="1200000"
+                  />
+                </div>
+                <div className="w-20">
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Currency</label>
+                  <select
+                    {...register('salary_currency')}
+                    className="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300"
                   >
-                    <Save className="w-4 h-4" />
-                    {createMut.isPending || updateMut.isPending ? 'Saving...' : 'Save Draft'}
-                  </button>
-                  {!isNew && (
-                    <button
-                      type="button"
-                      onClick={handleSendClick}
-                      disabled={sendMut.isPending}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-brand-500 text-white text-sm font-semibold rounded-xl hover:bg-brand-600 transition-colors disabled:opacity-50"
-                    >
-                      <Send className="w-4 h-4" /> Send to Candidate
-                    </button>
-                  )}
-                </>
-              )}
+                    {['INR', 'USD', 'EUR', 'GBP', 'SGD', 'AED'].map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
 
-              {status === 'sent' && (
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Joining Date</label>
+                <input
+                  type="date"
+                  {...register('joining_date')}
+                  className="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Work Location</label>
+                <input
+                  {...register('work_location')}
+                  className="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300"
+                  placeholder="e.g. Bangalore / Remote"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Probation (months)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={12}
+                  {...register('probation_months')}
+                  className="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Offer Expiry Date</label>
+                <input
+                  type="date"
+                  {...register('expires_at')}
+                  className="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300"
+                />
+              </div>
+
+              <div className="pt-2 space-y-2 border-t border-surface-100">
+                <button
+                  type="submit"
+                  disabled={createMut.isPending || updateMut.isPending}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 border border-surface-200 text-sm font-medium text-gray-700 rounded-xl hover:bg-surface-50 transition-colors disabled:opacity-50"
+                >
+                  <Save className="w-4 h-4" />
+                  {createMut.isPending || updateMut.isPending ? 'Saving...' : 'Save Draft'}
+                </button>
+                {!isNew && (
+                  <button
+                    type="button"
+                    onClick={handleSendClick}
+                    disabled={sendMut.isPending}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-brand-500 text-white text-sm font-semibold rounded-xl hover:bg-brand-600 transition-colors disabled:opacity-50"
+                  >
+                    <Send className="w-4 h-4" />
+                    {status === 'director_rejected' ? 'Resend for Director Approval' : 'Send for Director Approval'}
+                  </button>
+                )}
+              </div>
+            </form>
+          ) : (
+            <>
+              <OfferSummary offer={offer} />
+              {['pending_director', 'sent'].includes(status) && (
                 <button
                   type="button"
                   onClick={() => setShowConfirmRevoke(true)}
                   disabled={revokeMut.isPending}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-red-50 text-red-600 text-sm font-medium rounded-xl hover:bg-red-100 transition-colors border border-red-200 disabled:opacity-50"
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-white text-red-600 text-sm font-medium rounded-xl hover:bg-red-50 transition-colors border border-red-200 disabled:opacity-50"
                 >
                   <RotateCcw className="w-4 h-4" /> Revoke Offer
                 </button>
               )}
-
-              {offer && (
-                <button
-                  type="button"
-                  onClick={() => navigate(`/hr/applicants/${offer.application_id}?tab=offer`)}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2 text-xs text-gray-400 hover:text-gray-600 transition-colors"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" /> View Application
-                </button>
-              )}
-            </div>
-          </form>
+            </>
+          )}
         </div>
 
         {/* Right — Live Preview */}
         <div className={`flex-1 min-w-0 ${activePanel === 'form' ? 'hidden lg:flex' : 'flex'} flex-col`}>
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2 text-sm text-gray-500">
-              <Eye className="w-4 h-4" />
+          <div className="flex items-center justify-between mb-3 flex-shrink-0">
+            <div className="flex items-center gap-2 text-sm font-medium text-gray-600">
+              <Eye className="w-4 h-4 text-gray-400" />
               <span>Live Preview</span>
             </div>
             <span className="text-xs text-gray-300">Variables are substituted in real-time</span>
           </div>
-          <div className="flex-1 bg-white border border-surface-200 rounded-2xl overflow-auto">
-            <div
-              className="p-6"
-              dangerouslySetInnerHTML={{ __html: previewHtml }}
-            />
+          <div className="flex-1 bg-surface-100 rounded-2xl overflow-auto p-6">
+            <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-sm border border-surface-200 min-h-full">
+              <div className="flex items-center gap-2 px-6 py-3 border-b border-surface-100">
+                <FileText className="w-4 h-4 text-gray-300" />
+                <span className="text-xs text-gray-400">Offer Letter</span>
+              </div>
+              <div
+                className="p-8"
+                dangerouslySetInnerHTML={{ __html: previewHtml }}
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -485,10 +638,13 @@ export default function OfferBuilderPage() {
       {showConfirmSend && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
           <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full">
-            <h3 className="font-display text-lg font-bold text-gray-900 mb-2">Send Offer to Candidate?</h3>
+            <div className="w-11 h-11 rounded-full bg-brand-50 flex items-center justify-center mb-4">
+              <Send className="w-5 h-5 text-brand-600" />
+            </div>
+            <h3 className="font-display text-lg font-bold text-gray-900 mb-2">Send Offer for Director Approval?</h3>
             <p className="text-sm text-gray-500 mb-5">
-              This will mark the offer as <strong>Sent</strong> and generate a secure response link for{' '}
-              <strong>{offer?.candidate_name}</strong>. You can revoke it afterwards if needed.
+              This will email the director a secure approval link. The offer only reaches{' '}
+              <strong>{offer?.candidate_name}</strong> once the director signs off. You can revoke it beforehand if needed.
             </p>
             <div className="flex gap-3">
               <button
@@ -513,9 +669,12 @@ export default function OfferBuilderPage() {
       {showConfirmRevoke && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
           <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full">
+            <div className="w-11 h-11 rounded-full bg-red-50 flex items-center justify-center mb-4">
+              <RotateCcw className="w-5 h-5 text-red-500" />
+            </div>
             <h3 className="font-display text-lg font-bold text-gray-900 mb-2">Revoke this Offer?</h3>
             <p className="text-sm text-gray-500 mb-5">
-              The candidate's response link will be invalidated immediately. This action cannot be undone.
+              Any pending director or candidate response link will be invalidated immediately. This action cannot be undone.
             </p>
             <div className="flex gap-3">
               <button

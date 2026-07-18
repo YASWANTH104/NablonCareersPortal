@@ -10,8 +10,10 @@ from app.schemas.job import (
     JobResponse, JobListResponse,
     JobQuestionCreate, JobQuestionResponse,
     DepartmentCreate, DepartmentResponse,
+    JDGenerateRequest, JDGenerateResponse,
 )
 from app.services import job_service
+from app.services.jd_generation_service import generate_job_description, JDGenerationUnavailable
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -116,6 +118,27 @@ async def create_job(
     db: AsyncSession = Depends(get_db),
 ):
     return await job_service.create_job(db, data, posted_by=user.id)
+
+
+@router.post("/generate-jd", response_model=JDGenerateResponse)
+async def generate_jd(
+    data: JDGenerateRequest,
+    _=Depends(require_roles(Role.HR_MANAGER, Role.ADMIN, Role.SUPER_ADMIN)),
+):
+    try:
+        result = await generate_job_description(
+            title=data.title,
+            notes=data.notes,
+            department=data.department,
+            location=data.location,
+            location_type=data.location_type,
+            employment_type=data.employment_type,
+            experience_min=data.experience_min,
+            experience_max=data.experience_max,
+        )
+    except JDGenerationUnavailable:
+        raise HTTPException(503, "AI drafting is not available right now. Please write the JD manually.")
+    return result
 
 
 @router.put("/{job_id}", response_model=JobResponse)

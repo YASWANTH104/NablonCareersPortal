@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}Offer Accepted – Nablon AI{% endblock %}
+
+{% block content %}
+<h2>Offer Accepted</h2>
+
+<p>
+  <strong>{{ candidate_name }}</strong> has successfully accepted the offer for the
+  <strong>{{ job_title }}</strong> role, signed on {{ signed_date }}.
+</p>
+
+<table style="width:100%; border-collapse:collapse; margin:20px 0; font-size:14px;">
+  <tr style="border-bottom:1px solid #E5E7EB;">
+    <td style="padding:8px 4px; color:#6B7280; width:40%;">Candidate</td>
+    <td style="padding:8px 4px; font-weight:600; color:#111827;">{{ candidate_name }}</td>
+  </tr>
+  <tr style="border-bottom:1px solid #E5E7EB;">
+    <td style="padding:8px 4px; color:#6B7280;">Email</td>
+    <td style="padding:8px 4px; font-weight:600; color:#111827;">{{ candidate_email }}</td>
+  </tr>
+  <tr>
+    <td style="padding:8px 4px; color:#6B7280;">Role</td>
+    <td style="padding:8px 4px; font-weight:600; color:#111827;">{{ job_title }}</td>
+  </tr>
+</table>
+
+<p>Please proceed with the next steps in onboarding.</p>
+
+<a href="{{ portal_url }}" class="cta">View Offer in HR Portal</a>
+{% endblock %}

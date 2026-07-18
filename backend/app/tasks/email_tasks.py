@@ -453,3 +453,116 @@ async def _send_offer_email_async(offer_id: str):
             f"Offer email sent: offer={offer_id}, to={candidate_email}, "
             f"pdf={'yes' if pdf_bytes else 'no'}"
         )
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def send_director_approval_email(self, offer_id: str):
+    try:
+        asyncio.run(_send_director_approval_email_async(offer_id))
+    except Exception as exc:
+        logger.error(f"Director approval email failed: offer={offer_id}: {exc}")
+        raise self.retry(exc=exc)
+
+
+async def _send_director_approval_email_async(offer_id: str):
+    from app.models.offer import OfferLetter
+    from app.models.application import Application
+    from app.models.user import User
+    from app.models.job import Job, Department
+    from app.services.email_service import send_email
+    from app.config import settings
+    from sqlalchemy import select
+
+    offer_uuid = uuid.UUID(offer_id)
+
+    async with _task_session() as db:
+        row = (await db.execute(
+            select(OfferLetter, User.full_name, Job.title.label("job_title"), Department.name.label("dept_name"))
+            .join(Application, Application.id == OfferLetter.application_id)
+            .join(User, User.id == Application.applicant_id)
+            .join(Job, Job.id == Application.job_id)
+            .outerjoin(Department, Department.id == OfferLetter.department_id)
+            .where(OfferLetter.id == offer_uuid)
+        )).first()
+
+        if not row:
+            logger.warning(f"Offer {offer_id} not found for director approval email")
+            return
+
+        offer, candidate_name, job_title, dept_name = row
+
+        if not settings.DIRECTOR_EMAIL:
+            logger.warning(f"DIRECTOR_EMAIL not configured — skipping director approval email for offer={offer_id}")
+            return
+
+        review_url = f"{settings.FRONTEND_URL}/offers/director-review/{offer.director_token}"
+
+        await send_email(
+            to_email=settings.DIRECTOR_EMAIL,
+            subject=f"Offer approval needed: {candidate_name} — {job_title}",
+            template_name="director_approval_request",
+            context={
+                "director_name": settings.DIRECTOR_NAME,
+                "candidate_name": candidate_name or "",
+                "designation": offer.designation or "",
+                "department": dept_name or "",
+                "salary_ctc": f"{float(offer.salary_ctc):,.0f}" if offer.salary_ctc else "",
+                "salary_currency": offer.salary_currency or "INR",
+                "joining_date": str(offer.joining_date) if offer.joining_date else "",
+                "review_url": review_url,
+            },
+        )
+
+        logger.info(f"Director approval email sent: offer={offer_id}, to={settings.DIRECTOR_EMAIL}")
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def notify_hr_offer_accepted(self, offer_id: str):
+    try:
+        asyncio.run(_notify_hr_offer_accepted_async(offer_id))
+    except Exception as exc:
+        logger.error(f"HR acceptance notification failed: offer={offer_id}: {exc}")
+        raise self.retry(exc=exc)
+
+
+async def _notify_hr_offer_accepted_async(offer_id: str):
+    from app.models.offer import OfferLetter
+    from app.models.application import Application
+    from app.models.user import User
+    from app.models.job import Job
+    from app.services.email_service import send_email
+    from app.config import settings
+    from sqlalchemy import select
+
+    offer_uuid = uuid.UUID(offer_id)
+
+    async with _task_session() as db:
+        row = (await db.execute(
+            select(OfferLetter, User.full_name, User.email, Job.title.label("job_title"))
+            .join(Application, Application.id == OfferLetter.application_id)
+            .join(User, User.id == Application.applicant_id)
+            .join(Job, Job.id == Application.job_id)
+            .where(OfferLetter.id == offer_uuid)
+        )).first()
+
+        if not row:
+            logger.warning(f"Offer {offer_id} not found for HR acceptance notification")
+            return
+
+        offer, candidate_name, candidate_email, job_title = row
+        signed_date = offer.signed_at.strftime("%d %B %Y") if offer.signed_at else "today"
+
+        await send_email(
+            to_email=settings.HR_NOTIFICATION_EMAIL,
+            subject=f"Offer accepted: {candidate_name} — {job_title}",
+            template_name="offer_accepted_notification",
+            context={
+                "candidate_name": candidate_name or "",
+                "candidate_email": candidate_email or "",
+                "job_title": job_title or "",
+                "signed_date": signed_date,
+                "portal_url": f"{settings.FRONTEND_URL}/hr/offers",
+            },
+        )
+
+        logger.info(f"HR acceptance notification sent: offer={offer_id}, to={settings.HR_NOTIFICATION_EMAIL}")

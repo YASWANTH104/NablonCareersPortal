@@ -10,7 +10,7 @@ export default function PublicLayout() {
       {/* Public nav */}
       <header className="border-b border-surface-200 bg-white sticky top-0 z-40 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-          <Link to="/jobs" className="flex items-center gap-2.5 flex-shrink-0">
+          <Link to="/" className="flex items-center gap-2.5 flex-shrink-0">
             <img src="/logo.jpg" alt="Nablon AI" className="h-8 w-auto rounded-lg object-contain" />
             <span className="font-display font-bold text-gray-900 hidden sm:block">Careers</span>
           </Link>

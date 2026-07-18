@@ -36,6 +36,24 @@ class JobQuestionResponse(BaseModel):
     order_index: int
 
 
+class JDGenerateRequest(BaseModel):
+    title: str
+    notes: str
+    department: Optional[str] = None
+    location: Optional[str] = None
+    location_type: Optional[str] = None
+    employment_type: Optional[str] = None
+    experience_min: Optional[int] = None
+    experience_max: Optional[int] = None
+
+
+class JDGenerateResponse(BaseModel):
+    description: str
+    requirements: str
+    benefits: str
+    skills_required: list[str]
+
+
 class JobCreate(BaseModel):
     title: str
     department_id: Optional[uuid.UUID] = None

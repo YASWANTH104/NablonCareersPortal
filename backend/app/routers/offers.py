@@ -11,6 +11,7 @@ from app.schemas.offer import (
     OfferTemplateCreate, OfferTemplateUpdate, OfferTemplateResponse,
     OfferLetterCreate, OfferLetterUpdate, OfferLetterResponse,
     OfferLetterListResponse, OfferRespondRequest, CandidateOfferResponse,
+    DirectorOfferResponse, DirectorDecisionRequest,
 )
 from app.services import offer_service
 
@@ -152,6 +153,27 @@ async def respond_offer(
 ):
     return await offer_service.respond_offer(
         db, token, data.decision, data.candidate_signature
+    )
+
+
+# ── Director approval (public, no auth) — must come before /{offer_id} ───────
+
+@router.get("/director/{token}", response_model=DirectorOfferResponse)
+async def get_offer_for_director(
+    token: str,
+    db: AsyncSession = Depends(get_db),
+):
+    return await offer_service.get_offer_for_director(db, token)
+
+
+@router.post("/director/{token}/decide", response_model=DirectorOfferResponse)
+async def decide_offer_as_director(
+    token: str,
+    data: DirectorDecisionRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    return await offer_service.director_decide_offer(
+        db, token, data.decision, data.signature
     )
 
 
