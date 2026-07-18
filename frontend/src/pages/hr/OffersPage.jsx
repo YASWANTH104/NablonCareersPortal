@@ -10,6 +10,8 @@ import { offersApi } from '@/api/offers';
 const STATUS_TABS = [
   { value: '', label: 'All' },
   { value: 'draft', label: 'Draft' },
+  { value: 'pending_director', label: 'Awaiting Director' },
+  { value: 'director_rejected', label: 'Director Rejected' },
   { value: 'sent', label: 'Sent' },
   { value: 'accepted', label: 'Accepted' },
   { value: 'rejected', label: 'Rejected' },
@@ -18,20 +20,22 @@ const STATUS_TABS = [
 ];
 
 const STATUS_CONFIG = {
-  draft:    { icon: Clock,         color: 'bg-gray-100 text-gray-600',    dot: 'bg-gray-400' },
-  sent:     { icon: Send,          color: 'bg-blue-100 text-blue-700',    dot: 'bg-blue-500' },
-  accepted: { icon: CheckCircle,   color: 'bg-green-100 text-green-700',  dot: 'bg-green-500' },
-  rejected: { icon: XCircle,       color: 'bg-red-100 text-red-700',      dot: 'bg-red-500' },
-  revoked:  { icon: RotateCcw,     color: 'bg-orange-100 text-orange-700',dot: 'bg-orange-400' },
-  expired:  { icon: AlertCircle,   color: 'bg-yellow-100 text-yellow-700',dot: 'bg-yellow-400' },
+  draft:             { icon: Clock,         label: 'Draft',             color: 'bg-gray-100 text-gray-600',    dot: 'bg-gray-400' },
+  pending_director:  { icon: Clock,         label: 'Awaiting Director', color: 'bg-amber-100 text-amber-700',  dot: 'bg-amber-400' },
+  director_rejected: { icon: XCircle,       label: 'Director Rejected', color: 'bg-red-100 text-red-700',      dot: 'bg-red-500' },
+  sent:              { icon: Send,          label: 'Sent',              color: 'bg-blue-100 text-blue-700',    dot: 'bg-blue-500' },
+  accepted:          { icon: CheckCircle,   label: 'Accepted',          color: 'bg-green-100 text-green-700',  dot: 'bg-green-500' },
+  rejected:          { icon: XCircle,       label: 'Rejected',          color: 'bg-red-100 text-red-700',      dot: 'bg-red-500' },
+  revoked:           { icon: RotateCcw,     label: 'Revoked',           color: 'bg-orange-100 text-orange-700',dot: 'bg-orange-400' },
+  expired:           { icon: AlertCircle,   label: 'Expired',           color: 'bg-yellow-100 text-yellow-700',dot: 'bg-yellow-400' },
 };
 
 function StatusBadge({ status }) {
-  const cfg = STATUS_CONFIG[status] ?? { color: 'bg-gray-100 text-gray-600', dot: 'bg-gray-400' };
+  const cfg = STATUS_CONFIG[status] ?? { label: status, color: 'bg-gray-100 text-gray-600', dot: 'bg-gray-400' };
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium capitalize ${cfg.color}`}>
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${cfg.color}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
-      {status}
+      {cfg.label}
     </span>
   );
 }

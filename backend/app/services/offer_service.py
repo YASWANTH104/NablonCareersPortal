@@ -10,7 +10,7 @@ from app.models.offer import OfferLetter, OfferTemplate
 from app.schemas.offer import (
     OfferTemplateCreate, OfferTemplateUpdate, OfferTemplateResponse,
     OfferLetterCreate, OfferLetterUpdate, OfferLetterResponse,
-    OfferLetterListResponse, CandidateOfferResponse,
+    OfferLetterListResponse, CandidateOfferResponse, DirectorOfferResponse,
 )
 
 
@@ -30,6 +30,8 @@ def _offer_to_dict(offer: OfferLetter) -> dict:
         "sent_at": offer.sent_at,
         "accepted_at": offer.accepted_at,
         "expires_at": offer.expires_at,
+        "director_signature": offer.director_signature,
+        "director_approved_at": offer.director_approved_at,
         "candidate_signature": offer.candidate_signature,
         "signed_at": offer.signed_at,
         "created_by": offer.created_by,
@@ -259,7 +261,7 @@ async def update_offer(
     offer = await db.get(OfferLetter, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
-    if offer.status != "draft":
+    if offer.status not in ("draft", "director_rejected"):
         raise HTTPException(400, f"Only draft offers can be edited (current status: {offer.status})")
 
     for field, value in data.model_dump(exclude_unset=True).items():
@@ -271,10 +273,11 @@ async def update_offer(
 
 
 async def send_offer(db: AsyncSession, offer_id: uuid.UUID) -> OfferLetterResponse:
+    """HR sends the offer for director approval — it does not reach the candidate yet."""
     offer = await db.get(OfferLetter, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
-    if offer.status != "draft":
+    if offer.status not in ("draft", "director_rejected"):
         raise HTTPException(400, f"Only draft offers can be sent (current status: {offer.status})")
 
     from app.services.document_service import is_documents_complete
@@ -284,19 +287,110 @@ async def send_offer(db: AsyncSession, offer_id: uuid.UUID) -> OfferLetterRespon
             "Cannot send offer letter — candidate has not submitted all required documents yet."
         )
 
-    offer.candidate_token = secrets.token_urlsafe(32)
-    offer.status = "sent"
-    offer.sent_at = datetime.now(timezone.utc)
+    offer.director_token = secrets.token_urlsafe(32)
+    offer.status = "pending_director"
     offer.updated_at = datetime.now(timezone.utc)
     await db.commit()
 
     try:
-        from app.tasks.email_tasks import send_offer_email
-        send_offer_email.delay(str(offer_id))
+        from app.tasks.email_tasks import send_director_approval_email
+        send_director_approval_email.delay(str(offer_id))
     except Exception:
         pass
 
     return await get_offer(db, offer_id)
+
+
+async def _build_director_response(db: AsyncSession, offer: OfferLetter) -> DirectorOfferResponse:
+    from app.models.application import Application
+    from app.models.user import User
+    from app.models.job import Job, Department
+
+    row = (await db.execute(
+        select(User.full_name, Job.title, Department.name)
+        .select_from(Application)
+        .join(User, User.id == Application.applicant_id)
+        .join(Job, Job.id == Application.job_id)
+        .outerjoin(Department, Department.id == offer.department_id)
+        .where(Application.id == offer.application_id)
+    )).first()
+
+    candidate_name, job_title, dept_name = row if row else (None, None, None)
+
+    body_html = None
+    if offer.template_id:
+        template = await db.get(OfferTemplate, offer.template_id)
+        if template:
+            variables = _build_variables(offer, candidate_name or "", dept_name)
+            body_html = _render_template(template.body_html, variables)
+
+    return DirectorOfferResponse(
+        designation=offer.designation,
+        department_name=dept_name,
+        candidate_name=candidate_name,
+        job_title=job_title,
+        joining_date=offer.joining_date,
+        salary_ctc=float(offer.salary_ctc) if offer.salary_ctc is not None else None,
+        salary_currency=offer.salary_currency,
+        work_location=offer.work_location,
+        status=offer.status,
+        body_html=body_html,
+    )
+
+
+async def get_offer_for_director(db: AsyncSession, token: str) -> DirectorOfferResponse:
+    offer = (await db.execute(
+        select(OfferLetter).where(OfferLetter.director_token == token)
+    )).scalar_one_or_none()
+
+    if not offer:
+        raise HTTPException(404, "Invalid or expired link")
+    if offer.status != "pending_director":
+        raise HTTPException(400, f"This offer is already {offer.status}")
+
+    return await _build_director_response(db, offer)
+
+
+async def director_decide_offer(
+    db: AsyncSession,
+    token: str,
+    decision: str,
+    signature: Optional[str] = None,
+) -> DirectorOfferResponse:
+    offer = (await db.execute(
+        select(OfferLetter).where(OfferLetter.director_token == token)
+    )).scalar_one_or_none()
+
+    if not offer:
+        raise HTTPException(404, "Invalid or expired link")
+    if offer.status != "pending_director":
+        raise HTTPException(400, f"This offer is already {offer.status}")
+    if decision not in ("approved", "rejected"):
+        raise HTTPException(422, "Decision must be 'approved' or 'rejected'")
+
+    if decision == "approved" and not signature:
+        raise HTTPException(422, "A signature is required to approve the offer")
+
+    now = datetime.now(timezone.utc)
+    if decision == "approved":
+        offer.director_signature = signature
+        offer.director_approved_at = now
+        offer.candidate_token = secrets.token_urlsafe(32)
+        offer.status = "sent"
+        offer.sent_at = now
+    else:
+        offer.status = "director_rejected"
+    offer.updated_at = now
+    await db.commit()
+
+    if decision == "approved":
+        try:
+            from app.tasks.email_tasks import send_offer_email
+            send_offer_email.delay(str(offer.id))
+        except Exception:
+            pass
+
+    return await _build_director_response(db, offer)
 
 
 async def preview_offer(db: AsyncSession, offer_id: uuid.UUID) -> str:
@@ -328,7 +422,7 @@ async def revoke_offer(db: AsyncSession, offer_id: uuid.UUID) -> OfferLetterResp
     offer = await db.get(OfferLetter, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
-    if offer.status != "sent":
+    if offer.status not in ("pending_director", "sent"):
         raise HTTPException(400, f"Only sent offers can be revoked (current status: {offer.status})")
 
     offer.status = "revoked"
@@ -344,12 +438,23 @@ def _build_offer_full_html(offer, template, candidate_name: str, dept_name: Opti
         body_html = _render_template(template.body_html, variables)
 
     signature_block = ""
+    if offer.director_signature:
+        approved_label = (
+            offer.director_approved_at.strftime("%d %B %Y") if offer.director_approved_at else "Approved"
+        )
+        signature_block += f"""
+<div style="margin-top:48px;border-top:1px solid #e5e7eb;padding-top:24px;">
+  <p style="font-size:12px;color:#6b7280;margin-bottom:8px;">Director Signature</p>
+  <img src="{offer.director_signature}"
+       style="max-height:80px;border:1px solid #e5e7eb;border-radius:6px;padding:6px;background:#fff;" />
+  <p style="font-size:11px;color:#9ca3af;margin-top:4px;">Approved on {approved_label}</p>
+</div>"""
     if offer.candidate_signature:
         signed_label = (
             offer.signed_at.strftime("%d %B %Y") if offer.signed_at else "Signed"
         )
-        signature_block = f"""
-<div style="margin-top:48px;border-top:1px solid #e5e7eb;padding-top:24px;">
+        signature_block += f"""
+<div style="margin-top:24px;padding-top:24px;">
   <p style="font-size:12px;color:#6b7280;margin-bottom:8px;">Candidate Signature</p>
   <img src="{offer.candidate_signature}"
        style="max-height:80px;border:1px solid #e5e7eb;border-radius:6px;padding:6px;background:#fff;" />
@@ -507,6 +612,13 @@ async def respond_offer_for_applicant(
     offer.updated_at = datetime.now(timezone.utc)
     await db.commit()
 
+    if decision == "accepted":
+        try:
+            from app.tasks.email_tasks import notify_hr_offer_accepted
+            notify_hr_offer_accepted.delay(str(offer.id))
+        except Exception:
+            pass
+
     return await get_offer_for_applicant(db, application_id, applicant_id)
 
 
@@ -542,4 +654,12 @@ async def respond_offer(
         offer.signed_at = datetime.now(timezone.utc)
     offer.updated_at = datetime.now(timezone.utc)
     await db.commit()
+
+    if decision == "accepted":
+        try:
+            from app.tasks.email_tasks import notify_hr_offer_accepted
+            notify_hr_offer_accepted.delay(str(offer.id))
+        except Exception:
+            pass
+
     return await get_offer(db, offer.id)

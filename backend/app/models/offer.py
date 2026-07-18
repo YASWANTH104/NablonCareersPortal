@@ -35,12 +35,16 @@ class OfferLetter(Base):
     template_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("offer_templates.id"))
     pdf_url: Mapped[str | None] = mapped_column(Text)
 
-    status: Mapped[str] = mapped_column(String(20), default="draft")
-    # draft | sent | accepted | rejected | expired | revoked
+    status: Mapped[str] = mapped_column(String(30), default="draft")
+    # draft | pending_director | director_rejected | sent | accepted | rejected | expired | revoked
 
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    director_token: Mapped[str | None] = mapped_column(Text, unique=True)
+    director_signature: Mapped[str | None] = mapped_column(Text)
+    director_approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     candidate_token: Mapped[str | None] = mapped_column(Text, unique=True)
     candidate_signature: Mapped[str | None] = mapped_column(Text)

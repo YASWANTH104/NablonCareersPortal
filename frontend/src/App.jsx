@@ -15,6 +15,7 @@ import RegisterPage from '@/pages/auth/RegisterPage';
 import ResetPasswordPage from '@/pages/auth/ResetPasswordPage';
 
 // Public pages
+import LandingPage from '@/pages/public/LandingPage';
 import JobsPage from '@/pages/public/JobsPage';
 import JobDetailPage from '@/pages/public/JobDetailPage';
 import ApplyPage from '@/pages/public/ApplyPage';
@@ -38,6 +39,7 @@ import InterviewsPage from '@/pages/hr/InterviewsPage';
 import OffersPage from '@/pages/hr/OffersPage';
 import OfferBuilderPage from '@/pages/hr/OfferBuilderPage';
 import OfferRespondPage from '@/pages/public/OfferRespondPage';
+import DirectorReviewPage from '@/pages/public/DirectorReviewPage';
 import DocumentUploadPage from '@/pages/public/DocumentUploadPage';
 import ReportsPage from '@/pages/hr/ReportsPage';
 import SettingsPage from '@/pages/hr/SettingsPage';
@@ -51,7 +53,7 @@ const router = createBrowserRouter([
     path: '/',
     element: <PublicLayout />,
     children: [
-      { index: true, element: <Navigate to="/jobs" replace /> },
+      { index: true, element: <LandingPage /> },
       { path: 'jobs', element: <JobsPage /> },
       { path: 'jobs/:slug', element: <JobDetailPage /> },
       { path: 'jobs/:slug/apply', element: <ApplyPage /> },
@@ -132,6 +134,9 @@ const router = createBrowserRouter([
 
   // ── PUBLIC OFFER RESPOND ────────────────────────────────────
   { path: '/offers/respond/:token', element: <OfferRespondPage /> },
+
+  // ── PUBLIC DIRECTOR APPROVAL ─────────────────────────────────
+  { path: '/offers/director-review/:token', element: <DirectorReviewPage /> },
 
   // ── PUBLIC DOCUMENT SUBMISSION ──────────────────────────────
   { path: '/docs/submit/:token', element: <DocumentUploadPage /> },

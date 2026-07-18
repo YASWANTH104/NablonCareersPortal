@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     AZURE_EMAIL_SENDER: str = ""
     EMAIL_FROM_NAME: str = "Nablon AI Careers"
 
+    DIRECTOR_EMAIL: str = ""
+    DIRECTOR_NAME: str = "Director"
+    HR_NOTIFICATION_EMAIL: str = "hr@nablon.ai"
+
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     ALGORITHM: str = "HS256"

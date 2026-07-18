@@ -4,9 +4,10 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import toast from 'react-hot-toast';
-import { Loader2, CheckCircle } from 'lucide-react';
+import { Loader2, CheckCircle, Mail, Lock } from 'lucide-react';
 
 import { authApi } from '@/api/auth';
+import AuthLayout, { AuthInput, AuthSubmitButton } from '@/components/layout/AuthLayout';
 
 const forgotSchema = z.object({
   email: z.string().email('Enter a valid email'),
@@ -59,100 +60,85 @@ export default function ResetPasswordPage() {
     }
   };
 
+  const backToSignIn = (
+    <Link to="/login" className="font-semibold text-brand-600 hover:text-brand-700">
+      Back to Sign in
+    </Link>
+  );
+
   if (done) {
     return (
-      <div className="min-h-screen bg-surface-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-md bg-white rounded-2xl shadow-card p-8 text-center">
-          <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-4" />
-          <h2 className="text-xl font-display font-bold text-gray-900 mb-2">Email sent</h2>
-          <p className="text-sm text-gray-500 mb-6">
+      <AuthLayout title="Email sent" subtitle="Check your inbox for the reset link" footer={backToSignIn}>
+        <div className="bg-white border border-surface-200 rounded-2xl shadow-card p-8 text-center">
+          <div className="w-14 h-14 rounded-2xl bg-green-50 border border-green-100 flex items-center justify-center mx-auto mb-4">
+            <CheckCircle className="w-7 h-7 text-green-500" />
+          </div>
+          <p className="text-sm text-gray-500 leading-relaxed">
             If that email is registered, you'll receive a reset link shortly.
           </p>
-          <Link to="/login" className="text-sm font-medium text-brand-600 hover:text-brand-700">
-            Back to Sign in
-          </Link>
         </div>
-      </div>
+      </AuthLayout>
     );
   }
 
   return (
-    <div className="min-h-screen bg-surface-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        <div className="bg-white rounded-2xl shadow-card p-8">
-          <h1 className="text-2xl font-display font-bold text-gray-900 mb-1">
-            {isForgot ? 'Forgot password?' : 'Set new password'}
-          </h1>
-          <p className="text-sm text-gray-500 mb-6">
-            {isForgot
-              ? 'Enter your email and we\'ll send you a reset link.'
-              : 'Enter your new password below.'}
-          </p>
-
-          {isForgot ? (
-            <form onSubmit={handleForgot(onForgot)} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Email</label>
-                <input
-                  {...registerForgot('email')}
-                  type="email"
-                  className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                />
-                {forgotErrors.email && (
-                  <p className="mt-1 text-xs text-red-500">{forgotErrors.email.message}</p>
-                )}
-              </div>
-              <button
-                type="submit"
-                disabled={forgotSubmitting}
-                className="w-full flex items-center justify-center gap-2 py-2.5 bg-brand-500 text-white rounded-lg text-sm font-medium hover:bg-brand-600 disabled:opacity-60 transition-colors"
-              >
-                {forgotSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
-                Send reset link
-              </button>
-            </form>
-          ) : (
-            <form onSubmit={handleReset(onReset)} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">New password</label>
-                <input
-                  {...registerReset('new_password')}
-                  type="password"
-                  className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                />
-                {resetErrors.new_password && (
-                  <p className="mt-1 text-xs text-red-500">{resetErrors.new_password.message}</p>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Confirm password</label>
-                <input
-                  {...registerReset('confirm_password')}
-                  type="password"
-                  className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                />
-                {resetErrors.confirm_password && (
-                  <p className="mt-1 text-xs text-red-500">{resetErrors.confirm_password.message}</p>
-                )}
-              </div>
-              <button
-                type="submit"
-                disabled={resetSubmitting}
-                className="w-full flex items-center justify-center gap-2 py-2.5 bg-brand-500 text-white rounded-lg text-sm font-medium hover:bg-brand-600 disabled:opacity-60 transition-colors"
-              >
-                {resetSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
-                Reset password
-              </button>
-            </form>
-          )}
-
-          <p className="mt-6 text-center text-sm text-gray-500">
-            <Link to="/login" className="font-medium text-brand-600 hover:text-brand-700">
-              Back to Sign in
-            </Link>
-          </p>
-        </div>
-      </div>
-    </div>
+    <AuthLayout
+      title={isForgot ? 'Forgot password?' : 'Set new password'}
+      subtitle={
+        isForgot
+          ? "Enter your email and we'll send you a reset link."
+          : 'Enter your new password below.'
+      }
+      footer={backToSignIn}
+    >
+      {isForgot ? (
+        <form onSubmit={handleForgot(onForgot)} className="space-y-5">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Email address</label>
+            <AuthInput
+              {...registerForgot('email')}
+              icon={Mail}
+              type="email"
+              placeholder="you@example.com"
+              autoComplete="email"
+              error={forgotErrors.email?.message}
+            />
+          </div>
+          <AuthSubmitButton loading={forgotSubmitting}>
+            {forgotSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+            Send reset link
+          </AuthSubmitButton>
+        </form>
+      ) : (
+        <form onSubmit={handleReset(onReset)} className="space-y-5">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">New password</label>
+            <AuthInput
+              {...registerReset('new_password')}
+              icon={Lock}
+              type="password"
+              placeholder="Min 8 characters"
+              autoComplete="new-password"
+              error={resetErrors.new_password?.message}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Confirm password</label>
+            <AuthInput
+              {...registerReset('confirm_password')}
+              icon={Lock}
+              type="password"
+              placeholder="••••••••"
+              autoComplete="new-password"
+              error={resetErrors.confirm_password?.message}
+            />
+          </div>
+          <AuthSubmitButton loading={resetSubmitting}>
+            {resetSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+            Reset password
+          </AuthSubmitButton>
+        </form>
+      )}
+    </AuthLayout>
   );
 }

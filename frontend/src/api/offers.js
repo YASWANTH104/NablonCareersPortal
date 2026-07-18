@@ -20,6 +20,10 @@ export const offersApi = {
   // Public — no auth (legacy/fallback)
   respond: (token, data) => client.post(`/offers/respond/${token}`, data),
 
+  // Director approval (public, no auth)
+  getDirectorOffer: (token) => client.get(`/offers/director/${token}`),
+  directorDecide: (token, data) => client.post(`/offers/director/${token}/decide`, data),
+
   // Candidate portal (authenticated)
   getMyOffer: (applicationId) => client.get(`/offers/mine/${applicationId}`),
   respondMyOffer: (applicationId, data) => client.post(`/offers/mine/${applicationId}/respond`, data),

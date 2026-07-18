@@ -62,3 +62,92 @@
     @apply font-display;
   }
 }
+
+/* ────────────────────────────────────────────────────────────────
+   Public-site visual effects (see components/shared/effects.jsx)
+   ──────────────────────────────────────────────────────────────── */
+
+@keyframes fx-float-a { 0%, 100% { margin-top: 0; } 50% { margin-top: -14px; } }
+@keyframes fx-float-b { 0%, 100% { margin-top: 0; } 50% { margin-top: -10px; } }
+@keyframes fx-float-c { 0%, 100% { margin-top: 0; } 50% { margin-top: -18px; } }
+.float-a { animation: fx-float-a 6s ease-in-out infinite; }
+.float-b { animation: fx-float-b 7.5s ease-in-out 0.8s infinite; }
+.float-c { animation: fx-float-c 6.8s ease-in-out 1.6s infinite; }
+
+@keyframes fx-spin { to { transform: rotate(360deg); } }
+.spin-slow   { animation: fx-spin 28s linear infinite; }
+.spin-slower { animation: fx-spin 45s linear infinite reverse; }
+
+@keyframes fx-shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
+.progress-shimmer { position: relative; overflow: hidden; }
+.progress-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.5), transparent);
+  animation: fx-shimmer 2.4s ease-in-out infinite;
+}
+
+@keyframes fx-gradient-pan { 0%, 100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+.animated-gradient-text {
+  background: linear-gradient(90deg, #9eb0ff, #ffffff, #7585ff, #c3d0ff);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: fx-gradient-pan 7s ease infinite;
+}
+
+.tilt-card { transform-style: preserve-3d; position: relative; }
+.tilt-glare {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(circle at var(--glare-x, 50%) var(--glare-y, 50%), rgba(79, 94, 255, 0.10), transparent 60%);
+  transition: opacity 0.25s;
+}
+.tilt-card:hover .tilt-glare { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .float-a, .float-b, .float-c,
+  .spin-slow, .spin-slower,
+  .progress-shimmer::after,
+  .animated-gradient-text { animation: none; }
+}
+
+/* ────────────────────────────────────────────────────────────────
+   Rich-text (job description) typography — the Tailwind typography
+   plugin is not installed, so `.prose` is styled here.
+   ──────────────────────────────────────────────────────────────── */
+@layer components {
+  .prose { @apply text-gray-700 leading-relaxed; }
+  .prose :is(h1, h2, h3, h4) { @apply font-display font-semibold text-gray-900 mt-6 mb-2.5 leading-snug; }
+  .prose h1 { @apply text-xl; }
+  .prose h2 { @apply text-lg; }
+  .prose h3 { @apply text-base; }
+  .prose > :first-child { @apply mt-0; }
+  .prose p { @apply my-3; }
+  .prose ul { @apply list-disc pl-5 my-3 space-y-1.5; }
+  .prose ol { @apply list-decimal pl-5 my-3 space-y-1.5; }
+  .prose li > :is(ul, ol) { @apply my-1.5; }
+  .prose a { @apply text-brand-600 underline underline-offset-2 hover:text-brand-700; }
+  .prose strong { @apply font-semibold text-gray-900; }
+  .prose blockquote { @apply border-l-4 border-brand-200 pl-4 italic text-gray-600 my-4; }
+  .prose code { @apply font-mono text-[0.9em] bg-surface-100 px-1.5 py-0.5 rounded; }
+  .prose hr { @apply my-6 border-surface-200; }
+}
+
+/* ────────────────────────────────────────────────────────────────
+   TipTap rich text editor (see components/shared/RichTextEditor.jsx)
+   ──────────────────────────────────────────────────────────────── */
+.ProseMirror { outline: none; }
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  @apply text-gray-400;
+}

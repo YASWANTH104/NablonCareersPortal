@@ -5,8 +5,10 @@ import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import toast from 'react-hot-toast';
-import { ArrowLeft, Loader2, Plus, X } from 'lucide-react';
+import { ArrowLeft, Loader2, Plus, X, Wand2 } from 'lucide-react';
 import { jobsApi } from '@/api/jobs';
+import RichTextEditor from '@/components/shared/RichTextEditor';
+import DraftWithAiModal from '@/components/shared/DraftWithAiModal';
 
 const toOptionalInt = (v) => (v === '' || v === null || v === undefined ? undefined : parseInt(v, 10));
 const toOptionalNum = (v) => (v === '' || v === null || v === undefined ? undefined : parseFloat(v));
@@ -67,14 +69,6 @@ const Select = forwardRef(({ children, className = '', ...props }, ref) => (
   </select>
 ));
 
-const Textarea = forwardRef(({ className = '', ...props }, ref) => (
-  <textarea
-    ref={ref}
-    className={`w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent resize-y ${className}`}
-    {...props}
-  />
-));
-
 function ErrorMsg({ message }) {
   if (!message) return null;
   return <p className="mt-1 text-xs text-red-500">{message}</p>;
@@ -100,10 +94,15 @@ export default function JobEditPage() {
     queryFn: () => jobsApi.listDepartments().then((r) => r.data),
   });
 
+  const [showAiModal, setShowAiModal] = useState(false);
+
   const {
     register,
     handleSubmit,
     reset,
+    control,
+    getValues,
+    setValue,
     formState: { errors, isSubmitting, isDirty },
   } = useForm({
     resolver: zodResolver(schema),
@@ -398,22 +397,65 @@ export default function JobEditPage() {
 
         {/* Content */}
         <section className="bg-white rounded-xl border border-surface-200 p-6 space-y-5">
-          <h2 className="font-display font-semibold text-gray-900 text-base">Job content</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="font-display font-semibold text-gray-900 text-base">Job content</h2>
+            <button
+              type="button"
+              onClick={() => setShowAiModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-brand-700 bg-brand-50 border border-brand-100 rounded-lg hover:bg-brand-100 transition-colors"
+            >
+              <Wand2 className="w-3.5 h-3.5" />
+              Draft with AI
+            </button>
+          </div>
 
           <div>
             <FieldLabel required>Description</FieldLabel>
-            <Textarea {...register('description')} rows={8} placeholder="Describe the role, team, and what the candidate will be working on..." />
+            <Controller
+              name="description"
+              control={control}
+              render={({ field }) => (
+                <RichTextEditor
+                  value={field.value}
+                  onChange={field.onChange}
+                  minHeight={200}
+                  placeholder="Describe the role, team, and what the candidate will be working on..."
+                />
+              )}
+            />
             <ErrorMsg message={errors.description?.message} />
           </div>
 
           <div>
             <FieldLabel>Requirements</FieldLabel>
-            <Textarea {...register('requirements')} rows={5} placeholder="List the must-have qualifications and skills..." />
+            <Controller
+              name="requirements"
+              control={control}
+              render={({ field }) => (
+                <RichTextEditor
+                  value={field.value}
+                  onChange={field.onChange}
+                  minHeight={140}
+                  placeholder="List the must-have qualifications and skills..."
+                />
+              )}
+            />
           </div>
 
           <div>
             <FieldLabel>Benefits & perks</FieldLabel>
-            <Textarea {...register('benefits')} rows={4} placeholder="Health insurance, equity, remote work policy..." />
+            <Controller
+              name="benefits"
+              control={control}
+              render={({ field }) => (
+                <RichTextEditor
+                  value={field.value}
+                  onChange={field.onChange}
+                  minHeight={120}
+                  placeholder="Health insurance, equity, remote work policy..."
+                />
+              )}
+            />
           </div>
         </section>
 
@@ -474,6 +516,28 @@ export default function JobEditPage() {
           </button>
         </div>
       </form>
+
+      {showAiModal && (
+        <DraftWithAiModal
+          context={{
+            title: getValues('title'),
+            department: departments.find((d) => d.id === getValues('department_id'))?.name,
+            location: getValues('location'),
+            location_type: getValues('location_type'),
+            employment_type: getValues('employment_type'),
+            experience_min: toOptionalInt(getValues('experience_min')),
+            experience_max: toOptionalInt(getValues('experience_max')),
+          }}
+          onApply={(draft) => {
+            setValue('description', draft.description, { shouldDirty: true, shouldValidate: true });
+            setValue('requirements', draft.requirements, { shouldDirty: true });
+            setValue('benefits', draft.benefits, { shouldDirty: true });
+            setSkills((prev) => Array.from(new Set([...prev, ...draft.skills_required])));
+            toast.success('Draft applied — review and edit before saving');
+          }}
+          onClose={() => setShowAiModal(false)}
+        />
+      )}
     </div>
   );
 }
