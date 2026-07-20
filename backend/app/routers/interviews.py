@@ -61,6 +61,26 @@ async def list_interviews(
     )
 
 
+# ── Public (token-based, no auth): interviewer feedback from email link ─────
+# Must be declared before the /{interview_id} routes so they match first.
+
+@router.get("/feedback-by-token/{token}")
+async def get_feedback_by_token(
+    token: str,
+    db: AsyncSession = Depends(get_db),
+):
+    return await interview_service.get_feedback_context_by_token(db, token)
+
+
+@router.post("/feedback-by-token/{token}", response_model=InterviewFeedbackResponse)
+async def submit_feedback_by_token(
+    token: str,
+    data: InterviewFeedbackCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    return await interview_service.submit_feedback_by_token(db, token, data)
+
+
 @router.get("/{interview_id}", response_model=InterviewResponse)
 async def get_interview(
     interview_id: uuid.UUID,

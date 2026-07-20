@@ -1,4 +1,5 @@
 import uuid
+import secrets
 from datetime import datetime
 from sqlalchemy import String, Boolean, Text, DateTime, Integer, ForeignKey, PrimaryKeyConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -42,6 +43,10 @@ class InterviewPanelist(Base):
     interview_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("interviews.id"))
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     role: Mapped[str] = mapped_column(String(50), default="interviewer")  # interviewer | observer
+    # Secure link for submitting feedback from email without logging in
+    feedback_token: Mapped[str | None] = mapped_column(
+        String(64), unique=True, index=True, default=lambda: secrets.token_urlsafe(32)
+    )
 
     __table_args__ = (PrimaryKeyConstraint("interview_id", "user_id"),)
 

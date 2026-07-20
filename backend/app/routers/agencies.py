@@ -1,5 +1,6 @@
 import uuid
-from fastapi import APIRouter, Depends
+from typing import Optional
+from fastapi import APIRouter, Depends, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -101,3 +102,64 @@ async def agency_portal_assignment(
     db: AsyncSession = Depends(get_db),
 ):
     return await agency_service.get_agency_portal(db, portal_token, assignment_id)
+
+
+@router.post("/agency-portal/{portal_token}/parse-resume")
+async def agency_parse_resume(
+    portal_token: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Parse an uploaded resume so the agency submission form can be auto-filled."""
+    from app.services import resume_parsing_service
+
+    await agency_service.get_agency_by_portal_token(db, portal_token)
+    content = await file.read()
+    return await resume_parsing_service.parse_resume(
+        content, file.content_type or "", file.filename or ""
+    )
+
+
+@router.post("/agency-portal/{portal_token}/assignments/{assignment_id}/submit", status_code=201)
+async def agency_submit_candidate(
+    portal_token: str,
+    assignment_id: uuid.UUID,
+    resume: UploadFile = File(...),
+    full_name: str = Form(...),
+    email: str = Form(...),
+    phone: Optional[str] = Form(None),
+    current_location: Optional[str] = Form(None),
+    total_experience: Optional[str] = Form(None),
+    current_company: Optional[str] = Form(None),
+    current_designation: Optional[str] = Form(None),
+    education: Optional[str] = Form(None),
+    skills: Optional[str] = Form(None),
+    linkedin_url: Optional[str] = Form(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Agency uploads a candidate's resume directly — no candidate login required."""
+    from app.services import application_service, storage_service
+
+    agency, assignment = await agency_service.validate_portal_assignment(
+        db, portal_token, assignment_id
+    )
+    resume_url = await storage_service.upload_resume(resume, f"agency-{agency.id}")
+
+    application = await application_service.submit_sourced_application(
+        db,
+        job_id=assignment.job_id,
+        full_name=full_name,
+        email=email,
+        resume_url=resume_url,
+        source="agency",
+        agency_id=agency.id,
+        phone=phone,
+        linkedin_url=linkedin_url or None,
+        current_location=current_location,
+        total_experience=total_experience,
+        current_company=current_company,
+        current_designation=current_designation,
+        education=education,
+        skills=skills,
+    )
+    return {"application_id": str(application.id), "stage": application.stage}

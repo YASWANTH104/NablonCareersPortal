@@ -55,6 +55,8 @@ export default function ApplyPage() {
   const {
     register,
     handleSubmit,
+    setValue,
+    getValues,
     formState: { errors, isSubmitting },
   } = useForm({
     resolver: zodResolver(schema),
@@ -73,9 +75,38 @@ export default function ApplyPage() {
     } : undefined,
   });
 
-  const onDrop = useCallback((accepted) => {
-    if (accepted[0]) setResumeFile(accepted[0]);
-  }, []);
+  const [parsing, setParsing] = useState(false);
+
+  const onDrop = useCallback(async (accepted) => {
+    const file = accepted[0];
+    if (!file) return;
+    setResumeFile(file);
+
+    // Auto-fill empty form fields from the resume; the candidate reviews and corrects.
+    setParsing(true);
+    try {
+      const { data } = await uploadsApi.parseResume(file);
+      const fillable = [
+        'current_location', 'total_experience', 'current_company',
+        'current_designation', 'education', 'skills',
+        'linkedin_url', 'portfolio_url', 'github_url',
+      ];
+      let filled = false;
+      fillable.forEach((key) => {
+        if (data[key] && !getValues(key)) {
+          setValue(key, data[key], { shouldValidate: false });
+          filled = true;
+        }
+      });
+      if (filled) {
+        toast.success('We pre-filled some fields from your resume — please review them.');
+      }
+    } catch {
+      // Parsing is best-effort; the candidate just fills the form manually.
+    } finally {
+      setParsing(false);
+    }
+  }, [getValues, setValue]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -211,6 +242,11 @@ export default function ApplyPage() {
             <div className="flex items-center gap-3 p-4 bg-green-50 border border-green-200 rounded-lg">
               <FileText className="w-5 h-5 text-green-600 flex-shrink-0" />
               <span className="text-sm text-green-800 flex-1 truncate">{resumeFile.name}</span>
+              {parsing && (
+                <span className="flex items-center gap-1.5 text-xs text-green-700">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Reading resume…
+                </span>
+              )}
               <button
                 type="button"
                 onClick={() => setResumeFile(null)}

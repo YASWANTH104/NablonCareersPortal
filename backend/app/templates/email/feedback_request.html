@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}Interview Feedback Requested – Nablon AI Careers{% endblock %}
+
+{% block content %}
+<h2>Hi {{ full_name }}, how did it go?</h2>
+<p>
+  Your interview with <strong>{{ candidate_name }}</strong> for the
+  <strong>{{ job_title }}</strong> role (<em>{{ interview_title }}</em>) has been marked as completed.
+</p>
+<p>
+  Please share your feedback while the conversation is still fresh — it takes about two minutes,
+  and you don't need to log in to the portal. Just use the secure link below.
+</p>
+
+<a href="{{ feedback_url }}" class="cta">Submit Feedback</a>
+
+<p style="margin-top: 24px; color: #6B7280; font-size: 14px;">
+  This link is personal to you — please don't forward it. If the interview didn't take place,
+  you can ignore this email.
+</p>
+{% endblock %}

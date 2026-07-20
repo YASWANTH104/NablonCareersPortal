@@ -23,7 +23,6 @@ async def create_assessment(
         from app.models.user import User
         from app.models.job import Job
         from app.models.notification import Notification
-        from app.services.email_service import send_email
 
         app = await db.get(Application, data.application_id)
         candidate = await db.get(User, app.applicant_id)
@@ -31,7 +30,6 @@ async def create_assessment(
 
         job_title = job.title if job else "the position"
         deadline_str = data.deadline.strftime("%B %d, %Y at %I:%M %p") if data.deadline else "TBD"
-        type_label = data.assessment_type.replace("_", " ").title()
 
         db.add(Notification(
             user_id=candidate.id,
@@ -40,23 +38,15 @@ async def create_assessment(
             body=f"Complete your assessment for {job_title} by {deadline_str}.",
             link="/portal/applications",
         ))
-
-        await send_email(
-            to_email=candidate.email,
-            subject=f"Assessment Assigned – {job_title}",
-            template_name="assessment_scheduled",
-            context={
-                "full_name": candidate.full_name,
-                "job_title": job_title,
-                "assessment_title": data.title,
-                "assessment_type": type_label,
-                "deadline": deadline_str,
-                "duration_mins": data.duration_mins,
-                "platform_link": data.platform_link,
-                "instructions": data.instructions,
-            },
-        )
         await db.commit()
+    except Exception:
+        pass
+
+    # Email (a real ACS send takes several seconds) runs out-of-request via
+    # Celery — same fix as interview scheduling, which had the identical bug.
+    try:
+        from app.tasks.email_tasks import send_assessment_scheduled_email
+        send_assessment_scheduled_email.delay(str(assessment.id))
     except Exception:
         pass
 

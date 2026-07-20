@@ -15,8 +15,6 @@ from app.utils.security import (
     decode_refresh_token,
     generate_token,
 )
-from app.services.email_service import send_password_reset_email
-
 REFRESH_KEY_PREFIX = "refresh:"
 
 
@@ -115,7 +113,13 @@ async def forgot_password(email: str, db: AsyncSession) -> None:
     user.password_reset_expires = datetime.now(timezone.utc) + timedelta(hours=1)
     await db.commit()
 
-    await send_password_reset_email(user.email, user.full_name, reset_token)
+    # Dispatched via Celery, not awaited inline — same fix as interview/assessment
+    # scheduling. This also closes a timing side-channel: this endpoint returns
+    # immediately for a non-existent email (line above) but used to take several
+    # seconds longer for a real one, letting response time alone leak whether an
+    # email is registered despite the deliberate identical response body.
+    from app.tasks.email_tasks import send_password_reset_email_task
+    send_password_reset_email_task.delay(user.email, user.full_name, reset_token)
 
 
 async def reset_password(token: str, new_password: str, db: AsyncSession) -> None:

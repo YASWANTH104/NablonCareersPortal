@@ -27,3 +27,17 @@ async def upload_avatar(
 ):
     url = await storage_service.upload_avatar(file, str(current_user.id))
     return {"url": url}
+
+
+@router.post("/parse-resume")
+async def parse_resume(
+    file: UploadFile = File(...),
+    current_user=Depends(get_current_user),
+):
+    """Extract candidate fields from a resume so the apply form can be auto-filled."""
+    from app.services import resume_parsing_service
+
+    content = await file.read()
+    return await resume_parsing_service.parse_resume(
+        content, file.content_type or "", file.filename or ""
+    )

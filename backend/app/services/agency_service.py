@@ -211,6 +211,55 @@ async def get_agency_portal(
     )
 
 
+async def validate_portal_assignment(
+    db: AsyncSession,
+    portal_token: str,
+    assignment_id: uuid.UUID,
+) -> tuple[Agency, JobAgencyAssignment]:
+    """Resolve and validate an agency portal token + assignment for submission:
+    active agency, assignment belongs to it, not expired, quota not exhausted."""
+    from app.models.application import Application
+
+    agency = (await db.execute(
+        select(Agency).where(Agency.portal_token == portal_token, Agency.is_active == True)
+    )).scalar_one_or_none()
+    if not agency:
+        raise HTTPException(404, "Agency portal not found")
+
+    assignment = await db.get(JobAgencyAssignment, assignment_id)
+    if not assignment or assignment.agency_id != agency.id:
+        raise HTTPException(404, "Assignment not found")
+
+    if assignment.expires_at:
+        expires = assignment.expires_at
+        now = datetime.now(timezone.utc)
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        if expires < now:
+            raise HTTPException(400, "This job assignment has expired")
+
+    if assignment.max_submissions:
+        count = (await db.execute(
+            select(func.count()).select_from(Application).where(
+                Application.agency_id == agency.id,
+                Application.job_id == assignment.job_id,
+            )
+        )).scalar_one()
+        if count >= assignment.max_submissions:
+            raise HTTPException(400, "Submission limit reached for this job")
+
+    return agency, assignment
+
+
+async def get_agency_by_portal_token(db: AsyncSession, portal_token: str) -> Agency:
+    agency = (await db.execute(
+        select(Agency).where(Agency.portal_token == portal_token, Agency.is_active == True)
+    )).scalar_one_or_none()
+    if not agency:
+        raise HTTPException(404, "Agency portal not found")
+    return agency
+
+
 async def get_all_agency_portals(
     db: AsyncSession,
     portal_token: str,
@@ -231,14 +280,28 @@ async def get_all_agency_portals(
         .order_by(JobAgencyAssignment.created_at.desc())
     )).all()
 
+    stage_rows = (await db.execute(
+        select(Application.job_id, Application.stage, func.count().label("count"))
+        .where(Application.agency_id == agency.id)
+        .group_by(Application.job_id, Application.stage)
+    )).all()
+    stage_by_job: dict = {}
+    for job_id, stage, count in stage_rows:
+        stage_by_job.setdefault(job_id, {})[stage] = count
+
     assignments_data = []
+    total_submitted = total_hired = total_in_progress = total_rejected = 0
     for assignment, job_title in rows:
-        count = (await db.execute(
-            select(func.count()).select_from(Application).where(
-                Application.agency_id == agency.id,
-                Application.job_id == assignment.job_id,
-            )
-        )).scalar_one()
+        stage_map = stage_by_job.get(assignment.job_id, {})
+        count = sum(stage_map.values())
+        hired = stage_map.get("hired", 0)
+        rejected = stage_map.get("rejected", 0) + stage_map.get("withdrawn", 0)
+        in_progress = count - hired - rejected
+        total_submitted += count
+        total_hired += hired
+        total_in_progress += in_progress
+        total_rejected += rejected
+
         assignments_data.append({
             "assignment_id": str(assignment.id),
             "job_id": str(assignment.job_id),
@@ -247,7 +310,17 @@ async def get_all_agency_portals(
             "max_submissions": assignment.max_submissions,
             "expires_at": assignment.expires_at.isoformat() if assignment.expires_at else None,
             "submission_count": count,
+            "hired_count": hired,
+            "in_progress_count": in_progress,
+            "rejected_count": rejected,
             "created_at": assignment.created_at.isoformat(),
         })
 
-    return {"agency_name": agency.name, "assignments": assignments_data}
+    return {
+        "agency_name": agency.name,
+        "assignments": assignments_data,
+        "total_submitted": total_submitted,
+        "total_hired": total_hired,
+        "total_in_progress": total_in_progress,
+        "total_rejected": total_rejected,
+    }

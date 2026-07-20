@@ -12,6 +12,8 @@ from app.schemas.document import DocumentRequestResponse, PublicDocumentRequestR
 
 
 def _request_to_dict(req: DocumentRequest) -> dict:
+    from app.services.storage_service import refresh_url
+
     submitted = {d.document_type for d in req.documents}
     return {
         "id": req.id,
@@ -28,7 +30,8 @@ def _request_to_dict(req: DocumentRequest) -> dict:
                 "request_id": d.request_id,
                 "document_type": d.document_type,
                 "label": d.label,
-                "file_url": d.file_url,
+                # Re-signed on every read — same expiring-SAS issue as resume_url.
+                "file_url": refresh_url(d.file_url),
                 "file_name": d.file_name,
                 "uploaded_at": d.uploaded_at,
             }
@@ -315,8 +318,6 @@ async def send_document_request_email(db: AsyncSession, application_id: uuid.UUI
     from app.models.application import Application
     from app.models.user import User
     from app.models.job import Job
-    from app.services.email_service import send_email
-    from app.config import settings
 
     req = await get_or_create_request(db, application_id)
 
@@ -331,21 +332,13 @@ async def send_document_request_email(db: AsyncSession, application_id: uuid.UUI
     if not row:
         raise HTTPException(404, "Application not found")
 
-    full_name, candidate_email, job_title = row
-    upload_url = f"{settings.FRONTEND_URL}/portal/applications"
-
-    await send_email(
-        to_email=candidate_email,
-        subject=f"Action required: Submit documents for your {job_title} offer at Nablon AI",
-        template_name="document_request",
-        context={
-            "full_name": full_name,
-            "job_title": job_title,
-            "upload_url": upload_url,
-            "required_documents": REQUIRED_DOCUMENT_TYPES,
-            "expires_days": 30,
-        },
-    )
+    # Email (a real ACS send takes several seconds) runs out-of-request via
+    # Celery — this endpoint used to await send_email() inline and block the
+    # HR "resend" button for as long as the send took. Same fix as interview
+    # and assessment scheduling, and this task already existed for the
+    # automatic offer-stage trigger — this call path just wasn't using it.
+    from app.tasks.email_tasks import send_document_request_email_task
+    send_document_request_email_task.delay(str(application_id))
 
     req.email_sent_at = datetime.now(timezone.utc)
     await db.commit()

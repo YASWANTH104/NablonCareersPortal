@@ -107,6 +107,63 @@ async def upload_document(file: UploadFile, folder: str, document_type: str) -> 
     return await _save_locally(content, blob_name)
 
 
+def _extract_blob_name(url: str) -> str | None:
+    """Blob name (path within our container) from a stored Azure blob URL, or
+    None if this isn't one of our Azure blob URLs (e.g. a local /uploads/ path)."""
+    from urllib.parse import urlparse
+
+    if not url:
+        return None
+    parsed = urlparse(url)
+    if not parsed.netloc.endswith(".blob.core.windows.net"):
+        return None
+    prefix = f"/{settings.AZURE_STORAGE_CONTAINER}/"
+    if not parsed.path.startswith(prefix):
+        return None
+    return parsed.path[len(prefix):]
+
+
+def refresh_url(url: str, expiry_hours: int = 24) -> str:
+    """Re-sign a stored Azure blob URL with a fresh, short-lived SAS token.
+
+    The SAS token embedded at upload time only lasts 7 days — storing that full
+    URL and serving it back unchanged forever means any resume/document older
+    than 7 days permanently 403s with "AuthenticationFailed ... signed expiry
+    time must be after signed start time". Call this every time a stored blob
+    URL is about to be returned to a client, not just once at upload.
+    Local /uploads/ paths and anything else pass through unchanged.
+    """
+    if not _azure_configured():
+        return url
+    blob_name = _extract_blob_name(url)
+    if not blob_name:
+        return url
+
+    try:
+        from azure.storage.blob import generate_blob_sas, BlobSasPermissions
+        from datetime import datetime, timedelta, timezone
+
+        conn_parts = dict(
+            part.split("=", 1)
+            for part in settings.AZURE_STORAGE_CONNECTION_STRING.split(";")
+            if "=" in part
+        )
+        account_name = conn_parts.get("AccountName", "")
+        account_key = conn_parts.get("AccountKey", "")
+
+        sas_token = generate_blob_sas(
+            account_name=account_name,
+            container_name=settings.AZURE_STORAGE_CONTAINER,
+            blob_name=blob_name,
+            account_key=account_key,
+            permission=BlobSasPermissions(read=True),
+            expiry=datetime.now(timezone.utc) + timedelta(hours=expiry_hours),
+        )
+        return f"https://{account_name}.blob.core.windows.net/{settings.AZURE_STORAGE_CONTAINER}/{blob_name}?{sas_token}"
+    except Exception:
+        return url  # fail open to whatever was stored rather than 500 the whole response
+
+
 async def _save_locally(content: bytes, relative_path: str) -> str:
     # In local dev use a writable path next to the backend source tree
     base = Path(__file__).resolve().parent.parent.parent / "uploads"

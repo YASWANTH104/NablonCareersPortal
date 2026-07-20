@@ -36,24 +36,6 @@ def _to_dict(row) -> dict:
     return d
 
 
-async def _send_referral_invite_email(referral_dict: dict) -> None:
-    from app.services.email_service import send_email
-    from app.config import settings
-
-    apply_url = f"{settings.FRONTEND_URL}/jobs/{referral_dict['job_slug']}/apply"
-    await send_email(
-        to_email=referral_dict["candidate_email"],
-        subject=f"You've been referred for a role at Nablon AI – {referral_dict['job_title']}",
-        template_name="referral_invite",
-        context={
-            "candidate_name": referral_dict["candidate_name"],
-            "referrer_name": referral_dict["referrer_name"],
-            "job_title": referral_dict["job_title"],
-            "apply_url": apply_url,
-        },
-    )
-
-
 async def create_referral(db: AsyncSession, data: ReferralCreate, referrer_id: uuid.UUID) -> dict:
     from datetime import datetime, timezone, timedelta
     from app.models.application import Application
@@ -110,7 +92,16 @@ async def create_referral(db: AsyncSession, data: ReferralCreate, referrer_id: u
     row = (await db.execute(_build_join_query(Referral.id == referral.id))).first()
     await db.commit()
     result = _to_dict(row)
-    await _send_referral_invite_email(result)
+
+    # Email (a real ACS send takes several seconds) runs out-of-request via
+    # Celery — same fix as interview/assessment scheduling and document
+    # requests, which had the identical await-send_email-inline bug.
+    try:
+        from app.tasks.email_tasks import send_referral_invite_email_task
+        send_referral_invite_email_task.delay(str(result["id"]))
+    except Exception:
+        pass
+
     return result
 
 
@@ -195,5 +186,11 @@ async def resend_invite(db: AsyncSession, referral_id: uuid.UUID) -> dict:
     referral.updated_at = datetime.now(timezone.utc)
     await db.commit()
     result = await get_referral(db, referral_id)
-    await _send_referral_invite_email(result)
+
+    try:
+        from app.tasks.email_tasks import send_referral_invite_email_task
+        send_referral_invite_email_task.delay(str(referral_id))
+    except Exception:
+        pass
+
     return result
