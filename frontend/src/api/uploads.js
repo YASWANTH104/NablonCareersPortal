@@ -15,4 +15,11 @@ export const uploadsApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
+  parseResume: (file) => {
+    const form = new FormData();
+    form.append('file', file);
+    return client.post('/uploads/parse-resume', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
 };

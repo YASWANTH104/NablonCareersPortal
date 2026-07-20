@@ -45,6 +45,7 @@ import ReportsPage from '@/pages/hr/ReportsPage';
 import SettingsPage from '@/pages/hr/SettingsPage';
 import AgenciesPage from '@/pages/hr/AgenciesPage';
 import AgencyPortalPage from '@/pages/public/AgencyPortalPage';
+import InterviewFeedbackPage from '@/pages/public/InterviewFeedbackPage';
 import AgencyApplyLayout from '@/components/layout/AgencyApplyLayout';
 
 const router = createBrowserRouter([
@@ -140,6 +141,9 @@ const router = createBrowserRouter([
 
   // ── PUBLIC DOCUMENT SUBMISSION ──────────────────────────────
   { path: '/docs/submit/:token', element: <DocumentUploadPage /> },
+
+  // ── PUBLIC INTERVIEWER FEEDBACK (from email link) ───────────
+  { path: '/interviews/feedback/:token', element: <InterviewFeedbackPage /> },
 
   // ── AGENCY PORTAL ───────────────────────────────────────────
   { path: '/agency/:portalToken', element: <AgencyPortalPage /> },

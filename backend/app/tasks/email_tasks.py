@@ -36,6 +36,20 @@ async def _send_verification_email_async(to_email: str, full_name: str, token: s
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def send_password_reset_email_task(self, to_email: str, full_name: str, token: str):
+    try:
+        asyncio.run(_send_password_reset_email_async(to_email, full_name, token))
+    except Exception as exc:
+        logger.error(f"Password reset email failed: to={to_email}: {exc}")
+        raise self.retry(exc=exc)
+
+
+async def _send_password_reset_email_async(to_email: str, full_name: str, token: str):
+    from app.services.email_service import send_password_reset_email
+    await send_password_reset_email(to_email, full_name, token)
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def send_stage_update_email(self, application_id: str, new_stage: str, from_stage: str = None):
     try:
         asyncio.run(_send_stage_update_email_async(application_id, new_stage, from_stage))
@@ -214,6 +228,63 @@ async def _send_application_received_async(application_id: str):
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def send_sourced_application_welcome_email(self, application_id: str):
+    """Sent instead of send_application_received_email when an agency or HR/TA
+    submission creates a brand-new candidate account. The candidate has no
+    password yet, so this links straight to /reset-password with a token
+    generated at account-creation time (7-day expiry) rather than the generic
+    'View My Applications' CTA, which would otherwise dead-end at a login
+    screen they can't get past."""
+    try:
+        asyncio.run(_send_sourced_application_welcome_async(application_id))
+    except Exception as exc:
+        logger.error(f"Sourced application welcome email failed: app={application_id}: {exc}")
+        raise self.retry(exc=exc)
+
+
+async def _send_sourced_application_welcome_async(application_id: str):
+    from app.models.application import Application
+    from app.models.user import User
+    from app.models.job import Job
+    from app.services.email_service import send_email
+    from app.config import settings
+    from sqlalchemy import select
+
+    app_uuid = uuid.UUID(application_id)
+
+    async with _task_session() as db:
+        row = (await db.execute(
+            select(Application, User, Job.title.label("job_title"))
+            .join(User, User.id == Application.applicant_id)
+            .join(Job, Job.id == Application.job_id)
+            .where(Application.id == app_uuid)
+        )).first()
+
+        if not row:
+            return
+
+        app, user, job_title = row
+        if not user.password_reset_token:
+            return  # nothing to build a set-password link from
+
+        source_label = "one of our hiring partners" if app.source == "agency" else "our talent acquisition team"
+
+        await send_email(
+            to_email=user.email,
+            subject=f"Your application for {job_title} at Nablon AI",
+            template_name="sourced_application_welcome",
+            context={
+                "full_name": user.full_name,
+                "job_title": job_title,
+                "source_label": source_label,
+                "reset_url": f"{settings.FRONTEND_URL}/reset-password?token={user.password_reset_token}",
+            },
+        )
+
+        logger.info(f"Sourced application welcome email sent: app={application_id}, to={user.email}")
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def send_agency_stage_update_email(self, application_id: str, new_stage: str):
     try:
         asyncio.run(_send_agency_stage_update_email_async(application_id, new_stage))
@@ -345,11 +416,339 @@ async def _send_document_request_email_async(application_id: str):
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
-def send_interview_notification(self, interview_id: str):
+def send_referral_invite_email_task(self, referral_id: str):
     try:
-        logger.info(f"Interview notification queued: {interview_id}")
+        asyncio.run(_send_referral_invite_email_async(referral_id))
     except Exception as exc:
+        logger.error(f"Referral invite email failed: referral={referral_id}: {exc}")
         raise self.retry(exc=exc)
+
+
+async def _send_referral_invite_email_async(referral_id: str):
+    from sqlalchemy import select
+    from app.models.referral import Referral
+    from app.models.job import Job
+    from app.models.user import User
+    from app.services.email_service import send_email
+    from app.config import settings
+
+    r_uuid = uuid.UUID(referral_id)
+
+    async with _task_session() as db:
+        row = (await db.execute(
+            select(
+                Referral,
+                Job.title.label("job_title"),
+                Job.slug.label("job_slug"),
+                User.full_name.label("referrer_name"),
+            )
+            .join(Job, Referral.job_id == Job.id)
+            .join(User, Referral.referred_by == User.id)
+            .where(Referral.id == r_uuid)
+        )).first()
+        if not row:
+            return
+        referral, job_title, job_slug, referrer_name = row
+
+        await send_email(
+            to_email=referral.candidate_email,
+            subject=f"You've been referred for a role at Nablon AI – {job_title}",
+            template_name="referral_invite",
+            context={
+                "candidate_name": referral.candidate_name,
+                "referrer_name": referrer_name,
+                "job_title": job_title,
+                "apply_url": f"{settings.FRONTEND_URL}/jobs/{job_slug}/apply",
+            },
+        )
+
+        logger.info(f"Referral invite email sent: referral={referral_id}, to={referral.candidate_email}")
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def send_feedback_request_emails_task(self, interview_id: str):
+    try:
+        asyncio.run(_send_feedback_request_emails_async(interview_id))
+    except Exception as exc:
+        logger.error(f"Feedback request emails failed: interview={interview_id}: {exc}")
+        raise self.retry(exc=exc)
+
+
+async def _send_feedback_request_emails_async(interview_id: str):
+    from app.models.interview import Interview
+    from app.services.interview_service import send_feedback_request_emails
+
+    async with _task_session() as db:
+        interview = await db.get(Interview, uuid.UUID(interview_id))
+        if not interview:
+            return
+        sent = await send_feedback_request_emails(db, interview)
+        logger.info(f"Feedback request emails sent: interview={interview_id}, count={sent}")
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def send_assessment_scheduled_email(self, assessment_id: str):
+    try:
+        asyncio.run(_send_assessment_scheduled_async(assessment_id))
+    except Exception as exc:
+        logger.error(f"Assessment scheduled email failed: assessment={assessment_id}: {exc}")
+        raise self.retry(exc=exc)
+
+
+async def _send_assessment_scheduled_async(assessment_id: str):
+    from app.models.assessment import Assessment
+    from app.models.application import Application
+    from app.models.user import User
+    from app.models.job import Job
+    from app.services.email_service import send_email
+
+    a_uuid = uuid.UUID(assessment_id)
+
+    async with _task_session() as db:
+        assessment = await db.get(Assessment, a_uuid)
+        if not assessment:
+            return
+        app = await db.get(Application, assessment.application_id)
+        if not app:
+            return
+        candidate = await db.get(User, app.applicant_id)
+        if not candidate:
+            return
+        job = await db.get(Job, app.job_id)
+
+        job_title = job.title if job else "the position"
+        deadline_str = (
+            assessment.deadline.strftime("%B %d, %Y at %I:%M %p")
+            if assessment.deadline else "TBD"
+        )
+        type_label = assessment.assessment_type.replace("_", " ").title()
+
+        await send_email(
+            to_email=candidate.email,
+            subject=f"Assessment Assigned – {job_title}",
+            template_name="assessment_scheduled",
+            context={
+                "full_name": candidate.full_name,
+                "job_title": job_title,
+                "assessment_title": assessment.title,
+                "assessment_type": type_label,
+                "deadline": deadline_str,
+                "duration_mins": assessment.duration_mins,
+                "platform_link": assessment.platform_link,
+                "instructions": assessment.instructions,
+            },
+        )
+
+        logger.info(f"Assessment scheduled email sent: assessment={assessment_id}, to={candidate.email}")
+
+
+def _interview_scheduled_str(interview) -> str:
+    return (
+        interview.scheduled_at.strftime("%A, %d %B %Y at %I:%M %p UTC")
+        if interview.scheduled_at else "TBD"
+    )
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def send_interview_scheduled_notifications(self, interview_id: str):
+    try:
+        asyncio.run(_send_interview_scheduled_async(interview_id))
+    except Exception as exc:
+        logger.error(f"Interview scheduled email failed: interview={interview_id}: {exc}")
+        raise self.retry(exc=exc)
+
+
+async def _send_interview_scheduled_async(interview_id: str):
+    from sqlalchemy import select
+    from app.models.interview import Interview, InterviewPanelist
+    from app.models.application import Application
+    from app.models.user import User
+    from app.models.job import Job
+    from app.services.email_service import send_email
+
+    iv_uuid = uuid.UUID(interview_id)
+
+    async with _task_session() as db:
+        interview = await db.get(Interview, iv_uuid)
+        if not interview:
+            return
+        app = await db.get(Application, interview.application_id)
+        if not app:
+            return
+        candidate = await db.get(User, app.applicant_id)
+        job = await db.get(Job, app.job_id)
+
+        job_title = job.title if job else "the position"
+        email_ctx = {
+            "job_title": job_title,
+            "round_number": interview.round_number,
+            "title": interview.title or f"Round {interview.round_number}",
+            "interview_type": interview.interview_type,
+            "scheduled_at": _interview_scheduled_str(interview),
+            "duration_mins": interview.duration_mins,
+            "meeting_link": interview.meeting_link or "",
+            "location": interview.location or "",
+        }
+
+        if candidate:
+            await send_email(
+                to_email=candidate.email,
+                subject=f"Interview Scheduled – {job_title}",
+                template_name="interview_scheduled",
+                context={"full_name": candidate.full_name, "role": "candidate", **email_ctx},
+            )
+
+        panelists = (await db.execute(
+            select(InterviewPanelist).where(InterviewPanelist.interview_id == iv_uuid)
+        )).scalars().all()
+        for p in panelists:
+            interviewer = await db.get(User, p.user_id)
+            if interviewer:
+                await send_email(
+                    to_email=interviewer.email,
+                    subject=f"Interview Assigned – {job_title}",
+                    template_name="interview_scheduled",
+                    context={
+                        "full_name": interviewer.full_name,
+                        "role": "interviewer",
+                        "candidate_name": candidate.full_name if candidate else "",
+                        **email_ctx,
+                    },
+                )
+
+        logger.info(f"Interview scheduled notifications sent: interview={interview_id}")
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def send_interview_rescheduled_notifications(self, interview_id: str):
+    try:
+        asyncio.run(_send_interview_rescheduled_async(interview_id))
+    except Exception as exc:
+        logger.error(f"Interview rescheduled email failed: interview={interview_id}: {exc}")
+        raise self.retry(exc=exc)
+
+
+async def _send_interview_rescheduled_async(interview_id: str):
+    from sqlalchemy import select
+    from app.models.interview import Interview, InterviewPanelist
+    from app.models.application import Application
+    from app.models.user import User
+    from app.models.job import Job
+    from app.services.email_service import send_email
+
+    iv_uuid = uuid.UUID(interview_id)
+
+    async with _task_session() as db:
+        interview = await db.get(Interview, iv_uuid)
+        if not interview:
+            return
+        app = await db.get(Application, interview.application_id)
+        if not app:
+            return
+        candidate = await db.get(User, app.applicant_id)
+        job = await db.get(Job, app.job_id)
+        job_title = job.title if job else "Nablon AI"
+
+        email_ctx = {
+            "job_title": job.title if job else "the position",
+            "round_number": interview.round_number,
+            "title": interview.title or f"Round {interview.round_number}",
+            "interview_type": interview.interview_type,
+            "scheduled_at": _interview_scheduled_str(interview),
+            "duration_mins": interview.duration_mins,
+            "meeting_link": interview.meeting_link or "",
+            "location": interview.location or "",
+        }
+
+        if candidate:
+            await send_email(
+                to_email=candidate.email,
+                subject=f"Interview Rescheduled – {job_title}",
+                template_name="interview_rescheduled",
+                context={"full_name": candidate.full_name, "role": "candidate", **email_ctx},
+            )
+
+        panelists = (await db.execute(
+            select(InterviewPanelist).where(InterviewPanelist.interview_id == iv_uuid)
+        )).scalars().all()
+        for p in panelists:
+            interviewer = await db.get(User, p.user_id)
+            if interviewer:
+                await send_email(
+                    to_email=interviewer.email,
+                    subject=f"Interview Rescheduled – {job_title}",
+                    template_name="interview_rescheduled",
+                    context={
+                        "full_name": interviewer.full_name,
+                        "role": "interviewer",
+                        "candidate_name": candidate.full_name if candidate else "",
+                        **email_ctx,
+                    },
+                )
+
+        logger.info(f"Interview rescheduled notifications sent: interview={interview_id}")
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def send_interview_cancelled_notifications(self, interview_id: str):
+    try:
+        asyncio.run(_send_interview_cancelled_async(interview_id))
+    except Exception as exc:
+        logger.error(f"Interview cancelled email failed: interview={interview_id}: {exc}")
+        raise self.retry(exc=exc)
+
+
+async def _send_interview_cancelled_async(interview_id: str):
+    from sqlalchemy import select
+    from app.models.interview import Interview, InterviewPanelist
+    from app.models.application import Application
+    from app.models.user import User
+    from app.models.job import Job
+    from app.services.email_service import send_email
+
+    iv_uuid = uuid.UUID(interview_id)
+
+    async with _task_session() as db:
+        interview = await db.get(Interview, iv_uuid)
+        if not interview:
+            return
+        app = await db.get(Application, interview.application_id)
+        if not app:
+            return
+        candidate = await db.get(User, app.applicant_id)
+        job = await db.get(Job, app.job_id)
+        job_title = job.title if job else "Nablon AI"
+
+        email_ctx = {
+            "job_title": job.title if job else "the position",
+            "round_number": interview.round_number,
+            "title": interview.title or f"Round {interview.round_number}",
+            "interview_type": interview.interview_type,
+            "scheduled_at": _interview_scheduled_str(interview),
+        }
+
+        if candidate:
+            await send_email(
+                to_email=candidate.email,
+                subject=f"Interview Cancelled – {job_title}",
+                template_name="interview_cancelled",
+                context={"full_name": candidate.full_name, "role": "candidate", **email_ctx},
+            )
+
+        panelists = (await db.execute(
+            select(InterviewPanelist).where(InterviewPanelist.interview_id == iv_uuid)
+        )).scalars().all()
+        for p in panelists:
+            interviewer = await db.get(User, p.user_id)
+            if interviewer:
+                await send_email(
+                    to_email=interviewer.email,
+                    subject=f"Interview Cancelled – {job_title}",
+                    template_name="interview_cancelled",
+                    context={"full_name": interviewer.full_name, "role": "interviewer", **email_ctx},
+                )
+
+        logger.info(f"Interview cancelled notifications sent: interview={interview_id}")
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)

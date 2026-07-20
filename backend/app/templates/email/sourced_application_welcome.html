@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}Your Application – Nablon AI Careers{% endblock %}
+
+{% block content %}
+<h2>Hi {{ full_name }},</h2>
+
+<p>
+  {{ source_label|capitalize }} submitted an application on your behalf for the
+  <strong>{{ job_title }}</strong> role at Nablon AI, and we've created a candidate
+  portal account for you using this email address.
+</p>
+
+<p>
+  To track your application status and complete your profile, set up a password
+  for your account:
+</p>
+
+<a href="{{ reset_url }}" class="cta">Set Up My Account</a>
+
+<p style="margin-top: 24px; color: #6B7280; font-size: 14px;">
+  This link is valid for 7 days. If it expires, just use "Forgot password" on the
+  sign-in page with this same email address to set a new one at any time.
+</p>
+{% endblock %}

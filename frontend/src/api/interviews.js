@@ -13,4 +13,6 @@ export const interviewsApi = {
   submitSelfFeedback: (id, data) => client.post(`/interviews/${id}/self-feedback`, data),
   getSelfFeedback: (id) => client.get(`/interviews/${id}/self-feedback`),
   getCandidateSummary: (id) => client.get(`/interviews/${id}/candidate-summary`),
+  getFeedbackByToken: (token) => client.get(`/interviews/feedback-by-token/${token}`),
+  submitFeedbackByToken: (token, data) => client.post(`/interviews/feedback-by-token/${token}`, data),
 };

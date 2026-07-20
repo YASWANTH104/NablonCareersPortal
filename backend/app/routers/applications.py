@@ -2,7 +2,7 @@ import csv
 import io
 import uuid
 from typing import Optional
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, UploadFile, File, Form, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,6 +39,54 @@ async def submit_application(
     db: AsyncSession = Depends(get_db),
 ):
     return await application_service.submit_application(db, data, applicant_id=current_user.id)
+
+
+_HR_SUBMIT_SOURCES = {"talent_acquisition", "direct", "agency"}
+
+
+@router.post("/hr-submit", status_code=201)
+async def hr_submit_candidate(
+    resume: UploadFile = File(...),
+    job_id: uuid.UUID = Form(...),
+    full_name: str = Form(...),
+    email: str = Form(...),
+    source: str = Form("talent_acquisition"),
+    phone: Optional[str] = Form(None),
+    current_location: Optional[str] = Form(None),
+    total_experience: Optional[str] = Form(None),
+    current_company: Optional[str] = Form(None),
+    current_designation: Optional[str] = Form(None),
+    education: Optional[str] = Form(None),
+    skills: Optional[str] = Form(None),
+    linkedin_url: Optional[str] = Form(None),
+    user=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """HR/TA uploads a sourced candidate's resume and creates the application directly."""
+    from app.services import storage_service
+
+    if source not in _HR_SUBMIT_SOURCES:
+        raise HTTPException(400, f"Invalid source. Allowed: {', '.join(sorted(_HR_SUBMIT_SOURCES))}")
+
+    resume_url = await storage_service.upload_resume(resume, f"hr-{user.id}")
+
+    application = await application_service.submit_sourced_application(
+        db,
+        job_id=job_id,
+        full_name=full_name,
+        email=email,
+        resume_url=resume_url,
+        source=source,
+        phone=phone,
+        linkedin_url=linkedin_url or None,
+        current_location=current_location,
+        total_experience=total_experience,
+        current_company=current_company,
+        current_designation=current_designation,
+        education=education,
+        skills=skills,
+    )
+    return {"application_id": str(application.id), "stage": application.stage}
 
 
 @router.get("/export")

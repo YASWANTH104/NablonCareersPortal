@@ -7,11 +7,13 @@ import {
 } from '@dnd-kit/core';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { formatDistanceToNow } from 'date-fns';
-import { Search, LayoutGrid, List, Star, GripVertical, X } from 'lucide-react';
+import { Search, LayoutGrid, List, Star, GripVertical, X, UserPlus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { applicationsApi } from '@/api/applications';
 import { jobsApi } from '@/api/jobs';
 import { agenciesApi } from '@/api/agencies';
+import { uploadsApi } from '@/api/uploads';
+import CandidateIntakeForm from '@/components/shared/CandidateIntakeForm';
 
 const PIPELINE_STAGES = [
   { key: 'applied',    label: 'Applied',    color: 'bg-blue-100 text-blue-800' },
@@ -303,6 +305,83 @@ function TableView({ applications, onRowClick }) {
   );
 }
 
+// ── Add Candidate (Talent Acquisition sourcing) ──────────────────────────────
+
+const SOURCE_OPTIONS = [
+  { value: 'talent_acquisition', label: 'Talent Acquisition' },
+  { value: 'direct', label: 'Direct' },
+];
+
+function AddCandidateModal({ jobs, onClose }) {
+  const queryClient = useQueryClient();
+  const [jobId, setJobId] = useState('');
+  const [source, setSource] = useState('talent_acquisition');
+
+  const handleSubmit = async (payload) => {
+    if (!jobId) {
+      toast.error('Please select a job');
+      throw new Error('no job');
+    }
+    try {
+      await applicationsApi.hrSubmitCandidate({ ...payload, job_id: jobId, source });
+      toast.success('Candidate added to the pipeline!');
+      queryClient.invalidateQueries({ queryKey: ['hr-applications'] });
+      onClose();
+    } catch (err) {
+      if (err.response) toast.error(err.response.data?.detail ?? 'Failed to add candidate');
+      throw err;
+    }
+  };
+
+  const selectCls =
+    'w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl w-full max-w-lg my-8 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-base font-bold text-gray-900">Add candidate</h3>
+            <p className="text-xs text-gray-500 mt-0.5">Upload a sourced resume — fields auto-fill for review</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <CandidateIntakeForm
+          onParse={(file) => uploadsApi.parseResume(file)}
+          onSubmit={handleSubmit}
+          submitLabel="Add candidate"
+          disabled={!jobId}
+          header={
+            <div className="grid sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Job <span className="text-red-500">*</span>
+                </label>
+                <select value={jobId} onChange={(e) => setJobId(e.target.value)} className={selectCls}>
+                  <option value="">Select a job…</option>
+                  {jobs?.map((job) => (
+                    <option key={job.id} value={job.id}>{job.title}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Source</label>
+                <select value={source} onChange={(e) => setSource(e.target.value)} className={selectCls}>
+                  {SOURCE_OPTIONS.map((s) => (
+                    <option key={s.value} value={s.value}>{s.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          }
+        />
+      </div>
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ApplicantsPage() {
@@ -310,6 +389,7 @@ export default function ApplicantsPage() {
   const queryClient = useQueryClient();
 
   const [view, setView] = useState('kanban');
+  const [showAddCandidate, setShowAddCandidate] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState('');
   const [stageFilter, setStageFilter] = useState('');
   const [agencyFilter, setAgencyFilter] = useState('');
@@ -365,6 +445,13 @@ export default function ApplicantsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowAddCandidate(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-brand-500 text-white text-sm font-semibold rounded-lg hover:bg-brand-600 transition-colors"
+          >
+            <UserPlus className="w-4 h-4" />
+            Add candidate
+          </button>
           <button
             onClick={() => setView('kanban')}
             className={`p-2 rounded-lg transition-colors ${
@@ -501,6 +588,10 @@ export default function ApplicantsPage() {
             </div>
           )}
         </>
+      )}
+
+      {showAddCandidate && (
+        <AddCandidateModal jobs={jobsData} onClose={() => setShowAddCandidate(false)} />
       )}
     </div>
   );

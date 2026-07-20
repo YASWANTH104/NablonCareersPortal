@@ -2,6 +2,16 @@ import client from './client';
 
 export const applicationsApi = {
   submit: (data) => client.post('/applications', data),
+  hrSubmitCandidate: ({ resume, ...fields }) => {
+    const form = new FormData();
+    form.append('resume', resume);
+    Object.entries(fields).forEach(([key, val]) => {
+      if (val !== undefined && val !== null && val !== '') form.append(key, val);
+    });
+    return client.post('/applications/hr-submit', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
   mine: (page = 1, limit = 10) => client.get('/applications/mine', { params: { page, limit } }),
   list: (params) => client.get('/applications', { params }),
   getById: (id) => client.get(`/applications/${id}`),

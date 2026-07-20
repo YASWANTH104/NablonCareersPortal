@@ -234,25 +234,11 @@ async def create_interview(
         from app.models.notification import Notification
         from app.models.application import Application
         from app.models.user import User
-        from app.models.job import Job
-        from app.services.email_service import send_email
 
         app = await db.get(Application, data.application_id)
         if app:
             candidate = await db.get(User, app.applicant_id)
-            job = await db.get(Job, app.job_id)
             scheduled_str = data.scheduled_at.strftime("%A, %d %B %Y at %I:%M %p UTC") if data.scheduled_at else "TBD"
-            job_title = job.title if job else "the position"
-            email_ctx = {
-                "job_title": job_title,
-                "round_number": data.round_number,
-                "title": data.title or f"Round {data.round_number}",
-                "interview_type": data.interview_type,
-                "scheduled_at": scheduled_str,
-                "duration_mins": data.duration_mins,
-                "meeting_link": data.meeting_link or "",
-                "location": data.location or "",
-            }
 
             if candidate:
                 db.add(Notification(
@@ -262,12 +248,6 @@ async def create_interview(
                     body=f"Your interview has been scheduled for {scheduled_str}.",
                     link="/portal/applications",
                 ))
-                await send_email(
-                    to_email=candidate.email,
-                    subject=f"Interview Scheduled – {job_title}",
-                    template_name="interview_scheduled",
-                    context={"full_name": candidate.full_name, "role": "candidate", **email_ctx},
-                )
 
             for p in panelists:
                 interviewer = await db.get(User, p.user_id)
@@ -279,22 +259,20 @@ async def create_interview(
                         body=f"You are scheduled to interview {candidate.full_name if candidate else 'a candidate'} on {scheduled_str}.",
                         link="/hr/interviews",
                     ))
-                    await send_email(
-                        to_email=interviewer.email,
-                        subject=f"Interview Assigned – {job_title}",
-                        template_name="interview_scheduled",
-                        context={
-                            "full_name": interviewer.full_name,
-                            "role": "interviewer",
-                            "candidate_name": candidate.full_name if candidate else "",
-                            **email_ctx,
-                        },
-                    )
     except Exception:
         pass
 
     await db.commit()
     await db.refresh(interview)
+
+    # Emails (including real ACS sends, which can take several seconds each) run
+    # out-of-request via Celery — sending them inline here was why scheduling an
+    # interview with panelists could take 10-20+ seconds before the API responded.
+    try:
+        from app.tasks.email_tasks import send_interview_scheduled_notifications
+        send_interview_scheduled_notifications.delay(str(interview.id))
+    except Exception:
+        pass
 
     return _interview_to_response(interview, panelists, [])
 
@@ -537,27 +515,14 @@ async def update_interview(
             from app.models.notification import Notification
             from app.models.application import Application
             from app.models.user import User
-            from app.models.job import Job
-            from app.services.email_service import send_email
 
             app_obj = await db.get(Application, interview.application_id)
             if app_obj:
                 candidate = await db.get(User, app_obj.applicant_id)
-                job = await db.get(Job, app_obj.job_id)
                 scheduled_str = (
                     interview.scheduled_at.strftime("%A, %d %B %Y at %I:%M %p UTC")
                     if interview.scheduled_at else "TBD"
                 )
-                email_ctx = {
-                    "job_title": job.title if job else "the position",
-                    "round_number": interview.round_number,
-                    "title": interview.title or f"Round {interview.round_number}",
-                    "interview_type": interview.interview_type,
-                    "scheduled_at": scheduled_str,
-                    "duration_mins": interview.duration_mins,
-                    "meeting_link": interview.meeting_link or "",
-                    "location": interview.location or "",
-                }
 
                 if candidate:
                     db.add(Notification(
@@ -567,12 +532,6 @@ async def update_interview(
                         body=f"Your interview has been rescheduled to {scheduled_str}.",
                         link="/portal/applications",
                     ))
-                    await send_email(
-                        to_email=candidate.email,
-                        subject=f"Interview Rescheduled – {job.title if job else 'Nablon AI'}",
-                        template_name="interview_rescheduled",
-                        context={"full_name": candidate.full_name, "role": "candidate", **email_ctx},
-                    )
 
                 panelists_res = (await db.execute(
                     select(InterviewPanelist).where(InterviewPanelist.interview_id == interview_id)
@@ -588,19 +547,14 @@ async def update_interview(
                             body=f"An interview you are paneling has been rescheduled to {scheduled_str}.",
                             link="/hr/interviews",
                         ))
-                        await send_email(
-                            to_email=interviewer_user.email,
-                            subject=f"Interview Rescheduled – {job.title if job else 'Nablon AI'}",
-                            template_name="interview_rescheduled",
-                            context={
-                                "full_name": interviewer_user.full_name,
-                                "role": "interviewer",
-                                "candidate_name": candidate.full_name if candidate else "",
-                                **email_ctx,
-                            },
-                        )
 
                 await db.commit()
+        except Exception:
+            pass
+
+        try:
+            from app.tasks.email_tasks import send_interview_rescheduled_notifications
+            send_interview_rescheduled_notifications.delay(str(interview_id))
         except Exception:
             pass
 
@@ -623,20 +577,10 @@ async def cancel_interview(db: AsyncSession, interview_id: uuid.UUID) -> None:
         from app.models.notification import Notification
         from app.models.application import Application
         from app.models.user import User
-        from app.models.job import Job
-        from app.services.email_service import send_email
 
         app_obj = await db.get(Application, interview.application_id)
         if app_obj:
             candidate = await db.get(User, app_obj.applicant_id)
-            job = await db.get(Job, app_obj.job_id)
-            email_ctx = {
-                "job_title": job.title if job else "the position",
-                "round_number": interview.round_number,
-                "title": interview.title or f"Round {interview.round_number}",
-                "interview_type": interview.interview_type,
-                "scheduled_at": scheduled_str,
-            }
 
             if candidate:
                 db.add(Notification(
@@ -646,12 +590,6 @@ async def cancel_interview(db: AsyncSession, interview_id: uuid.UUID) -> None:
                     body=f"Your interview scheduled for {scheduled_str} has been cancelled.",
                     link="/portal/applications",
                 ))
-                await send_email(
-                    to_email=candidate.email,
-                    subject=f"Interview Cancelled – {job.title if job else 'Nablon AI'}",
-                    template_name="interview_cancelled",
-                    context={"full_name": candidate.full_name, "role": "candidate", **email_ctx},
-                )
 
             panelists_res = (await db.execute(
                 select(InterviewPanelist).where(InterviewPanelist.interview_id == interview_id)
@@ -667,16 +605,73 @@ async def cancel_interview(db: AsyncSession, interview_id: uuid.UUID) -> None:
                         body=f"An interview you were scheduled to conduct ({scheduled_str}) has been cancelled.",
                         link="/hr/interviews",
                     ))
-                    await send_email(
-                        to_email=interviewer_user.email,
-                        subject=f"Interview Cancelled – {job.title if job else 'Nablon AI'}",
-                        template_name="interview_cancelled",
-                        context={"full_name": interviewer_user.full_name, "role": "interviewer", **email_ctx},
-                    )
 
             await db.commit()
     except Exception:
         pass
+
+    try:
+        from app.tasks.email_tasks import send_interview_cancelled_notifications
+        send_interview_cancelled_notifications.delay(str(interview_id))
+    except Exception:
+        pass
+
+
+async def send_feedback_request_emails(db: AsyncSession, interview: Interview) -> int:
+    """Email each panelist a tokenized link to submit feedback without logging in.
+    Called when an interview transitions to 'completed'. Returns emails sent."""
+    import secrets
+    from app.models.application import Application
+    from app.models.user import User
+    from app.models.job import Job
+    from app.services.email_service import send_email
+    from app.config import settings
+
+    app = await db.get(Application, interview.application_id)
+    if not app:
+        return 0
+    job = await db.get(Job, app.job_id)
+    candidate = await db.get(User, app.applicant_id)
+
+    panelists = (await db.execute(
+        select(InterviewPanelist).where(InterviewPanelist.interview_id == interview.id)
+    )).scalars().all()
+
+    submitted_by_ids = {
+        row.submitted_by for row in (await db.execute(
+            select(InterviewFeedback.submitted_by).where(
+                InterviewFeedback.interview_id == interview.id
+            )
+        )).all()
+    }
+
+    sent = 0
+    for panelist in panelists:
+        if panelist.user_id in submitted_by_ids:
+            continue
+        interviewer = await db.get(User, panelist.user_id)
+        if not interviewer:
+            continue
+        if not panelist.feedback_token:  # legacy rows created before tokens existed
+            panelist.feedback_token = secrets.token_urlsafe(32)
+
+        await send_email(
+            to_email=interviewer.email,
+            subject=f"Submit your interview feedback – {job.title if job else 'Interview'}",
+            template_name="feedback_request",
+            context={
+                "full_name": interviewer.full_name,
+                "candidate_name": candidate.full_name if candidate else "the candidate",
+                "job_title": job.title if job else "the position",
+                "interview_title": interview.title or f"Round {interview.round_number}",
+                "feedback_url": f"{settings.FRONTEND_URL}/interviews/feedback/{panelist.feedback_token}",
+            },
+        )
+        sent += 1
+
+    if sent:
+        await db.commit()
+    return sent
 
 
 async def complete_interview(db: AsyncSession, interview_id: uuid.UUID, notes: Optional[str] = None) -> InterviewResponse:
@@ -689,6 +684,16 @@ async def complete_interview(db: AsyncSession, interview_id: uuid.UUID, notes: O
     if notes:
         interview.notes = notes
     await db.commit()
+
+    # Feedback-request emails (one real ACS send per panelist) run out-of-request
+    # via Celery — this used to await send_feedback_request_emails() inline here,
+    # the same class of bug fixed for interview/assessment scheduling.
+    try:
+        from app.tasks.email_tasks import send_feedback_request_emails_task
+        send_feedback_request_emails_task.delay(str(interview_id))
+    except Exception:
+        pass
+
     return await get_interview(db, interview_id)
 
 
@@ -708,16 +713,80 @@ async def auto_complete_past_interviews(db: AsyncSession) -> int:
     interviews = result.scalars().all()
 
     count = 0
+    completed: list[Interview] = []
     for interview in interviews:
         duration = interview.duration_mins or 60
         end_time = interview.scheduled_at + timedelta(minutes=duration)
         if end_time < now:
             interview.status = "completed"
+            completed.append(interview)
             count += 1
 
     if count:
         await db.commit()
+
+    for interview in completed:
+        try:
+            await send_feedback_request_emails(db, interview)
+        except Exception:
+            pass
+
     return count
+
+
+async def _get_panelist_by_token(db: AsyncSession, token: str) -> tuple[InterviewPanelist, Interview]:
+    panelist = (await db.execute(
+        select(InterviewPanelist).where(InterviewPanelist.feedback_token == token)
+    )).scalar_one_or_none()
+    if not panelist:
+        raise HTTPException(404, "Invalid or expired feedback link")
+    interview = await db.get(Interview, panelist.interview_id)
+    if not interview or interview.status == "cancelled":
+        raise HTTPException(404, "Invalid or expired feedback link")
+    return panelist, interview
+
+
+async def get_feedback_context_by_token(db: AsyncSession, token: str) -> dict:
+    """Context for the public (no-login) feedback page, plus any existing feedback to prefill."""
+    from app.models.application import Application
+    from app.models.user import User
+    from app.models.job import Job
+
+    panelist, interview = await _get_panelist_by_token(db, token)
+
+    app = await db.get(Application, interview.application_id)
+    job = await db.get(Job, app.job_id) if app else None
+    candidate = await db.get(User, app.applicant_id) if app else None
+    interviewer = await db.get(User, panelist.user_id)
+
+    existing = (await db.execute(
+        select(InterviewFeedback).where(
+            InterviewFeedback.interview_id == interview.id,
+            InterviewFeedback.submitted_by == panelist.user_id,
+        )
+    )).scalar_one_or_none()
+
+    return {
+        "interview_id": str(interview.id),
+        "interview_title": interview.title or f"Round {interview.round_number}",
+        "round_number": interview.round_number,
+        "interview_type": interview.interview_type,
+        "scheduled_at": interview.scheduled_at,
+        "status": interview.status,
+        "candidate_name": candidate.full_name if candidate else None,
+        "job_title": job.title if job else None,
+        "interviewer_name": interviewer.full_name if interviewer else None,
+        "existing_feedback": _feedback_to_dict(existing) if existing else None,
+    }
+
+
+async def submit_feedback_by_token(
+    db: AsyncSession,
+    token: str,
+    data: InterviewFeedbackCreate,
+) -> InterviewFeedback:
+    panelist, interview = await _get_panelist_by_token(db, token)
+    return await submit_feedback(db, interview.id, data, submitted_by=panelist.user_id)
 
 
 async def submit_feedback(

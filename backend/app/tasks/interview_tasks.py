@@ -105,6 +105,10 @@ def send_feedback_reminders():
                     if not interviewer:
                         continue
 
+                    if not panelist.feedback_token:  # legacy rows created before tokens existed
+                        import secrets
+                        panelist.feedback_token = secrets.token_urlsafe(32)
+
                     await send_email(
                         to_email=interviewer.email,
                         subject=f"Reminder: Please submit your feedback – {job.title if job else 'Interview'}",
@@ -114,7 +118,7 @@ def send_feedback_reminders():
                             "candidate_name": candidate.full_name if candidate else "the candidate",
                             "job_title": job.title if job else "the position",
                             "interview_title": interview.title or f"Round {interview.round_number}",
-                            "interviews_url": f"{settings.FRONTEND_URL}/hr/interviews",
+                            "interviews_url": f"{settings.FRONTEND_URL}/interviews/feedback/{panelist.feedback_token}",
                         },
                     )
                     logger.info(

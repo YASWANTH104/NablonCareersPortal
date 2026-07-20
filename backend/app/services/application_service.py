@@ -27,12 +27,18 @@ VALID_TRANSITIONS = {
 
 
 def _app_to_dict(app: Application) -> dict:
+    from app.services.storage_service import refresh_url
+
     return {
         "id": app.id,
         "job_id": app.job_id,
         "applicant_id": app.applicant_id,
         "referral_id": app.referral_id,
-        "resume_url": app.resume_url,
+        # Re-signed on every read — the SAS token baked in at upload time only
+        # lasts 7 days, so serving the stored value as-is breaks any resume
+        # older than that with an "AuthenticationFailed ... signed expiry"
+        # error from Azure.
+        "resume_url": refresh_url(app.resume_url),
         "cover_letter": app.cover_letter,
         "linkedin_url": app.linkedin_url,
         "portfolio_url": app.portfolio_url,
@@ -132,6 +138,123 @@ async def submit_application(
     try:
         from app.tasks.email_tasks import send_application_received_email
         send_application_received_email.delay(str(application.id))
+    except Exception:
+        pass
+
+    return application
+
+
+async def submit_sourced_application(
+    db: AsyncSession,
+    *,
+    job_id: uuid.UUID,
+    full_name: str,
+    email: str,
+    resume_url: str,
+    source: str,
+    agency_id: Optional[uuid.UUID] = None,
+    phone: Optional[str] = None,
+    linkedin_url: Optional[str] = None,
+    portfolio_url: Optional[str] = None,
+    github_url: Optional[str] = None,
+    cover_letter: Optional[str] = None,
+    current_location: Optional[str] = None,
+    total_experience: Optional[str] = None,
+    current_company: Optional[str] = None,
+    current_designation: Optional[str] = None,
+    education: Optional[str] = None,
+    skills: Optional[str] = None,
+) -> Application:
+    """Create an application on behalf of a candidate (agency upload or HR/TA sourcing).
+
+    Finds the candidate user by email or creates a passwordless account
+    (they can claim it via the forgot-password flow). Skips the rejection
+    cool-off check — HR is knowingly inserting this candidate."""
+    import secrets
+    from datetime import timedelta, timezone
+    from app.models.user import User as UserModel
+    from app.models.candidate_profile import CandidateProfile
+    from app.models.job import Job
+    from app.utils.security import hash_password, generate_token
+
+    job = await db.get(Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    email = email.strip().lower()
+    user = (await db.execute(
+        select(UserModel).where(func.lower(UserModel.email) == email)
+    )).scalar_one_or_none()
+
+    if user and user.role not in ("applicant", "employee"):
+        raise HTTPException(400, "This email belongs to an internal user account")
+
+    is_new_user = not user
+    if not user:
+        # No password is set on a sourced account — the candidate claims it via the
+        # set-password link in send_sourced_application_welcome_email (a proactively
+        # generated password_reset_token), or the standard /forgot-password flow later.
+        user = UserModel(
+            email=email,
+            full_name=full_name.strip(),
+            password_hash=hash_password(secrets.token_urlsafe(24)),
+            role="applicant",
+            phone=phone,
+            is_verified=False,
+            password_reset_token=generate_token(),
+            password_reset_expires=datetime.now(timezone.utc) + timedelta(days=7),
+        )
+        db.add(user)
+        await db.flush()
+    elif phone and not user.phone:
+        user.phone = phone
+
+    existing = (await db.execute(
+        select(Application).where(
+            Application.job_id == job_id,
+            Application.applicant_id == user.id,
+        )
+    )).scalar_one_or_none()
+    if existing:
+        raise HTTPException(409, "This candidate has already been submitted for this job")
+
+    profile = await db.get(CandidateProfile, user.id)
+    if not profile:
+        profile = CandidateProfile(user_id=user.id)
+        db.add(profile)
+    for field, val in (
+        ("current_location", current_location),
+        ("total_experience", total_experience),
+        ("current_company", current_company),
+        ("current_designation", current_designation),
+        ("education", education),
+        ("skills", skills),
+    ):
+        if val and val.strip():
+            setattr(profile, field, val.strip())
+
+    application = Application(
+        job_id=job_id,
+        applicant_id=user.id,
+        resume_url=resume_url,
+        source=source,
+        agency_id=agency_id,
+        cover_letter=cover_letter,
+        linkedin_url=linkedin_url,
+        portfolio_url=portfolio_url,
+        github_url=github_url,
+    )
+    db.add(application)
+    await db.commit()
+    await db.refresh(application)
+
+    try:
+        if is_new_user:
+            from app.tasks.email_tasks import send_sourced_application_welcome_email
+            send_sourced_application_welcome_email.delay(str(application.id))
+        else:
+            from app.tasks.email_tasks import send_application_received_email
+            send_application_received_email.delay(str(application.id))
     except Exception:
         pass
 
@@ -415,16 +538,6 @@ async def move_stage(
             await get_or_create_request(db, application_id)
             from app.tasks.email_tasks import send_document_request_email_task
             send_document_request_email_task.delay(str(application_id))
-        except Exception:
-            pass
-
-    if new_stage == "hired":
-        try:
-            from app.models.user import User
-            candidate = await db.get(User, app.applicant_id)
-            if candidate and candidate.role == "applicant":
-                candidate.role = "employee"
-                await db.commit()
         except Exception:
             pass
 
