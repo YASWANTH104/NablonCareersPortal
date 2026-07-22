@@ -7,13 +7,14 @@ import {
 } from '@dnd-kit/core';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { formatDistanceToNow } from 'date-fns';
-import { Search, LayoutGrid, List, Star, GripVertical, X, UserPlus } from 'lucide-react';
+import { Search, LayoutGrid, List, Star, GripVertical, X, UserPlus, UploadCloud } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { applicationsApi } from '@/api/applications';
 import { jobsApi } from '@/api/jobs';
 import { agenciesApi } from '@/api/agencies';
 import { uploadsApi } from '@/api/uploads';
 import CandidateIntakeForm from '@/components/shared/CandidateIntakeForm';
+import BulkUploadModal from '@/components/shared/BulkUploadModal';
 
 const PIPELINE_STAGES = [
   { key: 'applied',    label: 'Applied',    color: 'bg-blue-100 text-blue-800' },
@@ -390,6 +391,7 @@ export default function ApplicantsPage() {
 
   const [view, setView] = useState('kanban');
   const [showAddCandidate, setShowAddCandidate] = useState(false);
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState('');
   const [stageFilter, setStageFilter] = useState('');
   const [agencyFilter, setAgencyFilter] = useState('');
@@ -451,6 +453,13 @@ export default function ApplicantsPage() {
           >
             <UserPlus className="w-4 h-4" />
             Add candidate
+          </button>
+          <button
+            onClick={() => setShowBulkUpload(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-white border border-surface-200 text-gray-700 text-sm font-semibold rounded-lg hover:bg-surface-50 transition-colors"
+          >
+            <UploadCloud className="w-4 h-4" />
+            Bulk upload
           </button>
           <button
             onClick={() => setView('kanban')}
@@ -592,6 +601,9 @@ export default function ApplicantsPage() {
 
       {showAddCandidate && (
         <AddCandidateModal jobs={jobsData} onClose={() => setShowAddCandidate(false)} />
+      )}
+      {showBulkUpload && (
+        <BulkUploadModal jobs={jobsData} onClose={() => setShowBulkUpload(false)} />
       )}
     </div>
   );

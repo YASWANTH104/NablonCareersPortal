@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -16,6 +16,8 @@ import {
   Gift,
   FileText,
   Download,
+  Eye,
+  X,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { jobsApi } from '@/api/jobs';
@@ -58,6 +60,52 @@ function ContentSection({ icon: Icon, title, children, delay = 0 }) {
   );
 }
 
+function JdPdfModal({ url, name, onClose }) {
+  const isPdf = /\.pdf($|\?)/i.test(name || url || '') || (!name && /\.pdf($|\?)/i.test(url));
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl flex flex-col" style={{ height: '88vh' }}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200 flex-shrink-0">
+          <h3 className="font-display font-semibold text-gray-900 truncate pr-4">
+            {name || 'Job description'}
+          </h3>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <a
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-1.5 text-sm text-brand-600 hover:text-brand-700 font-medium px-2"
+            >
+              <Download className="w-4 h-4" /> Download
+            </a>
+            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-surface-100 text-gray-400 hover:text-gray-600">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+        {isPdf ? (
+          <iframe src={url} title="Job description" className="flex-1 w-full rounded-b-2xl" />
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-6">
+            <FileText className="w-10 h-10 text-gray-300" />
+            <p className="text-sm text-gray-500">
+              Preview isn't available for this file type — download it to view.
+            </p>
+            <a
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-brand-500 hover:bg-brand-600 text-white text-sm font-semibold rounded-lg transition-colors"
+            >
+              <Download className="w-4 h-4" /> Download document
+            </a>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function JobDetailPage() {
   const { slug } = useParams();
   const navigate = useNavigate();
@@ -65,6 +113,7 @@ export default function JobDetailPage() {
   const [searchParams] = useSearchParams();
   const { accessToken } = useAuthStore();
   const isAgencyMode = location.pathname.startsWith('/agency-apply');
+  const [showJdModal, setShowJdModal] = useState(false);
 
   useEffect(() => {
     const ref = searchParams.get('ref');
@@ -281,15 +330,14 @@ export default function JobDetailPage() {
                 )}
 
                 {job.jd_pdf_url && (
-                  <a
-                    href={job.jd_pdf_url}
-                    target="_blank"
-                    rel="noreferrer"
+                  <button
+                    type="button"
+                    onClick={() => setShowJdModal(true)}
                     className="mt-3 w-full py-2.5 border border-brand-200 text-brand-700 bg-brand-50/60 hover:bg-brand-50 font-medium rounded-xl text-sm flex items-center justify-center gap-2 transition-colors"
                   >
-                    <Download className="w-4 h-4" />
-                    Full job description (PDF)
-                  </a>
+                    <Eye className="w-4 h-4" />
+                    View full job description
+                  </button>
                 )}
 
                 <div className="mt-6 pt-5 border-t border-surface-100 space-y-3 text-sm">
@@ -334,6 +382,10 @@ export default function JobDetailPage() {
           </div>
         </div>
       </div>
+
+      {showJdModal && job.jd_pdf_url && (
+        <JdPdfModal url={job.jd_pdf_url} name={job.jd_pdf_name} onClose={() => setShowJdModal(false)} />
+      )}
     </div>
   );
 }
