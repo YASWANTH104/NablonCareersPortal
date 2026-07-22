@@ -18,6 +18,8 @@ class ApplicationCreate(BaseModel):
     linkedin_url: Optional[str] = None
     portfolio_url: Optional[str] = None
     github_url: Optional[str] = None
+    current_ctc: Optional[str] = None
+    expected_ctc: Optional[str] = None
     answers: dict = {}
     referral_id: Optional[uuid.UUID] = None
     agency_ref: Optional[str] = None
@@ -41,11 +43,23 @@ class ApplicationCreate(BaseModel):
 
 
 class ApplicationUpdate(BaseModel):
+    # Application-level fields (columns on applications)
     cover_letter: Optional[str] = None
     resume_url: Optional[str] = None
     linkedin_url: Optional[str] = None
     portfolio_url: Optional[str] = None
     github_url: Optional[str] = None
+    current_ctc: Optional[str] = None
+    expected_ctc: Optional[str] = None
+    # Candidate-profile fields (persisted to CandidateProfile / User) — routed
+    # server-side, so both the candidate and HR can correct these details.
+    date_of_birth: Optional[date] = None
+    current_location: Optional[str] = None
+    total_experience: Optional[str] = None
+    current_company: Optional[str] = None
+    current_designation: Optional[str] = None
+    education: Optional[str] = None
+    skills: Optional[str] = None
 
 
 class ApplicationStageUpdate(BaseModel):
@@ -96,6 +110,8 @@ class ApplicationResponse(BaseModel):
     linkedin_url: Optional[str] = None
     portfolio_url: Optional[str] = None
     github_url: Optional[str] = None
+    current_ctc: Optional[str] = None
+    expected_ctc: Optional[str] = None
     answers: dict
     stage: str
     rejection_reason: Optional[str] = None

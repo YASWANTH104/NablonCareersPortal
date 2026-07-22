@@ -107,6 +107,18 @@ async def upload_document(file: UploadFile, folder: str, document_type: str) -> 
     return await _save_locally(content, blob_name)
 
 
+async def upload_jd_bytes(content: bytes, filename: str, content_type: str) -> str:
+    """Store an uploaded JD document (bytes already read from the UploadFile so
+    the same bytes can also be parsed). Returns a blob SAS URL / local path."""
+    if len(content) > 20 * 1024 * 1024:
+        raise HTTPException(400, "File too large. Max 20 MB allowed.")
+    ext = Path(filename or "jd.pdf").suffix or ".pdf"
+    blob_name = f"jd/{uuid.uuid4()}{ext}"
+    if _azure_configured():
+        return await _upload_to_azure(content, blob_name, content_type or "application/pdf")
+    return await _save_locally(content, blob_name)
+
+
 def _extract_blob_name(url: str) -> str | None:
     """Blob name (path within our container) from a stored Azure blob URL, or
     None if this isn't one of our Azure blob URLs (e.g. a local /uploads/ path)."""

@@ -11,6 +11,13 @@ export const jobsApi = {
   updateStatus: (id, status) => client.patch(`/jobs/${id}/status`, { status }),
   remove: (id) => client.delete(`/jobs/${id}`),
   generateJD: (data) => client.post('/jobs/generate-jd', data),
+  parseJdPdf: (file) => {
+    const form = new FormData();
+    form.append('file', file);
+    return client.post('/jobs/parse-jd-pdf', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
   getQuestions: (id) => client.get(`/jobs/${id}/questions`),
   addQuestion: (id, data) => client.post(`/jobs/${id}/questions`, data),
   removeQuestion: (id, qid) => client.delete(`/jobs/${id}/questions/${qid}`),

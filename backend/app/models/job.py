@@ -36,6 +36,10 @@ class Job(Base):
     requirements: Mapped[str | None] = mapped_column(Text)
     benefits: Mapped[str | None] = mapped_column(Text)
     skills_required: Mapped[list | None] = mapped_column(ARRAY(String))
+    # Optional uploaded JD document (e.g. a designed PDF). The URL is a stored
+    # Azure blob SAS URL — re-signed via storage_service.refresh_url on read.
+    jd_pdf_url: Mapped[str | None] = mapped_column(Text)
+    jd_pdf_name: Mapped[str | None] = mapped_column(String(255))
     openings: Mapped[int] = mapped_column(Integer, default=1)
     status: Mapped[str] = mapped_column(String(20), default="draft", index=True)
     # draft | published | paused | closed | archived

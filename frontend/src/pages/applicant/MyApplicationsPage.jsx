@@ -30,6 +30,9 @@ const STAGE_CONFIG = {
 };
 
 const TERMINAL_STAGES = new Set(['hired', 'rejected', 'withdrawn']);
+// Candidates may edit their own details only early in the pipeline; the backend
+// enforces the same rule. HR can edit at any stage from the applicant console.
+const CANDIDATE_EDITABLE_STAGES = new Set(['applied', 'screening']);
 
 function StageBadge({ stage }) {
   const cfg = STAGE_CONFIG[stage] ?? { label: stage, color: 'bg-gray-100 text-gray-600' };
@@ -50,6 +53,8 @@ function EditApplicationModal({ app, onClose, onSuccess }) {
       linkedin_url: app.linkedin_url ?? '',
       portfolio_url: app.portfolio_url ?? '',
       github_url: app.github_url ?? '',
+      current_ctc: app.current_ctc ?? '',
+      expected_ctc: app.expected_ctc ?? '',
     });
   }, [app, reset]);
 
@@ -88,6 +93,24 @@ function EditApplicationModal({ app, onClose, onSuccess }) {
               className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-y"
               placeholder="Tell us why you're a great fit..."
             />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Current CTC</label>
+              <input
+                {...register('current_ctc')}
+                className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                placeholder="e.g. 18 LPA"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Expected CTC</label>
+              <input
+                {...register('expected_ctc')}
+                className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                placeholder="e.g. 24 LPA"
+              />
+            </div>
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div>
@@ -1037,15 +1060,17 @@ export default function MyApplicationsPage() {
                   </div>
 
                   <div className="flex items-center gap-2 flex-shrink-0">
+                    {CANDIDATE_EDITABLE_STAGES.has(app.stage) && (
+                      <button
+                        onClick={() => setEditingApp(app)}
+                        className="p-1.5 text-gray-400 hover:text-brand-600 rounded-lg hover:bg-brand-50 transition-colors"
+                        title="Edit your details"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                    )}
                     {!TERMINAL_STAGES.has(app.stage) && (
                       <>
-                        <button
-                          onClick={() => setEditingApp(app)}
-                          className="p-1.5 text-gray-400 hover:text-brand-600 rounded-lg hover:bg-brand-50 transition-colors"
-                          title="Edit application"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
                         {withdrawingId === app.id ? (
                           <div className="flex items-center gap-1.5 text-xs text-red-600 bg-red-50 px-3 py-1.5 rounded-lg border border-red-100">
                             <AlertCircle className="w-3.5 h-3.5" />

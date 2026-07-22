@@ -10,6 +10,7 @@ import {
   ArrowLeft, Star, ExternalLink, FileText, Calendar, MessageSquare,
   Clock, User, Github, Linkedin, Globe, ChevronDown, Plus, Loader2,
   Video, Phone, MapPin, CheckCircle2, XCircle, AlertCircle, Send, FolderOpen, Download, Eye, X,
+  Pencil, Wallet, Briefcase, GraduationCap,
 } from 'lucide-react';
 import { applicationsApi } from '@/api/applications';
 import { interviewsApi } from '@/api/interviews';
@@ -1063,6 +1064,93 @@ function RejectDialog({ candidateName, interviews, onConfirm, onCancel, isPendin
   );
 }
 
+// ── Edit candidate details (HR — available at any stage) ─────────────────────
+const DETAIL_INPUT =
+  'w-full px-3 py-2 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent';
+
+function EditCandidateDetailsModal({ app, onClose, onSuccess }) {
+  const p = app.candidate_profile ?? {};
+  const { register, handleSubmit, formState: { isSubmitting } } = useForm({
+    defaultValues: {
+      current_company: p.current_company ?? '',
+      current_designation: p.current_designation ?? '',
+      total_experience: p.total_experience ?? '',
+      current_location: p.current_location ?? '',
+      education: p.education ?? '',
+      skills: p.skills ?? '',
+      current_ctc: app.current_ctc ?? '',
+      expected_ctc: app.expected_ctc ?? '',
+      cover_letter: app.cover_letter ?? '',
+      linkedin_url: app.linkedin_url ?? '',
+      portfolio_url: app.portfolio_url ?? '',
+      github_url: app.github_url ?? '',
+    },
+  });
+
+  const mut = useMutation({
+    mutationFn: (payload) => applicationsApi.update(app.id, payload),
+    onSuccess: () => { toast.success('Candidate details updated'); onSuccess(); },
+    onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to update details'),
+  });
+
+  const onSubmit = (values) => {
+    // Send empty strings too so HR can clear a field (backend skips only nulls).
+    mut.mutate(values);
+  };
+
+  const Field = ({ name, label, placeholder, full }) => (
+    <div className={full ? 'sm:col-span-2' : ''}>
+      <label className="block text-xs font-medium text-gray-700 mb-1">{label}</label>
+      <input {...register(name)} placeholder={placeholder} className={DETAIL_INPUT} />
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl my-6">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200">
+          <h2 className="font-semibold text-gray-900">Edit candidate details</h2>
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-surface-100 text-gray-400">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+          <div className="grid sm:grid-cols-2 gap-3">
+            <Field name="current_company" label="Current company" placeholder="Company (or 'Fresher')" />
+            <Field name="current_designation" label="Current designation" placeholder="e.g. Senior Data Scientist" />
+            <Field name="total_experience" label="Total experience" placeholder="e.g. 5 years" />
+            <Field name="current_location" label="Current location" placeholder="Bengaluru, India" />
+            <Field name="current_ctc" label="Current CTC" placeholder="e.g. 18 LPA" />
+            <Field name="expected_ctc" label="Expected CTC" placeholder="e.g. 24 LPA" />
+            <Field name="education" label="Education" placeholder="e.g. B.Tech, CSE" full />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Skills</label>
+            <textarea {...register('skills')} rows={2} placeholder="Python, PyTorch, LLMs…" className={`${DETAIL_INPUT} resize-none`} />
+          </div>
+          <div className="grid sm:grid-cols-3 gap-3">
+            <Field name="linkedin_url" label="LinkedIn" placeholder="linkedin.com/in/…" />
+            <Field name="portfolio_url" label="Portfolio" placeholder="yoursite.com" />
+            <Field name="github_url" label="GitHub" placeholder="github.com/…" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Cover letter</label>
+            <textarea {...register('cover_letter')} rows={4} className={`${DETAIL_INPUT} resize-y`} />
+          </div>
+          <div className="flex gap-3 pt-1">
+            <button type="submit" disabled={isSubmitting || mut.isPending}
+              className="flex items-center gap-2 px-5 py-2 bg-brand-500 text-white text-sm font-semibold rounded-lg hover:bg-brand-600 disabled:opacity-60">
+              {(isSubmitting || mut.isPending) && <Loader2 className="w-4 h-4 animate-spin" />}
+              Save changes
+            </button>
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function ApplicationDetailPage() {
@@ -1078,6 +1166,7 @@ export default function ApplicationDetailPage() {
   const [showRescheduleFor, setShowRescheduleFor] = useState(null);
   const [showFeedbackFor, setShowFeedbackFor] = useState(null);
   const [showRejectDialog, setShowRejectDialog] = useState(false);
+  const [editingDetails, setEditingDetails] = useState(false);
   const [noteText, setNoteText] = useState('');
   const [offerPdfUrl, setOfferPdfUrl] = useState(null);
   const [offerPdfLoading, setOfferPdfLoading] = useState(false);
@@ -1382,6 +1471,50 @@ export default function ApplicationDetailPage() {
       {/* ── Overview Tab ── */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
+          {/* Candidate details (HR can edit at any stage) */}
+          {(() => {
+            const prof = app.candidate_profile ?? {};
+            const rows = [
+              { icon: Briefcase, label: 'Current company', value: prof.current_company },
+              { icon: User, label: 'Current designation', value: prof.current_designation },
+              { icon: Clock, label: 'Total experience', value: prof.total_experience },
+              { icon: MapPin, label: 'Current location', value: prof.current_location },
+              { icon: Wallet, label: 'Current CTC', value: app.current_ctc },
+              { icon: Wallet, label: 'Expected CTC', value: app.expected_ctc },
+              { icon: GraduationCap, label: 'Education', value: prof.education },
+            ];
+            return (
+              <div className="bg-white rounded-xl border border-surface-200 p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-semibold text-gray-900">Candidate details</h3>
+                  <button
+                    onClick={() => setEditingDetails(true)}
+                    className="flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:text-brand-700 bg-brand-50 border border-brand-100 px-2.5 py-1.5 rounded-lg transition-colors"
+                  >
+                    <Pencil className="w-3.5 h-3.5" /> Edit
+                  </button>
+                </div>
+                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                  {rows.map(({ icon: Icon, label, value }) => (
+                    <div key={label} className="flex items-start gap-2.5">
+                      <Icon className="w-4 h-4 text-gray-300 mt-0.5 flex-shrink-0" />
+                      <div className="min-w-0">
+                        <dt className="text-gray-400 text-xs">{label}</dt>
+                        <dd className={`mt-0.5 ${value ? 'text-gray-800' : 'text-gray-300'}`}>{value || 'Not provided'}</dd>
+                      </div>
+                    </div>
+                  ))}
+                </dl>
+                {prof.skills && (
+                  <div className="mt-4 pt-4 border-t border-surface-100">
+                    <p className="text-xs text-gray-400 mb-1">Skills</p>
+                    <p className="text-sm text-gray-700">{prof.skills}</p>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           {/* Links */}
           {(app.linkedin_url || app.github_url || app.portfolio_url) && (
             <div className="bg-white rounded-xl border border-surface-200 p-5">
@@ -2136,6 +2269,18 @@ export default function ApplicationDetailPage() {
           applicationId={id}
           onClose={() => setShowScheduleAssessment(false)}
           onSuccess={() => refetchAssessments()}
+        />
+      )}
+
+      {/* Edit candidate details (HR, any stage) */}
+      {editingDetails && (
+        <EditCandidateDetailsModal
+          app={app}
+          onClose={() => setEditingDetails(false)}
+          onSuccess={() => {
+            setEditingDetails(false);
+            queryClient.invalidateQueries({ queryKey: ['application-detail', id] });
+          }}
         />
       )}
 

@@ -21,6 +21,8 @@ const schema = z.object({
   current_designation: z.string().min(1, 'Current designation is required'),
   education: z.string().min(1, 'Education is required'),
   skills: z.string().optional(),
+  current_ctc: z.string().optional(),
+  expected_ctc: z.string().optional(),
   cover_letter: z.string().optional(),
   linkedin_url: z.string().url('Enter a valid URL').optional().or(z.literal('')),
   portfolio_url: z.string().url('Enter a valid URL').optional().or(z.literal('')),
@@ -68,6 +70,8 @@ export default function ApplyPage() {
       current_designation: careerProfile?.current_designation ?? '',
       education: careerProfile?.education ?? '',
       skills: careerProfile?.skills ?? '',
+      current_ctc: '',
+      expected_ctc: '',
       cover_letter: '',
       linkedin_url: '',
       portfolio_url: '',
@@ -188,6 +192,8 @@ export default function ApplyPage() {
         current_designation: values.current_designation,
         education: values.education,
         skills: values.skills || undefined,
+        current_ctc: values.current_ctc || undefined,
+        expected_ctc: values.expected_ctc || undefined,
         cover_letter: values.cover_letter || undefined,
         linkedin_url: values.linkedin_url || undefined,
         portfolio_url: values.portfolio_url || undefined,
@@ -363,6 +369,29 @@ export default function ApplyPage() {
               placeholder="e.g. Python, PyTorch, LLMs, SQL, Agentic AI"
               className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent resize-none"
             />
+          </div>
+
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Current CTC <span className="text-gray-400 font-normal">(optional)</span>
+              </label>
+              <input
+                {...register('current_ctc')}
+                placeholder="e.g. 18 LPA"
+                className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Expected CTC <span className="text-gray-400 font-normal">(optional)</span>
+              </label>
+              <input
+                {...register('expected_ctc')}
+                placeholder="e.g. 24 LPA"
+                className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+              />
+            </div>
           </div>
         </div>
 

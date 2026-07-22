@@ -15,6 +15,7 @@ export const applicationsApi = {
   mine: (page = 1, limit = 10) => client.get('/applications/mine', { params: { page, limit } }),
   list: (params) => client.get('/applications', { params }),
   getById: (id) => client.get(`/applications/${id}`),
+  update: (id, data) => client.patch(`/applications/${id}`, data),
   moveStage: (id, stage, notes, rejection_reason) => client.patch(`/applications/${id}/stage`, { stage, notes, rejection_reason }),
   assign: (id, assigneeId) => client.patch(`/applications/${id}/assign`, { assignee_id: assigneeId }),
   toggleStar: (id) => client.patch(`/applications/${id}/star`),

@@ -54,6 +54,23 @@ class JDGenerateResponse(BaseModel):
     skills_required: list[str]
 
 
+class JDPdfParseResponse(BaseModel):
+    # The stored blob URL + original filename for the uploaded PDF, plus the
+    # structured fields extracted from it so HR can review/apply before saving.
+    jd_pdf_url: str
+    jd_pdf_name: str
+    description: str
+    requirements: str
+    benefits: str
+    skills_required: list[str]
+    title: Optional[str] = None
+    location: Optional[str] = None
+    employment_type: Optional[str] = None
+    experience_min: Optional[int] = None
+    experience_max: Optional[int] = None
+    parsed: bool = True
+
+
 class JobCreate(BaseModel):
     title: str
     department_id: Optional[uuid.UUID] = None
@@ -70,6 +87,8 @@ class JobCreate(BaseModel):
     requirements: Optional[str] = None
     benefits: Optional[str] = None
     skills_required: Optional[list[str]] = None
+    jd_pdf_url: Optional[str] = None
+    jd_pdf_name: Optional[str] = None
     openings: int = 1
     is_internal: bool = False
     closes_at: Optional[datetime] = None
@@ -91,6 +110,8 @@ class JobUpdate(BaseModel):
     requirements: Optional[str] = None
     benefits: Optional[str] = None
     skills_required: Optional[list[str]] = None
+    jd_pdf_url: Optional[str] = None
+    jd_pdf_name: Optional[str] = None
     openings: Optional[int] = None
     is_internal: Optional[bool] = None
     closes_at: Optional[datetime] = None
@@ -120,6 +141,8 @@ class JobResponse(BaseModel):
     requirements: Optional[str] = None
     benefits: Optional[str] = None
     skills_required: Optional[list[str]] = None
+    jd_pdf_url: Optional[str] = None
+    jd_pdf_name: Optional[str] = None
     openings: int
     status: str
     is_internal: bool
