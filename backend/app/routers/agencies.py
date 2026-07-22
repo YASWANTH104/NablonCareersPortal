@@ -135,6 +135,8 @@ async def agency_submit_candidate(
     education: Optional[str] = Form(None),
     skills: Optional[str] = Form(None),
     linkedin_url: Optional[str] = Form(None),
+    current_ctc: Optional[str] = Form(None),
+    expected_ctc: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
     """Agency uploads a candidate's resume directly — no candidate login required."""
@@ -161,5 +163,7 @@ async def agency_submit_candidate(
         current_designation=current_designation,
         education=education,
         skills=skills,
+        current_ctc=current_ctc or None,
+        expected_ctc=expected_ctc or None,
     )
     return {"application_id": str(application.id), "stage": application.stage}

@@ -5,7 +5,7 @@ import {
   PieChart, Pie, Cell, Legend, AreaChart, Area,
 } from 'recharts';
 import {
-  BarChart2, TrendingUp, UserCheck, Clock, Building2, Activity, LineChart, Inbox,
+  BarChart2, TrendingUp, UserCheck, Clock, Building2, Activity, LineChart, Inbox, Briefcase,
 } from 'lucide-react';
 import { reportsApi } from '@/api/reports';
 
@@ -22,6 +22,7 @@ const TABS = [
   { key: 'pipeline',  label: 'Pipeline Now',         icon: Activity },
   { key: 'funnel',    label: 'Hiring Funnel',        icon: TrendingUp },
   { key: 'trend',     label: 'Trend',                icon: LineChart },
+  { key: 'job',       label: 'By Job',               icon: Briefcase },
   { key: 'source',    label: 'Source Analysis',      icon: BarChart2 },
   { key: 'referral',  label: 'Referral Performance', icon: UserCheck },
   { key: 'tth',       label: 'Time to Hire',         icon: Clock },
@@ -533,6 +534,120 @@ function TimeToHireReport({ days }) {
   );
 }
 
+const STAGE_SHORT = {
+  applied: 'Applied', screening: 'Screen', assessment: 'Assess', tr1: 'TR1', tr2: 'TR2',
+  hr: 'HR', offer: 'Offer', hired: 'Hired', rejected: 'Rejected', withdrawn: 'Withdrawn',
+};
+const stageBarColor = (stage) =>
+  FUNNEL_STAGE_COLOR[stage] ?? (stage === 'hired' ? '#22c55e' : stage === 'rejected' ? '#f87171' : '#94a3b8');
+
+function JobPerformanceReport({ days }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['report-job', days],
+    queryFn: () => reportsApi.jobPerformance({ days }).then((r) => r.data),
+    placeholderData: keepPreviousData,
+  });
+
+  if (isLoading) return <EmptyState text="Loading…" icon={Briefcase} />;
+  if (!data?.length) return <EmptyState text="No applications to any job in this period" icon={Briefcase} />;
+
+  const totalApps = data.reduce((s, j) => s + j.total_applications, 0);
+  const totalHired = data.reduce((s, j) => s + j.hired, 0);
+  const avgConv = totalApps > 0 ? Math.round((totalHired / totalApps) * 100) : 0;
+  const chartData = data.slice(0, 12); // keep the bar chart readable
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="bg-surface-50 rounded-xl p-4 text-center">
+          <p className="text-2xl font-bold text-gray-900">{data.length}</p>
+          <p className="text-xs text-gray-500 mt-1">Jobs with Applicants</p>
+        </div>
+        <div className="bg-surface-50 rounded-xl p-4 text-center">
+          <p className="text-2xl font-bold text-gray-900">{totalApps}</p>
+          <p className="text-xs text-gray-500 mt-1">Total Applications</p>
+        </div>
+        <div className="bg-green-50 rounded-xl p-4 text-center">
+          <p className="text-2xl font-bold text-green-700">{totalHired}</p>
+          <p className="text-xs text-green-600 mt-1">Total Hired</p>
+        </div>
+        <div className="bg-brand-50 rounded-xl p-4 text-center">
+          <p className="text-2xl font-bold text-brand-700">{avgConv}%</p>
+          <p className="text-xs text-brand-600 mt-1">Avg Conversion</p>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto rounded-lg border border-surface-100">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-surface-200 bg-surface-50">
+              <th className="text-left py-2.5 px-3 text-xs font-medium text-gray-500">Job</th>
+              <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Applications</th>
+              <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">In Progress</th>
+              <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Hired</th>
+              <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Rejected</th>
+              <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Conversion</th>
+              <th className="py-2.5 px-3 text-xs font-medium text-gray-500">Pipeline</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-surface-100">
+            {data.map((j) => (
+              <tr key={j.job_id} className="hover:bg-surface-50">
+                <td className="py-3 px-3">
+                  <p className="font-medium text-gray-900">{j.title}</p>
+                  <p className="text-xs text-gray-400">{j.department || 'No department'}</p>
+                </td>
+                <td className="py-3 px-3 text-right font-semibold text-gray-900">{j.total_applications}</td>
+                <td className="py-3 px-3 text-right text-amber-600">{j.in_progress}</td>
+                <td className="py-3 px-3 text-right text-green-600 font-semibold">{j.hired}</td>
+                <td className="py-3 px-3 text-right text-red-400">{j.rejected}</td>
+                <td className="py-3 px-3 text-right">
+                  <span className={`font-semibold ${j.conversion_rate >= 20 ? 'text-green-600' : j.conversion_rate >= 10 ? 'text-amber-600' : 'text-gray-500'}`}>
+                    {j.conversion_rate}%
+                  </span>
+                </td>
+                <td className="py-3 px-3">
+                  {j.total_applications > 0 && (
+                    <div className="flex gap-0.5 h-4 min-w-[80px]">
+                      {j.by_stage.filter((s) => s.count > 0).map((s) => (
+                        <div
+                          key={s.stage}
+                          title={`${STAGE_SHORT[s.stage] ?? s.stage}: ${s.count}`}
+                          className="rounded-sm"
+                          style={{
+                            width: `${(s.count / j.total_applications) * 100}%`,
+                            minWidth: 4,
+                            background: stageBarColor(s.stage),
+                          }}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div>
+        <SectionHeading title="Applications vs. hired per job" subtitle={data.length > 12 ? 'Top 12 by application volume' : undefined} />
+        <ResponsiveContainer width="100%" height={300}>
+          <BarChart data={chartData} margin={{ bottom: 40 }}>
+            <CartesianGrid {...gridProps} />
+            <XAxis dataKey="title" tick={tickProps} interval={0} angle={-25} textAnchor="end" height={70} />
+            <YAxis tick={tickProps} allowDecimals={false} />
+            <Tooltip contentStyle={tooltipStyle} />
+            <Bar dataKey="total_applications" name="Applications" fill="#818cf8" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="hired" name="Hired" fill="#22c55e" radius={[4, 4, 0, 0]} />
+            <Legend />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
 function AgencyPerformanceReport({ days }) {
   const { data, isLoading } = useQuery({
     queryKey: ['report-agency', days],
@@ -542,8 +657,6 @@ function AgencyPerformanceReport({ days }) {
 
   if (isLoading) return <EmptyState text="Loading…" icon={Building2} />;
   if (!data?.length) return <EmptyState text="No agency submissions in this period" icon={Building2} />;
-
-  const STAGE_SHORT = { applied: 'Applied', screening: 'Screen', assessment: 'Assess', tr1: 'TR1', tr2: 'TR2', hr: 'HR', offer: 'Offer', hired: 'Hired', rejected: 'Rejected' };
 
   return (
     <div className="space-y-6">
@@ -686,6 +799,7 @@ export default function ReportsPage() {
         {activeTab === 'pipeline' && <PipelineSnapshotReport />}
         {activeTab === 'funnel'   && <HiringFunnelReport days={days} />}
         {activeTab === 'trend'    && <TrendReport days={days} />}
+        {activeTab === 'job'      && <JobPerformanceReport days={days} />}
         {activeTab === 'source'   && <SourceAnalysisReport days={days} />}
         {activeTab === 'referral' && <ReferralPerformanceReport days={days} />}
         {activeTab === 'tth'      && <TimeToHireReport days={days} />}

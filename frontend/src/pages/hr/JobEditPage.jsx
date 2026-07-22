@@ -5,10 +5,11 @@ import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import toast from 'react-hot-toast';
-import { ArrowLeft, Loader2, Plus, X, Wand2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Plus, X, Wand2, FileText, Upload, ExternalLink } from 'lucide-react';
 import { jobsApi } from '@/api/jobs';
 import RichTextEditor from '@/components/shared/RichTextEditor';
 import DraftWithAiModal from '@/components/shared/DraftWithAiModal';
+import ImportJdPdfModal from '@/components/shared/ImportJdPdfModal';
 
 const toOptionalInt = (v) => (v === '' || v === null || v === undefined ? undefined : parseInt(v, 10));
 const toOptionalNum = (v) => (v === '' || v === null || v === undefined ? undefined : parseFloat(v));
@@ -82,6 +83,8 @@ export default function JobEditPage() {
 
   const [skillInput, setSkillInput] = useState('');
   const [skills, setSkills] = useState([]);
+  const [jdPdf, setJdPdf] = useState(null); // { url, name }
+  const [showJdPdfModal, setShowJdPdfModal] = useState(false);
 
   const { data: existing, isLoading: loadingJob } = useQuery({
     queryKey: ['job-edit', id],
@@ -152,6 +155,7 @@ export default function JobEditPage() {
         closes_at: closesAt,
       });
       setSkills(existing.skills_required ?? []);
+      setJdPdf(existing.jd_pdf_url ? { url: existing.jd_pdf_url, name: existing.jd_pdf_name || 'Job description.pdf' } : null);
     }
   }, [existing, reset]);
 
@@ -203,6 +207,8 @@ export default function JobEditPage() {
     salary_min: values.salary_min ?? null,
     salary_max: values.salary_max ?? null,
     skills_required: skills.length > 0 ? skills : null,
+    jd_pdf_url: jdPdf?.url ?? null,
+    jd_pdf_name: jdPdf?.name ?? null,
     closes_at: values.closes_at || null,
     location_type: values.location_type || null,
     employment_type: values.employment_type || null,
@@ -395,6 +401,53 @@ export default function JobEditPage() {
           </label>
         </section>
 
+        {/* JD document */}
+        <section className="bg-white rounded-xl border border-surface-200 p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="font-display font-semibold text-gray-900 text-base">Job description document</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Upload a designed JD (PDF/Word). It's shown on the job page for download, and its content fills in the fields below.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowJdPdfModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-brand-700 bg-brand-50 border border-brand-100 rounded-lg hover:bg-brand-100 transition-colors whitespace-nowrap"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              {jdPdf ? 'Replace PDF' : 'Import from PDF'}
+            </button>
+          </div>
+
+          {jdPdf && (
+            <div className="flex items-center gap-3 bg-surface-50 border border-surface-200 rounded-lg px-4 py-3">
+              <div className="w-9 h-9 rounded-lg bg-red-50 border border-red-100 flex items-center justify-center flex-shrink-0">
+                <FileText className="w-4.5 h-4.5 text-red-500" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-gray-900 truncate">{jdPdf.name}</p>
+                <a
+                  href={jdPdf.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-brand-600 hover:text-brand-700"
+                >
+                  View document <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+              <button
+                type="button"
+                onClick={() => setJdPdf(null)}
+                className="p-1.5 rounded-lg text-gray-400 hover:bg-surface-200 hover:text-gray-600"
+                title="Remove attached document"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+        </section>
+
         {/* Content */}
         <section className="bg-white rounded-xl border border-surface-200 p-6 space-y-5">
           <div className="flex items-center justify-between">
@@ -536,6 +589,28 @@ export default function JobEditPage() {
             toast.success('Draft applied — review and edit before saving');
           }}
           onClose={() => setShowAiModal(false)}
+        />
+      )}
+
+      {showJdPdfModal && (
+        <ImportJdPdfModal
+          onApplied={(r) => {
+            if (r.description) setValue('description', r.description, { shouldDirty: true, shouldValidate: true });
+            if (r.requirements) setValue('requirements', r.requirements, { shouldDirty: true });
+            if (r.benefits) setValue('benefits', r.benefits, { shouldDirty: true });
+            if (r.skills_required?.length) {
+              setSkills((prev) => Array.from(new Set([...prev, ...r.skills_required])));
+            }
+            // Fill basic fields only when empty — never clobber what HR already typed.
+            if (r.title && !getValues('title')) setValue('title', r.title, { shouldDirty: true, shouldValidate: true });
+            if (r.location && !getValues('location')) setValue('location', r.location, { shouldDirty: true });
+            if (r.employment_type && !getValues('employment_type')) setValue('employment_type', r.employment_type, { shouldDirty: true });
+            if (r.experience_min != null && !getValues('experience_min')) setValue('experience_min', r.experience_min, { shouldDirty: true });
+            if (r.experience_max != null && !getValues('experience_max')) setValue('experience_max', r.experience_max, { shouldDirty: true });
+            setJdPdf({ url: r.jd_pdf_url, name: r.jd_pdf_name });
+            toast.success('JD attached & fields filled — review, then save');
+          }}
+          onClose={() => setShowJdPdfModal(false)}
         />
       )}
     </div>

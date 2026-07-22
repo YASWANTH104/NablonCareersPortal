@@ -1,6 +1,6 @@
 import uuid
 from typing import Optional
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -10,9 +10,9 @@ from app.schemas.job import (
     JobResponse, JobListResponse,
     JobQuestionCreate, JobQuestionResponse,
     DepartmentCreate, DepartmentResponse,
-    JDGenerateRequest, JDGenerateResponse,
+    JDGenerateRequest, JDGenerateResponse, JDPdfParseResponse,
 )
-from app.services import job_service
+from app.services import job_service, storage_service
 from app.services.jd_generation_service import generate_job_description, JDGenerationUnavailable
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -106,7 +106,13 @@ async def get_job(
     if not is_hr and job.status != "published":
         raise HTTPException(404, "Job not found")
 
-    return job
+    # Re-sign the stored JD-PDF SAS URL so it doesn't 403 once its baked-in token
+    # expires. Build the response first so we never mutate the persistent ORM row
+    # (which could otherwise write the short-lived URL back on autoflush).
+    resp = JobResponse.model_validate(job)
+    if resp.jd_pdf_url:
+        resp.jd_pdf_url = storage_service.refresh_url(resp.jd_pdf_url)
+    return resp
 
 
 # ── HR protected ─────────────────────────────────────────────────────────────
@@ -139,6 +145,42 @@ async def generate_jd(
     except JDGenerationUnavailable:
         raise HTTPException(503, "AI drafting is not available right now. Please write the JD manually.")
     return result
+
+
+@router.post("/parse-jd-pdf", response_model=JDPdfParseResponse)
+async def parse_jd_pdf(
+    file: UploadFile = File(...),
+    _=Depends(require_roles(Role.HR_MANAGER, Role.ADMIN, Role.SUPER_ADMIN)),
+):
+    """Upload a JD document (PDF/DOCX): store the original file AND extract its
+    content into structured fields so HR can attach the file and auto-fill the
+    posting (reviewed before saving). The file is read once and used for both."""
+    allowed = {
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }
+    name = (file.filename or "").lower()
+    if file.content_type not in allowed and not name.endswith((".pdf", ".doc", ".docx")):
+        raise HTTPException(400, "Please upload a PDF or Word document.")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "The uploaded file is empty.")
+
+    from app.services import jd_parsing_service
+
+    url = await storage_service.upload_jd_bytes(
+        content, file.filename or "jd.pdf", file.content_type or "application/pdf"
+    )
+    parsed = await jd_parsing_service.parse_jd_document(
+        content, file.content_type or "", file.filename or ""
+    )
+    return {
+        "jd_pdf_url": url,
+        "jd_pdf_name": file.filename or "job-description.pdf",
+        **parsed,
+    }
 
 
 @router.put("/{job_id}", response_model=JobResponse)

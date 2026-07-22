@@ -43,6 +43,8 @@ def _app_to_dict(app: Application) -> dict:
         "linkedin_url": app.linkedin_url,
         "portfolio_url": app.portfolio_url,
         "github_url": app.github_url,
+        "current_ctc": app.current_ctc,
+        "expected_ctc": app.expected_ctc,
         "answers": app.answers,
         "stage": app.stage,
         "rejection_reason": app.rejection_reason,
@@ -164,6 +166,8 @@ async def submit_sourced_application(
     current_designation: Optional[str] = None,
     education: Optional[str] = None,
     skills: Optional[str] = None,
+    current_ctc: Optional[str] = None,
+    expected_ctc: Optional[str] = None,
 ) -> Application:
     """Create an application on behalf of a candidate (agency upload or HR/TA sourcing).
 
@@ -243,6 +247,8 @@ async def submit_sourced_application(
         linkedin_url=linkedin_url,
         portfolio_url=portfolio_url,
         github_url=github_url,
+        current_ctc=(current_ctc.strip() if current_ctc and current_ctc.strip() else None),
+        expected_ctc=(expected_ctc.strip() if expected_ctc and expected_ctc.strip() else None),
     )
     db.add(application)
     await db.commit()
@@ -617,23 +623,67 @@ async def get_timeline(
     return list(rows)
 
 
+# Candidate may self-edit only while the application is early in the pipeline.
+# HR/admins can edit throughout (see update_application).
+CANDIDATE_EDITABLE_STAGES = ("applied", "screening")
+_HR_EDIT_ROLES = ("hr_manager", "admin", "super_admin")
+# Fields on ApplicationUpdate that belong to CandidateProfile, not the applications table.
+_PROFILE_UPDATE_FIELDS = (
+    "current_location", "total_experience", "current_company",
+    "current_designation", "education", "skills",
+)
+
+
 async def update_application(
     db: AsyncSession,
     application_id: uuid.UUID,
-    applicant_id: uuid.UUID,
+    current_user,
     data,
 ) -> Application:
-    from app.schemas.application import ApplicationUpdate
+    from app.models.candidate_profile import CandidateProfile
+    from app.models.user import User as UserModel
+
     app = await db.get(Application, application_id)
     if not app:
         raise HTTPException(404, "Application not found")
-    if str(app.applicant_id) != str(applicant_id):
-        raise HTTPException(403, "Not your application")
-    if app.stage in ("hired", "rejected", "withdrawn"):
-        raise HTTPException(400, "Cannot edit a closed application")
-    for field, val in data.model_dump(exclude_unset=True).items():
+
+    is_hr = getattr(current_user, "role", None) in _HR_EDIT_ROLES
+    if not is_hr:
+        # Candidate self-service: must own it and only while early-stage.
+        if str(app.applicant_id) != str(current_user.id):
+            raise HTTPException(403, "Not your application")
+        if app.stage not in CANDIDATE_EDITABLE_STAGES:
+            raise HTTPException(
+                400,
+                "You can only edit your details while the application is in the "
+                "Applied or Screening stage. Please contact the recruiter for later changes.",
+            )
+
+    payload = data.model_dump(exclude_unset=True)
+
+    # Route profile fields to CandidateProfile and DOB to the user record.
+    profile_updates = {k: payload.pop(k) for k in _PROFILE_UPDATE_FIELDS if k in payload}
+    dob = payload.pop("date_of_birth", None)
+
+    if profile_updates:
+        profile = await db.get(CandidateProfile, app.applicant_id)
+        if not profile:
+            profile = CandidateProfile(user_id=app.applicant_id)
+            db.add(profile)
+        for field, val in profile_updates.items():
+            if val is not None:
+                setattr(profile, field, val)
+
+    if dob is not None:
+        user = await db.get(UserModel, app.applicant_id)
+        if user:
+            user.date_of_birth = dob
+
+    # Remaining keys are application-level columns.
+    for field, val in payload.items():
         if val is not None:
             setattr(app, field, val)
+
     app.updated_at = datetime.utcnow()
     await db.commit()
     await db.refresh(app)

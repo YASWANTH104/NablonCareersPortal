@@ -15,6 +15,7 @@ import {
   ListChecks,
   Gift,
   FileText,
+  Download,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { jobsApi } from '@/api/jobs';
@@ -139,7 +140,7 @@ export default function JobDetailPage() {
       <section className="relative bg-gray-950 overflow-hidden">
         <HeroBackdrop particles={false} />
 
-        <div className="relative max-w-5xl mx-auto px-4 sm:px-6 pt-10 pb-24 sm:pb-28">
+        <div className="relative max-w-5xl mx-auto px-4 sm:px-6 pt-24 pb-24 sm:pb-28">
           {/* Back — hidden in agency focused mode */}
           {!isAgencyMode && (
             <Link
@@ -277,6 +278,18 @@ export default function JobDetailPage() {
                   <p className="text-xs text-gray-400 text-center mt-3">
                     You'll be asked to create an account
                   </p>
+                )}
+
+                {job.jd_pdf_url && (
+                  <a
+                    href={job.jd_pdf_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-3 w-full py-2.5 border border-brand-200 text-brand-700 bg-brand-50/60 hover:bg-brand-50 font-medium rounded-xl text-sm flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <Download className="w-4 h-4" />
+                    Full job description (PDF)
+                  </a>
                 )}
 
                 <div className="mt-6 pt-5 border-t border-surface-100 space-y-3 text-sm">

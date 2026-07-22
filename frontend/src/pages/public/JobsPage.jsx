@@ -211,7 +211,7 @@ export default function JobsPage() {
       <section className="relative bg-gray-950 overflow-hidden">
         <HeroBackdrop />
 
-        <div className="relative max-w-3xl mx-auto px-4 sm:px-6 pt-16 pb-24 lg:pt-20 lg:pb-28 text-center">
+        <div className="relative max-w-3xl mx-auto px-4 sm:px-6 pt-24 pb-24 lg:pt-28 lg:pb-28 text-center">
           <Reveal>
             <span className="inline-flex items-center gap-2 text-xs font-medium text-brand-200 bg-white/[0.08] border border-white/10 px-3.5 py-1.5 rounded-full mb-6 backdrop-blur">
               <Sparkles className="w-3.5 h-3.5" />

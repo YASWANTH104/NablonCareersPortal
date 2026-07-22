@@ -20,6 +20,10 @@ class Application(Base):
     linkedin_url: Mapped[str | None] = mapped_column(Text)
     portfolio_url: Mapped[str | None] = mapped_column(Text)
     github_url: Mapped[str | None] = mapped_column(Text)
+    # Compensation — collected optionally at apply time, editable later.
+    # Free text (e.g. "18 LPA", "₹24,00,000") rather than numeric.
+    current_ctc: Mapped[str | None] = mapped_column(String(50))
+    expected_ctc: Mapped[str | None] = mapped_column(String(50))
     answers: Mapped[dict] = mapped_column(JSONB, default=dict)
 
     stage: Mapped[str] = mapped_column(String(50), default="applied", index=True)

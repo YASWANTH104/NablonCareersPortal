@@ -179,6 +179,65 @@ async def source_funnel(
     return result
 
 
+@router.get("/job-performance")
+async def job_performance(
+    days: int = Query(90, ge=1, le=365),
+    _=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Per-job hiring analytics for applications received in the period —
+    volume, current outcomes and conversion for each role, so HR can see which
+    openings are drawing candidates and converting them."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    rows = (await db.execute(
+        select(
+            Job.id.label("job_id"),
+            Job.title.label("title"),
+            Job.status.label("status"),
+            Department.name.label("department"),
+            Application.stage,
+            func.count().label("count"),
+        )
+        .select_from(Application)
+        .join(Job, Application.job_id == Job.id)
+        .join(Department, Job.department_id == Department.id, isouter=True)
+        .where(Application.applied_at >= since)
+        .group_by(Job.id, Job.title, Job.status, Department.name, Application.stage)
+    )).all()
+
+    jobs: dict = {}
+    for r in rows:
+        job = jobs.setdefault(str(r.job_id), {
+            "job_id": str(r.job_id),
+            "title": r.title,
+            "status": r.status,
+            "department": r.department,
+            "stage_map": {},
+        })
+        job["stage_map"][r.stage] = job["stage_map"].get(r.stage, 0) + r.count
+
+    result = []
+    for job in jobs.values():
+        stage_map = job.pop("stage_map")
+        total = sum(stage_map.values())
+        hired = stage_map.get("hired", 0)
+        rejected = stage_map.get("rejected", 0)
+        withdrawn = stage_map.get("withdrawn", 0)
+        in_progress = total - hired - rejected - withdrawn
+        result.append({
+            **job,
+            "total_applications": total,
+            "in_progress": in_progress,
+            "hired": hired,
+            "rejected": rejected,
+            "conversion_rate": round((hired / total) * 100, 1) if total else 0,
+            "by_stage": [{"stage": s, "count": stage_map.get(s, 0)} for s in PIPELINE_STAGES],
+        })
+    result.sort(key=lambda x: -x["total_applications"])
+    return result
+
+
 @router.get("/referral-performance")
 async def referral_performance(
     days: int = Query(90, ge=1, le=365),

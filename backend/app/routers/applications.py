@@ -59,6 +59,8 @@ async def hr_submit_candidate(
     education: Optional[str] = Form(None),
     skills: Optional[str] = Form(None),
     linkedin_url: Optional[str] = Form(None),
+    current_ctc: Optional[str] = Form(None),
+    expected_ctc: Optional[str] = Form(None),
     user=Depends(require_roles(*_HR_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
@@ -85,6 +87,8 @@ async def hr_submit_candidate(
         current_designation=current_designation,
         education=education,
         skills=skills,
+        current_ctc=current_ctc or None,
+        expected_ctc=expected_ctc or None,
     )
     return {"application_id": str(application.id), "stage": application.stage}
 
@@ -143,7 +147,7 @@ async def update_application(
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await application_service.update_application(db, application_id, current_user.id, data)
+    return await application_service.update_application(db, application_id, current_user, data)
 
 
 @router.patch("/{application_id}/stage", response_model=ApplicationResponse)

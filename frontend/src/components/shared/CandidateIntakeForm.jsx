@@ -13,6 +13,8 @@ const EMPTY = {
   current_designation: '',
   education: '',
   skills: '',
+  current_ctc: '',
+  expected_ctc: '',
   linkedin_url: '',
 };
 
@@ -183,6 +185,17 @@ export default function CandidateIntakeForm({ onParse, onSubmit, submitLabel = '
       <div>
         <label className="block text-xs font-medium text-gray-700 mb-1">Skills</label>
         <textarea rows={2} value={fields.skills} onChange={setField('skills')} placeholder="Python, PyTorch, LLMs…" className={`${inputCls} resize-none`} />
+      </div>
+
+      <div className="grid sm:grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Current CTC</label>
+          <input value={fields.current_ctc} onChange={setField('current_ctc')} placeholder="e.g. 18 LPA" className={inputCls} />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Expected CTC</label>
+          <input value={fields.expected_ctc} onChange={setField('expected_ctc')} placeholder="e.g. 24 LPA" className={inputCls} />
+        </div>
       </div>
 
       <div>
