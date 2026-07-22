@@ -1,6 +1,11 @@
 version: '3.9'
 
 services:
+  # postgres: removed from the compose stack — the app now points at the
+  # Azure Postgres flexible server (nablon-pgsql-dev-alpha) via
+  # backend/.env DATABASE_URL. The local `nablon-careers_pgdata` volume
+  # still exists on disk (untouched) if it's ever needed again.
+
   redis:
     image: redis:7-alpine
     restart: unless-stopped

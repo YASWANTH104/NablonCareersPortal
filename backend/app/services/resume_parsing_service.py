@@ -48,7 +48,74 @@ def extract_text(content: bytes, content_type: str, filename: str = "") -> str:
     return ""
 
 
-def _regex_fallback(text: str) -> dict[str, Any]:
+def extract_hyperlinks(content: bytes, content_type: str, filename: str = "") -> list[str]:
+    """The actual hyperlink targets embedded in the document (PDF link annotations /
+    DOCX hyperlink relationships) — NOT the visible/anchor text.
+
+    Resumes commonly hyperlink a friendly label ("LinkedIn", "Portfolio", or a
+    shortened/stale display string) to the real URL. Plain text extraction only
+    sees the label, so a regex over extract_text() can silently capture that
+    display text (or miss the link entirely) instead of the real href. This
+    walks the document's actual link objects so the real URL is used.
+    """
+    name = (filename or "").lower()
+    links: list[str] = []
+    try:
+        if content_type == "application/pdf" or name.endswith(".pdf"):
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(content))
+            for page in reader.pages:
+                annots = page.get("/Annots")
+                if not annots:
+                    continue
+                for annot_ref in annots:
+                    try:
+                        annot = annot_ref.get_object()
+                        if annot.get("/Subtype") != "/Link":
+                            continue
+                        action = annot.get("/A")
+                        if action and action.get("/URI"):
+                            links.append(str(action["/URI"]))
+                    except Exception:
+                        continue
+
+        elif (
+            content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            or name.endswith(".docx")
+        ):
+            from docx import Document
+            doc = Document(io.BytesIO(content))
+            for rel in doc.part.rels.values():
+                if rel.reltype.endswith("/hyperlink") and rel.is_external:
+                    links.append(rel.target_ref)
+    except Exception as exc:
+        logger.warning(f"Hyperlink extraction failed ({content_type}): {exc}")
+
+    # De-dupe, preserve order
+    seen = set()
+    unique = []
+    for link in links:
+        if link not in seen:
+            seen.add(link)
+            unique.append(link)
+    return unique
+
+
+def _classify_links(links: list[str]) -> dict[str, str | None]:
+    """Match extracted hyperlink targets to the linkedin/github/portfolio slots."""
+    result: dict[str, str | None] = {"linkedin_url": None, "github_url": None, "portfolio_url": None}
+    for link in links:
+        low = link.lower()
+        if "linkedin.com" in low and not result["linkedin_url"]:
+            result["linkedin_url"] = link
+        elif "github.com" in low and not result["github_url"]:
+            result["github_url"] = link
+        elif not any(d in low for d in ("mailto:", "linkedin.com", "github.com")) and not result["portfolio_url"]:
+            result["portfolio_url"] = link
+    return result
+
+
+def _regex_fallback(text: str, links: list[str] | None = None) -> dict[str, Any]:
     result: dict[str, Any] = {k: None for k in PARSED_FIELDS}
 
     email = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text)
@@ -69,17 +136,32 @@ def _regex_fallback(text: str) -> dict[str, Any]:
         url = github.group(0)
         result["github_url"] = url if url.startswith("http") else f"https://{url}"
 
+    # Real hyperlink targets (if any were extracted) are authoritative over text
+    # regex matches — a resume can hyperlink a friendly label to the real URL,
+    # which the text regex above would never see correctly.
+    if links:
+        for key, val in _classify_links(links).items():
+            if val:
+                result[key] = val
+
     result["is_ai_parsed"] = False
     return result
 
 
-def _build_prompt(text: str) -> str:
+def _build_prompt(text: str, links: list[str] | None = None) -> str:
+    links_block = ""
+    if links:
+        links_block = (
+            "\n\nHyperlinks found embedded in the document (these are the real URLs — "
+            "prefer these over anything that merely looks like a URL in the visible text):\n"
+            + "\n".join(f"- {link}" for link in links)
+        )
     return f"""You are a resume parser for a careers portal. Extract candidate details from the resume text below.
 
 Resume text:
 \"\"\"
 {text[:MAX_TEXT_CHARS]}
-\"\"\"
+\"\"\"{links_block}
 
 Return a JSON object with exactly these keys (use null when the resume does not state a value — never guess or invent):
 {{
@@ -111,8 +193,11 @@ async def parse_resume(content: bytes, content_type: str, filename: str = "") ->
     from app.config import settings
 
     text = extract_text(content, content_type, filename)
+    links = extract_hyperlinks(content, content_type, filename)
     if not text.strip():
-        return {**{k: None for k in PARSED_FIELDS}, "is_ai_parsed": False}
+        empty = {k: None for k in PARSED_FIELDS}
+        empty.update({k: v for k, v in _classify_links(links).items() if v})
+        return {**empty, "is_ai_parsed": False}
 
     if settings.AZURE_OPENAI_ENDPOINT and settings.AZURE_OPENAI_API_KEY and settings.AZURE_OPENAI_DEPLOYMENT:
         try:
@@ -124,7 +209,7 @@ async def parse_resume(content: bytes, content_type: str, filename: str = "") ->
                 f"?api-version={settings.AZURE_OPENAI_API_VERSION}"
             )
             payload = {
-                "messages": [{"role": "user", "content": _build_prompt(text)}],
+                "messages": [{"role": "user", "content": _build_prompt(text, links)}],
                 "temperature": 0,
                 "max_tokens": 800,
                 "response_format": {"type": "json_object"},
@@ -143,9 +228,16 @@ async def parse_resume(content: bytes, content_type: str, filename: str = "") ->
             for key in PARSED_FIELDS:
                 val = parsed.get(key)
                 result[key] = val.strip() if isinstance(val, str) and val.strip() else None
+
+            # Override with the real hyperlink targets when we found any — more
+            # reliable than anything the model read off of visible anchor text.
+            for key, val in _classify_links(links).items():
+                if val:
+                    result[key] = val
+
             result["is_ai_parsed"] = True
             return result
         except Exception as exc:
             logger.warning(f"Azure OpenAI resume parsing failed, falling back to regex: {exc}")
 
-    return _regex_fallback(text)
+    return _regex_fallback(text, links)

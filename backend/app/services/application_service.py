@@ -267,6 +267,203 @@ async def submit_sourced_application(
     return application
 
 
+MAX_BULK_RESUMES = 20
+MAX_BULK_EXCEL_ROWS = 300
+
+
+async def bulk_submit_from_resumes(
+    db: AsyncSession,
+    *,
+    job_id: uuid.UUID,
+    source: str,
+    files: list[tuple[str, bytes, str]],
+    agency_id: Optional[uuid.UUID] = None,
+) -> list[dict]:
+    """Parse each uploaded resume and create a sourced application from it —
+    no manual re-entry per candidate, since that would defeat the point of a
+    bulk upload. Each file is fully independent: a failure on one (duplicate
+    application, unreadable file, missing name/email) is recorded and the rest
+    still get processed. The session is rolled back after every failure so a
+    partially-flushed row from one file can never leak into the next file's
+    transaction (see note below on why that matters)."""
+    from app.services import resume_parsing_service, storage_service
+
+    results: list[dict] = []
+    for filename, content, content_type in files:
+        try:
+            parsed = await resume_parsing_service.parse_resume(content, content_type, filename)
+            full_name = parsed.get("full_name")
+            email = parsed.get("email")
+            if not full_name or not email:
+                results.append({
+                    "filename": filename,
+                    "status": "error",
+                    "error": "Could not detect a name and email on this resume — add this candidate manually.",
+                })
+                continue
+
+            resume_url = await storage_service.upload_resume_bytes(content, filename, content_type, "hr-bulk")
+            application = await submit_sourced_application(
+                db,
+                job_id=job_id,
+                full_name=full_name,
+                email=email,
+                resume_url=resume_url,
+                source=source,
+                agency_id=agency_id,
+                phone=parsed.get("phone"),
+                linkedin_url=parsed.get("linkedin_url"),
+                portfolio_url=parsed.get("portfolio_url"),
+                github_url=parsed.get("github_url"),
+                current_location=parsed.get("current_location"),
+                total_experience=parsed.get("total_experience"),
+                current_company=parsed.get("current_company"),
+                current_designation=parsed.get("current_designation"),
+                education=parsed.get("education"),
+                skills=parsed.get("skills"),
+            )
+            results.append({
+                "filename": filename,
+                "status": "success",
+                "application_id": str(application.id),
+                "candidate_name": full_name,
+                "email": email,
+            })
+        except HTTPException as exc:
+            await db.rollback()
+            results.append({"filename": filename, "status": "error", "error": str(exc.detail)})
+        except Exception:
+            await db.rollback()
+            results.append({"filename": filename, "status": "error", "error": "Unexpected error while processing this file."})
+
+    return results
+
+
+# Column headers accepted in the bulk-upload spreadsheet, matched case/space-insensitively.
+EXCEL_COLUMN_ALIASES = {
+    "full name": "full_name", "name": "full_name", "candidate name": "full_name",
+    "email": "email", "email address": "email",
+    "phone": "phone", "phone number": "phone", "mobile": "phone",
+    "current location": "current_location", "location": "current_location",
+    "total experience": "total_experience", "experience": "total_experience",
+    "current company": "current_company", "company": "current_company",
+    "current designation": "current_designation", "designation": "current_designation", "title": "current_designation",
+    "education": "education",
+    "skills": "skills",
+    "linkedin": "linkedin_url", "linkedin url": "linkedin_url",
+    "current ctc": "current_ctc", "current_ctc": "current_ctc",
+    "expected ctc": "expected_ctc", "expected_ctc": "expected_ctc",
+}
+
+
+def parse_bulk_excel(content: bytes) -> list[dict]:
+    """Reads the bulk-upload spreadsheet into a list of row dicts keyed by our
+    field names (header matching is case/space-insensitive via EXCEL_COLUMN_ALIASES).
+    Raises HTTPException(400) if it isn't a readable spreadsheet or has no
+    recognizable header row."""
+    import io
+    from openpyxl import load_workbook
+
+    try:
+        wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+        ws = wb.active
+        rows_iter = ws.iter_rows(values_only=True)
+        header = next(rows_iter, None)
+    except Exception as exc:
+        raise HTTPException(400, f"Could not read this spreadsheet: {exc}")
+
+    if not header:
+        raise HTTPException(400, "The spreadsheet is empty.")
+
+    field_by_col = {}
+    for i, cell in enumerate(header):
+        key = (str(cell).strip().lower() if cell is not None else "")
+        if key in EXCEL_COLUMN_ALIASES:
+            field_by_col[i] = EXCEL_COLUMN_ALIASES[key]
+
+    if "full_name" not in field_by_col.values() or "email" not in field_by_col.values():
+        raise HTTPException(
+            400,
+            "The spreadsheet must have at least 'Full Name' and 'Email' columns "
+            "(Phone, Current Location, Total Experience, Current Company, "
+            "Current Designation, Education, Skills, LinkedIn, Current CTC and "
+            "Expected CTC are optional).",
+        )
+
+    # Row numbers are tracked against the real spreadsheet (header = row 1) so
+    # results reported back to HR line up with what they see in Excel — rows
+    # with some data but a missing name/email are kept (not silently dropped)
+    # so bulk_submit_from_excel can report them as failed rows instead of the
+    # row count just quietly not matching what was uploaded.
+    rows = []
+    for row_num, row in enumerate(rows_iter, start=2):
+        if row is None or all(c is None for c in row):
+            continue
+        record = {"_row": row_num}
+        for i, val in field_by_col.items():
+            if i < len(row) and row[i] is not None:
+                record[val] = str(row[i]).strip()
+        rows.append(record)
+
+    return rows
+
+
+async def bulk_submit_from_excel(
+    db: AsyncSession,
+    *,
+    job_id: uuid.UUID,
+    source: str,
+    rows: list[dict],
+    agency_id: Optional[uuid.UUID] = None,
+) -> list[dict]:
+    """Create a sourced application per spreadsheet row. No resume is required
+    for this path (resume_url is stored as '' — the Resume tab shows a
+    'no resume provided' state for these instead of a broken preview)."""
+    results: list[dict] = []
+    for row in rows:
+        i = row.get("_row")
+        full_name = row.get("full_name")
+        email = row.get("email")
+        if not full_name or not email:
+            results.append({
+                "row": i, "status": "error", "candidate_name": full_name, "email": email,
+                "error": "Missing Full Name or Email — this row was skipped.",
+            })
+            continue
+        try:
+            application = await submit_sourced_application(
+                db,
+                job_id=job_id,
+                full_name=full_name,
+                email=email,
+                resume_url="",
+                source=source,
+                agency_id=agency_id,
+                phone=row.get("phone"),
+                linkedin_url=row.get("linkedin_url"),
+                current_location=row.get("current_location"),
+                total_experience=row.get("total_experience"),
+                current_company=row.get("current_company"),
+                current_designation=row.get("current_designation"),
+                education=row.get("education"),
+                skills=row.get("skills"),
+                current_ctc=row.get("current_ctc"),
+                expected_ctc=row.get("expected_ctc"),
+            )
+            results.append({
+                "row": i, "status": "success", "application_id": str(application.id),
+                "candidate_name": full_name, "email": email,
+            })
+        except HTTPException as exc:
+            await db.rollback()
+            results.append({"row": i, "status": "error", "candidate_name": full_name, "email": email, "error": str(exc.detail)})
+        except Exception:
+            await db.rollback()
+            results.append({"row": i, "status": "error", "candidate_name": full_name, "email": email, "error": "Unexpected error processing this row."})
+
+    return results
+
+
 async def get_my_applications(
     db: AsyncSession,
     applicant_id: uuid.UUID,

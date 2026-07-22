@@ -1591,16 +1591,26 @@ export default function ApplicationDetailPage() {
             <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
               <FileText className="w-4 h-4 text-gray-400" /> Resume
             </h3>
-            <a
-              href={app.resume_url.startsWith('http') ? app.resume_url : `http://localhost:8000${app.resume_url}`}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center gap-1.5 text-sm text-brand-600 hover:text-brand-700 font-medium"
-            >
-              Open <ExternalLink className="w-3.5 h-3.5" />
-            </a>
+            {app.resume_url && (
+              <a
+                href={app.resume_url.startsWith('http') ? app.resume_url : `http://localhost:8000${app.resume_url}`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1.5 text-sm text-brand-600 hover:text-brand-700 font-medium"
+              >
+                Open <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            )}
           </div>
-          {app.resume_url.endsWith('.pdf') || app.resume_url.includes('.pdf') ? (
+          {!app.resume_url ? (
+            <div className="flex items-center justify-center py-20 bg-surface-50 rounded-xl border border-dashed border-surface-300">
+              <div className="text-center">
+                <FileText className="w-10 h-10 text-gray-300 mx-auto mb-2" />
+                <p className="text-sm text-gray-500">No resume was provided for this candidate</p>
+                <p className="text-xs text-gray-400 mt-1">This candidate was added via bulk spreadsheet upload without a resume file.</p>
+              </div>
+            </div>
+          ) : app.resume_url.endsWith('.pdf') || app.resume_url.includes('.pdf') ? (
             <iframe
               src={app.resume_url.startsWith('http') ? app.resume_url : `http://localhost:8000${app.resume_url}`}
               className="w-full h-[600px] border border-surface-200 rounded-lg"

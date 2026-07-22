@@ -516,16 +516,18 @@ function CandidateDrawer({ applicationId, isHR, onClose }) {
             <div className="space-y-2.5">
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Documents & Links</p>
               <div className="space-y-2">
-                <a
-                  href={app.resume_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-2.5 w-full px-4 py-2.5 bg-brand-500 text-white rounded-lg text-sm font-semibold hover:bg-brand-600 transition-colors"
-                >
-                  <FileText className="w-4 h-4" />
-                  View Resume
-                  <ExternalLink className="w-3.5 h-3.5 ml-auto opacity-70" />
-                </a>
+                {app.resume_url && (
+                  <a
+                    href={app.resume_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-2.5 w-full px-4 py-2.5 bg-brand-500 text-white rounded-lg text-sm font-semibold hover:bg-brand-600 transition-colors"
+                  >
+                    <FileText className="w-4 h-4" />
+                    View Resume
+                    <ExternalLink className="w-3.5 h-3.5 ml-auto opacity-70" />
+                  </a>
+                )}
                 {app.linkedin_url && (
                   <a href={app.linkedin_url} target="_blank" rel="noreferrer"
                     className="flex items-center gap-2.5 px-4 py-2.5 border border-surface-200 rounded-lg text-sm text-gray-700 hover:bg-surface-50 transition-colors">

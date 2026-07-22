@@ -2,7 +2,7 @@ import csv
 import io
 import uuid
 from typing import Optional
-from fastapi import APIRouter, Depends, Query, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, Depends, Query, UploadFile, File, Form, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -91,6 +91,105 @@ async def hr_submit_candidate(
         expected_ctc=expected_ctc or None,
     )
     return {"application_id": str(application.id), "stage": application.stage}
+
+
+@router.post("/bulk-upload-resumes")
+async def bulk_upload_resumes(
+    job_id: uuid.UUID = Form(...),
+    source: str = Form("talent_acquisition"),
+    files: list[UploadFile] = File(...),
+    user=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Drop in a batch of resumes — each is parsed and its own application is
+    created automatically (no per-candidate manual entry). Every file is
+    independent, so one bad file doesn't block the rest; the response reports
+    a result per file."""
+    from app.models.job import Job
+
+    if source not in _HR_SUBMIT_SOURCES:
+        raise HTTPException(400, f"Invalid source. Allowed: {', '.join(sorted(_HR_SUBMIT_SOURCES))}")
+    if not await db.get(Job, job_id):
+        raise HTTPException(404, "Job not found")
+    if not files:
+        raise HTTPException(400, "No files were uploaded.")
+    if len(files) > application_service.MAX_BULK_RESUMES:
+        raise HTTPException(400, f"Please upload at most {application_service.MAX_BULK_RESUMES} resumes at a time.")
+
+    file_data = []
+    for f in files:
+        file_data.append((f.filename or "resume", await f.read(), f.content_type or ""))
+
+    results = await application_service.bulk_submit_from_resumes(
+        db, job_id=job_id, source=source, files=file_data,
+    )
+    created = sum(1 for r in results if r["status"] == "success")
+    return {"results": results, "created": created, "failed": len(results) - created}
+
+
+@router.get("/bulk-upload-template")
+async def bulk_upload_template(
+    user=Depends(require_roles(*_HR_ROLES)),
+):
+    """Downloadable spreadsheet template for the Excel bulk-upload path."""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Candidates"
+    headers = [
+        "Full Name", "Email", "Phone", "Current Location", "Total Experience",
+        "Current Company", "Current Designation", "Education", "Skills",
+        "LinkedIn", "Current CTC", "Expected CTC",
+    ]
+    ws.append(headers)
+    ws.append([
+        "Jordan Lee", "jordan.lee@example.com", "+91 98765 43210", "Bengaluru, India", "5 years",
+        "Acme Corp", "Senior Data Scientist", "B.Tech, CSE, IIT Delhi", "Python, PyTorch, LLMs",
+        "https://linkedin.com/in/jordanlee", "18 LPA", "24 LPA",
+    ])
+    for col_idx in range(1, len(headers) + 1):
+        ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = 20
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=candidate_bulk_upload_template.xlsx"},
+    )
+
+
+@router.post("/bulk-upload-excel")
+async def bulk_upload_excel(
+    job_id: uuid.UUID = Form(...),
+    source: str = Form("talent_acquisition"),
+    file: UploadFile = File(...),
+    user=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bulk-create sourced applications from a spreadsheet — no resume required
+    per candidate. See bulk_upload_template for the expected column headers."""
+    from app.models.job import Job
+
+    if source not in _HR_SUBMIT_SOURCES:
+        raise HTTPException(400, f"Invalid source. Allowed: {', '.join(sorted(_HR_SUBMIT_SOURCES))}")
+    if not await db.get(Job, job_id):
+        raise HTTPException(404, "Job not found")
+
+    content = await file.read()
+    rows = application_service.parse_bulk_excel(content)
+    if not rows:
+        raise HTTPException(400, "No valid candidate rows found (need at least Full Name and Email per row).")
+    if len(rows) > application_service.MAX_BULK_EXCEL_ROWS:
+        raise HTTPException(400, f"Please upload at most {application_service.MAX_BULK_EXCEL_ROWS} candidates at a time.")
+
+    results = await application_service.bulk_submit_from_excel(
+        db, job_id=job_id, source=source, rows=rows,
+    )
+    created = sum(1 for r in results if r["status"] == "success")
+    return {"results": results, "created": created, "failed": len(results) - created}
 
 
 @router.get("/export")

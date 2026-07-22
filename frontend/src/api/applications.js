@@ -12,6 +12,27 @@ export const applicationsApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
+  bulkUploadResumes: (jobId, source, files) => {
+    const form = new FormData();
+    form.append('job_id', jobId);
+    form.append('source', source);
+    files.forEach((f) => form.append('files', f));
+    return client.post('/applications/bulk-upload-resumes', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 5 * 60 * 1000, // AI parses each resume in turn — can take a while for a full batch
+    });
+  },
+  bulkUploadExcel: (jobId, source, file) => {
+    const form = new FormData();
+    form.append('job_id', jobId);
+    form.append('source', source);
+    form.append('file', file);
+    return client.post('/applications/bulk-upload-excel', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 3 * 60 * 1000,
+    });
+  },
+  bulkUploadTemplate: () => client.get('/applications/bulk-upload-template', { responseType: 'blob' }),
   mine: (page = 1, limit = 10) => client.get('/applications/mine', { params: { page, limit } }),
   list: (params) => client.get('/applications', { params }),
   getById: (id) => client.get(`/applications/${id}`),

@@ -21,18 +21,24 @@ def _azure_configured() -> bool:
 
 async def upload_resume(file: UploadFile, user_id: str) -> str:
     content = await file.read()
+    return await upload_resume_bytes(content, file.filename or "resume.pdf", file.content_type, user_id)
 
+
+async def upload_resume_bytes(content: bytes, filename: str, content_type: str, user_id: str) -> str:
+    """Same validation/upload path as upload_resume, but for bytes already read
+    from the UploadFile — lets a caller parse the resume and upload it from the
+    same read instead of consuming the file twice."""
     if len(content) > MAX_RESUME_SIZE:
         raise HTTPException(400, "File too large. Max 10 MB allowed.")
 
-    if file.content_type not in ALLOWED_RESUME_TYPES:
+    if content_type not in ALLOWED_RESUME_TYPES:
         raise HTTPException(400, "Invalid file type. Only PDF and Word documents are allowed.")
 
-    ext = Path(file.filename or "resume.pdf").suffix or ".pdf"
+    ext = Path(filename or "resume.pdf").suffix or ".pdf"
     blob_name = f"resumes/{user_id}/{uuid.uuid4()}{ext}"
 
     if _azure_configured():
-        return await _upload_to_azure(content, blob_name, file.content_type)
+        return await _upload_to_azure(content, blob_name, content_type)
     return await _save_locally(content, blob_name)
 
 
