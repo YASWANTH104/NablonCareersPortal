@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -236,8 +237,43 @@ function InviteModal({ onClose }) {
 function UserRow({ user, currentUserId }) {
   const qc = useQueryClient();
   const [showRoleMenu, setShowRoleMenu] = useState(false);
+  const [menuPos, setMenuPos] = useState(null);
+  const btnRef = useRef(null);
+  const menuRef = useRef(null);
+  const btnRectRef = useRef(null);
   const invalidate = () => qc.invalidateQueries({ queryKey: ['team-users'] });
   const isSelf = String(user.id) === String(currentUserId);
+
+  const openRoleMenu = () => {
+    const rect = btnRef.current?.getBoundingClientRect();
+    if (rect) {
+      btnRectRef.current = rect;
+      setMenuPos({ top: rect.bottom + 4, left: rect.left });
+    }
+    setShowRoleMenu(true);
+  };
+
+  // The menu opens downward by default; once we know its real height, flip it
+  // above the trigger if it would otherwise overflow past the bottom of the viewport.
+  useLayoutEffect(() => {
+    if (!showRoleMenu || !menuRef.current || !btnRectRef.current) return;
+    const menuHeight = menuRef.current.getBoundingClientRect().height;
+    const rect = btnRectRef.current;
+    if (rect.bottom + 4 + menuHeight > window.innerHeight - 8) {
+      setMenuPos({ top: Math.max(8, rect.top - menuHeight - 4), left: rect.left });
+    }
+  }, [showRoleMenu]);
+
+  useEffect(() => {
+    if (!showRoleMenu) return;
+    const close = () => setShowRoleMenu(false);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [showRoleMenu]);
 
   const roleMut = useMutation({
     mutationFn: (role) => client.patch(`/users/${user.id}/role`, { role }),
@@ -270,33 +306,42 @@ function UserRow({ user, currentUserId }) {
       <td className="px-4 py-3">
         <div className="relative inline-block">
           <button
-            onClick={() => !isSelf && setShowRoleMenu((v) => !v)}
+            ref={btnRef}
+            onClick={() => !isSelf && (showRoleMenu ? setShowRoleMenu(false) : openRoleMenu())}
             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${ROLE_COLORS[user.role] ?? 'bg-gray-100 text-gray-600'} ${isSelf ? 'cursor-default' : 'cursor-pointer hover:opacity-80'}`}
           >
             {ROLE_LABELS[user.role] ?? user.role}
             {!isSelf && <MoreVertical className="w-3 h-3 ml-0.5" />}
           </button>
-          {showRoleMenu && !isSelf && (
-            <div className="absolute top-full left-0 mt-1 z-10 bg-white border border-surface-200 rounded-xl shadow-lg py-1 min-w-[140px]">
-              {ASSIGNABLE_ROLES.filter((r) => r !== user.role).map((r) => (
-                <button
-                  key={r}
-                  onClick={() => roleMut.mutate(r)}
-                  disabled={roleMut.isPending}
-                  className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-surface-50 flex items-center gap-2"
-                >
-                  <span className={`inline-flex px-1.5 py-0.5 rounded text-xs font-medium ${ROLE_COLORS[r]}`}>
-                    {ROLE_LABELS[r]}
-                  </span>
-                </button>
-              ))}
-              <button
-                onClick={() => setShowRoleMenu(false)}
-                className="w-full text-left px-3 py-2 text-xs text-gray-400 hover:bg-surface-50"
+          {showRoleMenu && !isSelf && menuPos && createPortal(
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setShowRoleMenu(false)} />
+              <div
+                ref={menuRef}
+                style={{ top: menuPos.top, left: menuPos.left }}
+                className="fixed z-20 bg-white border border-surface-200 rounded-xl shadow-lg py-1 min-w-[140px]"
               >
-                Cancel
-              </button>
-            </div>
+                {ASSIGNABLE_ROLES.filter((r) => r !== user.role).map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => roleMut.mutate(r)}
+                    disabled={roleMut.isPending}
+                    className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-surface-50 flex items-center gap-2"
+                  >
+                    <span className={`inline-flex px-1.5 py-0.5 rounded text-xs font-medium ${ROLE_COLORS[r]}`}>
+                      {ROLE_LABELS[r]}
+                    </span>
+                  </button>
+                ))}
+                <button
+                  onClick={() => setShowRoleMenu(false)}
+                  className="w-full text-left px-3 py-2 text-xs text-gray-400 hover:bg-surface-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </>,
+            document.body
           )}
         </div>
       </td>
