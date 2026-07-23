@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "changeme-256-bit-secret"
     ENVIRONMENT: str = "development"
     FRONTEND_URL: str = "http://localhost:5173"
+    EXTRA_CORS_ORIGINS: str = ""
     API_V1_PREFIX: str = "/api/v1"
 
     DATABASE_URL: str = "postgresql+asyncpg://nablon:secret@localhost:5432/nablon_careers"
@@ -40,6 +41,11 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"
+
+    @property
+    def cors_origins(self) -> List[str]:
+        extras = [o.strip() for o in self.EXTRA_CORS_ORIGINS.split(",") if o.strip()]
+        return [self.FRONTEND_URL, *extras]
 
 
 settings = Settings()
