@@ -10,7 +10,7 @@ import {
   ArrowLeft, Star, ExternalLink, FileText, Calendar, MessageSquare,
   Clock, User, Github, Linkedin, Globe, ChevronDown, Plus, Loader2,
   Video, Phone, MapPin, CheckCircle2, XCircle, AlertCircle, Send, FolderOpen, Download, Eye, X,
-  Pencil, Wallet, Briefcase, GraduationCap,
+  Pencil, Wallet, Briefcase, GraduationCap, AlertTriangle,
 } from 'lucide-react';
 import { applicationsApi } from '@/api/applications';
 import { interviewsApi } from '@/api/interviews';
@@ -1245,6 +1245,15 @@ export default function ApplicationDetailPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['application-detail', id] }),
   });
 
+  const dismissDuplicateMutation = useMutation({
+    mutationFn: () => applicationsApi.reviewDuplicate(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['application-detail', id] });
+      toast.success('Marked as reviewed');
+    },
+    onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to update'),
+  });
+
   const noteMutation = useMutation({
     mutationFn: (note) => applicationsApi.addNote(id, note),
     onSuccess: () => {
@@ -1450,6 +1459,29 @@ export default function ApplicationDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Possible-duplicate review banner */}
+      {app.duplicate_flag && !app.duplicate_reviewed_at && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-6 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-800">Possible duplicate candidate</p>
+            <p className="text-sm text-amber-700 mt-0.5">{app.duplicate_reason}</p>
+          </div>
+          <button
+            onClick={() => dismissDuplicateMutation.mutate()}
+            disabled={dismissDuplicateMutation.isPending}
+            className="flex-shrink-0 px-3 py-1.5 text-xs font-medium text-amber-800 bg-white border border-amber-300 rounded-lg hover:bg-amber-100 disabled:opacity-50"
+          >
+            Not a duplicate
+          </button>
+        </div>
+      )}
+      {app.duplicate_flag && app.duplicate_reviewed_at && (
+        <p className="text-xs text-gray-400 mb-6">
+          Possible-duplicate flag reviewed {formatDistanceToNow(new Date(app.duplicate_reviewed_at), { addSuffix: true })}.
+        </p>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-0 border-b border-surface-200 mb-6 overflow-x-auto">

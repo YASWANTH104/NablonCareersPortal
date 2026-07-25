@@ -120,6 +120,10 @@ class ApplicationResponse(BaseModel):
     rating: Optional[int] = None
     is_starred: bool
     assigned_to: Optional[uuid.UUID] = None
+    duplicate_flag: bool = False
+    duplicate_reason: Optional[str] = None
+    duplicate_reviewed_at: Optional[datetime] = None
+    duplicate_reviewed_by: Optional[uuid.UUID] = None
     applied_at: datetime
     stage_updated_at: datetime
     created_at: datetime

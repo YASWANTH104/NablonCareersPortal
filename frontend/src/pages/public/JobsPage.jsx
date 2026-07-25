@@ -211,7 +211,7 @@ export default function JobsPage() {
       <section className="relative bg-gray-950 overflow-hidden">
         <HeroBackdrop />
 
-        <div className="relative max-w-3xl mx-auto px-4 sm:px-6 pt-24 pb-24 lg:pt-28 lg:pb-28 text-center">
+        <div className="relative max-w-3xl mx-auto px-4 sm:px-6 pt-16 pb-20 sm:pt-24 sm:pb-24 lg:pt-28 lg:pb-28 text-center">
           <Reveal>
             <span className="inline-flex items-center gap-2 text-xs font-medium text-brand-200 bg-white/[0.08] border border-white/10 px-3.5 py-1.5 rounded-full mb-6 backdrop-blur">
               <Sparkles className="w-3.5 h-3.5" />
@@ -235,9 +235,9 @@ export default function JobsPage() {
 
       {/* ── Filter bar — floats over the hero bottom ─────────── */}
       <div className="max-w-5xl mx-auto px-4 sm:px-6 -mt-10 relative z-10">
-        <div className="bg-white/95 backdrop-blur rounded-2xl border border-surface-200 shadow-[0_20px_50px_-20px_rgba(15,23,42,0.35)] p-3 flex flex-wrap gap-2">
+        <div className="bg-white/95 backdrop-blur rounded-2xl border border-surface-200 shadow-[0_20px_50px_-20px_rgba(15,23,42,0.35)] p-3 flex flex-col sm:flex-row gap-2">
           {/* Search */}
-          <div className="relative flex-1 min-w-48">
+          <div className="relative flex-1 sm:min-w-48">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
               type="text"
@@ -248,36 +248,38 @@ export default function JobsPage() {
             />
           </div>
 
-          {/* Location type */}
-          <select
-            value={locationType}
-            onChange={(e) => handleFilterChange(setLocationType)(e.target.value)}
-            className="px-3 py-2.5 text-sm border border-surface-200 rounded-xl bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 cursor-pointer"
-          >
-            {LOCATION_TYPES.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
+          <div className="grid grid-cols-2 sm:flex gap-2">
+            {/* Location type */}
+            <select
+              value={locationType}
+              onChange={(e) => handleFilterChange(setLocationType)(e.target.value)}
+              className="w-full sm:w-auto px-3 py-2.5 text-sm border border-surface-200 rounded-xl bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 cursor-pointer"
+            >
+              {LOCATION_TYPES.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
 
-          {/* Employment type */}
-          <select
-            value={employmentType}
-            onChange={(e) => handleFilterChange(setEmploymentType)(e.target.value)}
-            className="px-3 py-2.5 text-sm border border-surface-200 rounded-xl bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 cursor-pointer"
-          >
-            {EMPLOYMENT_TYPES.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
+            {/* Employment type */}
+            <select
+              value={employmentType}
+              onChange={(e) => handleFilterChange(setEmploymentType)(e.target.value)}
+              className="w-full sm:w-auto px-3 py-2.5 text-sm border border-surface-200 rounded-xl bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 cursor-pointer"
+            >
+              {EMPLOYMENT_TYPES.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
 
           {/* Clear filters */}
           {hasFilters && (
             <button
               onClick={clearFilters}
-              className="flex items-center gap-1.5 px-3 py-2.5 text-sm text-gray-500 hover:text-gray-800 border border-surface-200 rounded-xl hover:bg-surface-50 transition-colors"
+              className="flex items-center justify-center gap-1.5 px-3 py-2.5 text-sm text-gray-500 hover:text-gray-800 border border-surface-200 rounded-xl hover:bg-surface-50 transition-colors"
             >
               <X className="w-3.5 h-3.5" />
-              Clear
+              Clear filters
             </button>
           )}
         </div>
