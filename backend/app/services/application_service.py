@@ -53,6 +53,10 @@ def _app_to_dict(app: Application) -> dict:
         "rating": app.rating,
         "is_starred": app.is_starred,
         "assigned_to": app.assigned_to,
+        "duplicate_flag": app.duplicate_flag,
+        "duplicate_reason": app.duplicate_reason,
+        "duplicate_reviewed_at": app.duplicate_reviewed_at,
+        "duplicate_reviewed_by": app.duplicate_reviewed_by,
         "applied_at": app.applied_at,
         "stage_updated_at": app.stage_updated_at,
         "created_at": app.created_at,
@@ -65,24 +69,13 @@ async def submit_application(
     data: ApplicationCreate,
     applicant_id: uuid.UUID,
 ) -> Application:
-    from datetime import datetime, timezone, timedelta
+    from app.services import duplicate_detection_service as dupes
 
-    # Block reapplication within 6 months of any rejection
-    cooloff_start = datetime.now(timezone.utc) - timedelta(days=183)
-    recent_rejection = (await db.execute(
-        select(Application).where(
-            Application.applicant_id == applicant_id,
-            Application.stage == "rejected",
-            Application.stage_updated_at >= cooloff_start,
-        )
-    )).scalar_one_or_none()
-
+    # Block reapplication within 6 months of any rejection — same account, so this
+    # is authoritative (unlike the fuzzy name match below).
+    recent_rejection = await dupes.check_cooloff(db, applicant_id)
     if recent_rejection:
-        eligible_date = (recent_rejection.stage_updated_at + timedelta(days=183)).strftime("%d %B %Y")
-        raise HTTPException(
-            403,
-            f"You are not eligible to apply at this time. You may reapply after {eligible_date}.",
-        )
+        raise HTTPException(403, dupes.cooloff_message(recent_rejection))
 
     existing = await db.execute(
         select(Application).where(
@@ -125,12 +118,20 @@ async def submit_application(
     if data.skills is not None:
         profile.skills = data.skills
 
+    duplicate_flag, duplicate_reason = (False, None)
+    if user and user.full_name:
+        duplicate_flag, duplicate_reason = await dupes.build_duplicate_flag(
+            db, user=user, full_name=user.full_name,
+        )
+
     source = "referral" if data.referral_id else ("agency" if agency_id else "direct")
     create_data = data.model_dump(exclude={"agency_ref", *PROFILE_FIELDS})
     application = Application(
         applicant_id=applicant_id,
         source=source,
         agency_id=agency_id,
+        duplicate_flag=duplicate_flag,
+        duplicate_reason=duplicate_reason,
         **create_data,
     )
     db.add(application)
@@ -171,15 +172,18 @@ async def submit_sourced_application(
 ) -> Application:
     """Create an application on behalf of a candidate (agency upload or HR/TA sourcing).
 
-    Finds the candidate user by email or creates a passwordless account
-    (they can claim it via the forgot-password flow). Skips the rejection
-    cool-off check — HR is knowingly inserting this candidate."""
+    Finds the candidate user by email or creates a passwordless account (they can
+    claim it via the forgot-password flow). The 6-month rejection cool-off applies
+    here exactly as it does to a direct candidate apply — the source of the
+    submission doesn't change who the candidate is, so it can't be used to route
+    around the reapply block."""
     import secrets
     from datetime import timedelta, timezone
     from app.models.user import User as UserModel
     from app.models.candidate_profile import CandidateProfile
     from app.models.job import Job
     from app.utils.security import hash_password, generate_token
+    from app.services import duplicate_detection_service as dupes
 
     job = await db.get(Job, job_id)
     if not job:
@@ -222,6 +226,15 @@ async def submit_sourced_application(
     if existing:
         raise HTTPException(409, "This candidate has already been submitted for this job")
 
+    if not is_new_user:
+        recent_rejection = await dupes.check_cooloff(db, user.id)
+        if recent_rejection:
+            raise HTTPException(403, dupes.cooloff_message(recent_rejection))
+
+    duplicate_flag, duplicate_reason = await dupes.build_duplicate_flag(
+        db, user=user, full_name=full_name,
+    )
+
     profile = await db.get(CandidateProfile, user.id)
     if not profile:
         profile = CandidateProfile(user_id=user.id)
@@ -249,6 +262,8 @@ async def submit_sourced_application(
         github_url=github_url,
         current_ctc=(current_ctc.strip() if current_ctc and current_ctc.strip() else None),
         expected_ctc=(expected_ctc.strip() if expected_ctc and expected_ctc.strip() else None),
+        duplicate_flag=duplicate_flag,
+        duplicate_reason=duplicate_reason,
     )
     db.add(application)
     await db.commit()
@@ -328,6 +343,8 @@ async def bulk_submit_from_resumes(
                 "application_id": str(application.id),
                 "candidate_name": full_name,
                 "email": email,
+                "duplicate_flag": application.duplicate_flag,
+                "duplicate_reason": application.duplicate_reason,
             })
         except HTTPException as exc:
             await db.rollback()
@@ -453,6 +470,8 @@ async def bulk_submit_from_excel(
             results.append({
                 "row": i, "status": "success", "application_id": str(application.id),
                 "candidate_name": full_name, "email": email,
+                "duplicate_flag": application.duplicate_flag,
+                "duplicate_reason": application.duplicate_reason,
             })
         except HTTPException as exc:
             await db.rollback()
@@ -744,6 +763,23 @@ async def move_stage(
         except Exception:
             pass
 
+    return app
+
+
+async def dismiss_duplicate_flag(db: AsyncSession, application_id: uuid.UUID, reviewer_id: uuid.UUID) -> Application:
+    """HR has looked at the possible-duplicate match and decided this application
+    is fine as-is. duplicate_flag itself is left set (audit trail of what was
+    found); duplicate_reviewed_at/_by is what the frontend actually checks to
+    decide whether to keep showing the review banner."""
+    from datetime import timezone
+
+    app = await db.get(Application, application_id)
+    if not app:
+        raise HTTPException(404, "Application not found")
+    app.duplicate_reviewed_at = datetime.now(timezone.utc)
+    app.duplicate_reviewed_by = reviewer_id
+    await db.commit()
+    await db.refresh(app)
     return app
 
 

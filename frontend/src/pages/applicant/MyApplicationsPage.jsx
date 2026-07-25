@@ -5,7 +5,7 @@ import { useForm } from 'react-hook-form';
 import { format, isPast } from 'date-fns';
 import toast from 'react-hot-toast';
 import {
-  Briefcase, ChevronRight, FileText, AlertCircle, Pencil, X, Loader2,
+  Briefcase, ChevronRight, FileText, AlertTriangle, Pencil, X, Loader2,
   Upload, CheckCircle2, ChevronDown, ChevronUp, PartyPopper, Calendar,
   MessageSquarePlus, ThumbsUp, PenLine, RotateCcw, Eye, Download,
 } from 'lucide-react';
@@ -40,6 +40,47 @@ function StageBadge({ stage }) {
     <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${cfg.color}`}>
       {cfg.label}
     </span>
+  );
+}
+
+function WithdrawConfirmModal({ app, onClose, onConfirm, isPending }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center flex-shrink-0">
+            <AlertTriangle className="w-5 h-5 text-red-500" />
+          </div>
+          <div>
+            <h3 className="text-base font-semibold text-gray-900">Withdraw application?</h3>
+            <p className="text-sm text-gray-500 mt-0.5">
+              {app.job_title ? (
+                <>Your application for <span className="font-medium text-gray-700">{app.job_title}</span> will be withdrawn. This can't be undone, but you're welcome to apply again later.</>
+              ) : (
+                "This application will be withdrawn. This can't be undone, but you're welcome to apply again later."
+              )}
+            </p>
+          </div>
+        </div>
+        <div className="flex gap-3 justify-end mt-4">
+          <button
+            onClick={onClose}
+            disabled={isPending}
+            className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 border border-surface-200 rounded-lg hover:bg-surface-50 transition-colors disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={isPending}
+            className="px-4 py-2 text-sm font-medium text-white bg-red-500 hover:bg-red-600 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
+          >
+            {isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+            Withdraw
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -970,12 +1011,22 @@ export default function MyApplicationsPage() {
     if (offerApp) setExpandedId(offerApp.id);
   }, [applications]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const withdrawingApp = applications.find((a) => a.id === withdrawingId);
+
   return (
     <div className="max-w-3xl mx-auto">
       {autoFeedbackInterview && (
         <SelfFeedbackModal
           interview={autoFeedbackInterview}
           onClose={() => setAutoFeedbackInterview(null)}
+        />
+      )}
+      {withdrawingApp && (
+        <WithdrawConfirmModal
+          app={withdrawingApp}
+          onClose={() => setWithdrawingId(null)}
+          onConfirm={() => withdrawMut.mutate(withdrawingApp.id)}
+          isPending={withdrawMut.isPending}
         />
       )}
       {editingApp && (
@@ -1070,34 +1121,12 @@ export default function MyApplicationsPage() {
                       </button>
                     )}
                     {!TERMINAL_STAGES.has(app.stage) && (
-                      <>
-                        {withdrawingId === app.id ? (
-                          <div className="flex items-center gap-1.5 text-xs text-red-600 bg-red-50 px-3 py-1.5 rounded-lg border border-red-100">
-                            <AlertCircle className="w-3.5 h-3.5" />
-                            <span>Confirm?</span>
-                            <button
-                              onClick={() => withdrawMut.mutate(app.id)}
-                              disabled={withdrawMut.isPending}
-                              className="font-semibold hover:text-red-800 ml-1"
-                            >
-                              Yes
-                            </button>
-                            <button
-                              onClick={() => setWithdrawingId(null)}
-                              className="text-gray-500 hover:text-gray-700 ml-1"
-                            >
-                              No
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => setWithdrawingId(app.id)}
-                            className="text-xs text-gray-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors"
-                          >
-                            Withdraw
-                          </button>
-                        )}
-                      </>
+                      <button
+                        onClick={() => setWithdrawingId(app.id)}
+                        className="text-xs text-gray-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors"
+                      >
+                        Withdraw
+                      </button>
                     )}
                     {isExpandable ? (
                       <button

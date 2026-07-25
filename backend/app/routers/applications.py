@@ -278,6 +278,17 @@ async def set_rating(
     return await application_service.set_rating(db, application_id, data.rating)
 
 
+@router.patch("/{application_id}/duplicate-review", response_model=ApplicationResponse)
+async def review_duplicate_flag(
+    application_id: uuid.UUID,
+    user=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """HR has looked at a possible-duplicate match on this application and confirmed
+    it's fine — clears the review banner without touching the underlying flag."""
+    return await application_service.dismiss_duplicate_flag(db, application_id, user.id)
+
+
 @router.patch("/{application_id}/assign", response_model=ApplicationResponse)
 async def assign_application(
     application_id: uuid.UUID,

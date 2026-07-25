@@ -184,7 +184,7 @@ export default function JobDetailPage() {
   }
 
   return (
-    <div className="overflow-x-clip pb-16">
+    <div className="overflow-x-clip pb-28 lg:pb-16">
       {/* ── HERO — same visual language as landing & jobs ────── */}
       <section className="relative bg-gray-950 overflow-hidden">
         <HeroBackdrop particles={false} />
@@ -380,6 +380,25 @@ export default function JobDetailPage() {
               )}
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Mobile-only sticky apply bar — keeps the CTA reachable without scrolling past the full description. */}
+      <div className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur-md border-t border-surface-200 shadow-[0_-10px_30px_-15px_rgba(15,23,42,0.25)] px-4 py-3">
+        <div className="max-w-5xl mx-auto flex items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-gray-900 truncate">{job.title}</p>
+            <p className="text-xs text-gray-500 truncate">
+              Nablon AI{job.location ? ` · ${job.location}` : ''}
+            </p>
+          </div>
+          <button
+            onClick={handleApply}
+            className="group flex-shrink-0 inline-flex items-center gap-1.5 px-5 py-2.5 bg-brand-500 hover:bg-brand-400 text-white font-semibold rounded-xl text-sm shadow-[0_10px_25px_-10px_rgba(79,94,255,0.7)] transition-all"
+          >
+            Apply now
+            <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+          </button>
         </div>
       </div>
 

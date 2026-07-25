@@ -2,7 +2,7 @@ import uuid
 from typing import Optional
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func
 
 from app.database import get_db
 from app.dependencies import get_current_user, require_roles, Role
@@ -108,28 +108,43 @@ async def invite_user(
     _=Depends(require_roles(*_ADMIN_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
-    existing = (await db.execute(select(User).where(User.email == data.email))).scalar_one_or_none()
+    import secrets
+    from datetime import datetime, timedelta, timezone
+
+    email = data.email.strip().lower()
+    existing = (await db.execute(select(User).where(func.lower(User.email) == email))).scalar_one_or_none()
     if existing:
         raise HTTPException(409, "Email already registered")
 
     if data.role not in VALID_ROLES:
         raise HTTPException(400, f"Invalid role. Must be one of: {', '.join(sorted(VALID_ROLES))}")
 
-    temp_password = generate_token()[:12]
+    # No password is set on an invited account — same "claim it yourself" pattern as
+    # a sourced candidate application: the invitee sets their own password via the
+    # set-password link in send_team_invite_email (a proactively generated
+    # password_reset_token), or the standard /forgot-password flow later.
     user = User(
-        email=data.email,
+        email=email,
         full_name=data.full_name,
         role=data.role,
         department=data.department,
         employee_id=data.employee_id,
-        password_hash=hash_password(temp_password),
+        password_hash=hash_password(secrets.token_urlsafe(24)),
         is_active=True,
         is_verified=False,
-        verification_token=generate_token(),
+        password_reset_token=generate_token(),
+        password_reset_expires=datetime.now(timezone.utc) + timedelta(days=7),
     )
     db.add(user)
     await db.commit()
     await db.refresh(user)
+
+    try:
+        from app.tasks.email_tasks import send_team_invite_email
+        send_team_invite_email.delay(str(user.id))
+    except Exception:
+        pass
+
     return user
 
 

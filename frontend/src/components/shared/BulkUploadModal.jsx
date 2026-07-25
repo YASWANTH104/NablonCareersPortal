@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import {
   X, Upload, FileText, FileSpreadsheet, Loader2, CheckCircle2, XCircle, Download, File as FileIcon,
+  AlertTriangle,
 } from 'lucide-react';
 import { applicationsApi } from '@/api/applications';
 
@@ -19,12 +20,16 @@ const selectCls =
 
 function ResultsTable({ results, rowLabelKey }) {
   const created = results.filter((r) => r.status === 'success').length;
+  const flagged = results.filter((r) => r.status === 'success' && r.duplicate_flag).length;
   return (
     <div className="space-y-3">
       <p className="text-sm font-medium text-gray-700">
         <span className="text-green-600 font-semibold">{created} added</span>
         {results.length - created > 0 && (
           <span className="text-red-500"> · {results.length - created} failed</span>
+        )}
+        {flagged > 0 && (
+          <span className="text-amber-600"> · {flagged} flagged as possible duplicate</span>
         )}
       </p>
       <div className="max-h-72 overflow-y-auto rounded-lg border border-surface-200 divide-y divide-surface-100">
@@ -38,7 +43,15 @@ function ResultsTable({ results, rowLabelKey }) {
             <div className="min-w-0 flex-1">
               <p className="text-xs text-gray-400">{r[rowLabelKey]}</p>
               {r.status === 'success' ? (
-                <p className="text-gray-800 font-medium truncate">{r.candidate_name} <span className="text-gray-400 font-normal">· {r.email}</span></p>
+                <>
+                  <p className="text-gray-800 font-medium truncate">{r.candidate_name} <span className="text-gray-400 font-normal">· {r.email}</span></p>
+                  {r.duplicate_flag && (
+                    <p className="text-amber-600 text-xs flex items-start gap-1 mt-0.5">
+                      <AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                      <span>{r.duplicate_reason}</span>
+                    </p>
+                  )}
+                </>
               ) : (
                 <p className="text-red-500">{r.error}</p>
               )}

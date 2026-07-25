@@ -49,6 +49,47 @@ async def _send_password_reset_email_async(to_email: str, full_name: str, token:
     await send_password_reset_email(to_email, full_name, token)
 
 
+_ROLE_LABELS = {
+    "super_admin": "Super Admin",
+    "admin": "Admin",
+    "hr_manager": "HR Manager",
+    "interviewer": "Interviewer",
+    "employee": "Employee",
+    "applicant": "Applicant",
+}
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def send_team_invite_email(self, user_id: str):
+    """Sent when an admin invites a new team member from Settings → Team. The
+    account is created with a random, never-communicated password, so this
+    links straight to /reset-password with a token generated at invite time
+    (7-day expiry) — the only way the invited person can ever get in."""
+    try:
+        asyncio.run(_send_team_invite_email_async(user_id))
+    except Exception as exc:
+        logger.error(f"Team invite email failed: user={user_id}: {exc}")
+        raise self.retry(exc=exc)
+
+
+async def _send_team_invite_email_async(user_id: str):
+    from app.models.user import User
+    from app.services.email_service import send_team_invite_email as _send
+
+    async with _task_session() as db:
+        user = await db.get(User, uuid.UUID(user_id))
+        if not user or not user.password_reset_token:
+            return  # nothing to build a set-password link from
+
+        await _send(
+            to_email=user.email,
+            full_name=user.full_name,
+            role_label=_ROLE_LABELS.get(user.role, user.role),
+            token=user.password_reset_token,
+        )
+        logger.info(f"Team invite email sent: user={user_id}, to={user.email}")
+
+
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def send_stage_update_email(self, application_id: str, new_stage: str, from_stage: str = None):
     try:

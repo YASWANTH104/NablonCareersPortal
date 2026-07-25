@@ -106,3 +106,13 @@ async def send_password_reset_email(to_email: str, full_name: str, token: str) -
         template_name="password_reset",
         context={"full_name": full_name, "reset_url": reset_url},
     )
+
+
+async def send_team_invite_email(to_email: str, full_name: str, role_label: str, token: str) -> bool:
+    reset_url = f"{settings.FRONTEND_URL}/reset-password?token={token}"
+    return await send_email(
+        to_email=to_email,
+        subject="You've been invited to Nablon AI Careers Portal",
+        template_name="team_invite",
+        context={"full_name": full_name, "role_label": role_label, "reset_url": reset_url},
+    )

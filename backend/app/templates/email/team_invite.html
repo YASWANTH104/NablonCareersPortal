@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}You're invited – Nablon AI Careers{% endblock %}
+
+{% block content %}
+<h2>Hi {{ full_name }},</h2>
+
+<p>
+  You've been added to the Nablon AI Careers Portal as
+  <strong>{{ role_label }}</strong>. An account has been created for you using
+  this email address.
+</p>
+
+<p>
+  To get started, set up a password for your account:
+</p>
+
+<a href="{{ reset_url }}" class="cta">Set Up My Account</a>
+
+<p style="margin-top: 24px; color: #6B7280; font-size: 14px;">
+  This link is valid for 7 days. If it expires, just use "Forgot password" on the
+  sign-in page with this same email address to set a new one at any time.
+</p>
+{% endblock %}

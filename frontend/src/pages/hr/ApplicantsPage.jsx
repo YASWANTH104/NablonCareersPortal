@@ -7,7 +7,7 @@ import {
 } from '@dnd-kit/core';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { formatDistanceToNow } from 'date-fns';
-import { Search, LayoutGrid, List, Star, GripVertical, X, UserPlus, UploadCloud } from 'lucide-react';
+import { Search, LayoutGrid, List, Star, GripVertical, X, UserPlus, UploadCloud, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { applicationsApi } from '@/api/applications';
 import { jobsApi } from '@/api/jobs';
@@ -78,6 +78,9 @@ function KanbanCard({ application, onClick }) {
           <p className="text-sm font-medium text-gray-900 truncate leading-tight">{name}</p>
           <p className="text-xs text-gray-400 truncate">{application.applicant?.email}</p>
         </div>
+        {application.duplicate_flag && !application.duplicate_reviewed_at && (
+          <AlertTriangle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" title="Possible duplicate candidate" />
+        )}
         {application.is_starred && (
           <Star className="w-3.5 h-3.5 text-yellow-400 fill-yellow-400 flex-shrink-0" />
         )}
@@ -262,6 +265,9 @@ function TableView({ applications, onRowClick }) {
                     <div>
                       <p className="font-medium text-gray-900 flex items-center gap-1.5">
                         {name}
+                        {app.duplicate_flag && !app.duplicate_reviewed_at && (
+                          <AlertTriangle className="w-3 h-3 text-amber-500" title="Possible duplicate candidate" />
+                        )}
                         {app.is_starred && (
                           <Star className="w-3 h-3 text-yellow-400 fill-yellow-400" />
                         )}

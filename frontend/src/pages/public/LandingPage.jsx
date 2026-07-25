@@ -253,7 +253,7 @@ export default function LandingPage() {
       <section className="relative bg-gray-950 overflow-hidden">
         <HeroBackdrop />
 
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 pt-20 pb-24 lg:pt-28 lg:pb-32">
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 pt-14 pb-16 sm:pt-20 sm:pb-24 lg:pt-28 lg:pb-32">
           <div className="grid md:grid-cols-2 gap-10 items-center">
             <div>
               <Reveal>
@@ -279,17 +279,17 @@ export default function LandingPage() {
               </Reveal>
 
               <Reveal delay={300}>
-                <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3">
                   <Link
                     to="/jobs"
-                    className="group inline-flex items-center gap-2 px-6 py-3.5 bg-brand-500 hover:bg-brand-400 text-white font-semibold rounded-xl shadow-[0_10px_35px_-10px_rgba(79,94,255,0.7)] hover:shadow-[0_14px_45px_-10px_rgba(79,94,255,0.9)] transition-all"
+                    className="group inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-brand-500 hover:bg-brand-400 text-white font-semibold rounded-xl shadow-[0_10px_35px_-10px_rgba(79,94,255,0.7)] hover:shadow-[0_14px_45px_-10px_rgba(79,94,255,0.9)] transition-all"
                   >
                     Explore open roles
                     <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                   </Link>
                   <Link
                     to="/register"
-                    className="inline-flex items-center gap-2 px-6 py-3.5 text-white font-semibold rounded-xl border border-white/15 bg-white/[0.06] hover:bg-white/[0.12] backdrop-blur transition-colors"
+                    className="inline-flex items-center justify-center gap-2 px-6 py-3.5 text-white font-semibold rounded-xl border border-white/15 bg-white/[0.06] hover:bg-white/[0.12] backdrop-blur transition-colors"
                   >
                     Create your profile
                   </Link>
@@ -297,7 +297,7 @@ export default function LandingPage() {
               </Reveal>
 
               <Reveal delay={400}>
-                <div className="mt-12 grid grid-cols-3 gap-6 max-w-md">
+                <div className="mt-10 sm:mt-12 grid grid-cols-3 gap-3 sm:gap-6 max-w-md">
                   {[
                     { value: 'F500', label: 'Enterprise clients' },
                     { value: '4', label: 'Industry verticals' },
@@ -364,12 +364,16 @@ export default function LandingPage() {
           </Reveal>
 
           <div className="relative">
-            {/* connecting line */}
+            {/* connecting line — desktop only, where the grid is a single row */}
             <div className="hidden lg:block absolute top-7 left-[10%] right-[10%] h-px bg-gradient-to-r from-brand-100 via-brand-300 to-brand-100" />
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-8">
+            <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-5 sm:gap-8">
               {PROCESS_STEPS.map((step, i) => (
-                <Reveal key={step.title} delay={i * 100} className="relative text-center">
-                  <div className="relative w-14 h-14 mx-auto mb-4">
+                <Reveal
+                  key={step.title}
+                  delay={i * 100}
+                  className="relative flex items-start gap-4 sm:block sm:text-center"
+                >
+                  <div className="relative w-14 h-14 flex-shrink-0 sm:mx-auto mb-0 sm:mb-4">
                     <div className="absolute inset-0 rounded-2xl bg-brand-500/15 blur-md" />
                     <div className="relative w-full h-full rounded-2xl bg-white border border-brand-200 shadow-card flex items-center justify-center">
                       <step.icon className="w-6 h-6 text-brand-600" />
@@ -378,8 +382,10 @@ export default function LandingPage() {
                       {i + 1}
                     </span>
                   </div>
-                  <h3 className="font-display font-semibold text-gray-900 mb-1.5">{step.title}</h3>
-                  <p className="text-xs text-gray-500 leading-relaxed max-w-[180px] mx-auto">{step.text}</p>
+                  <div className="pt-1 sm:pt-0">
+                    <h3 className="font-display font-semibold text-gray-900 mb-1.5">{step.title}</h3>
+                    <p className="text-xs text-gray-500 leading-relaxed sm:max-w-[180px] sm:mx-auto">{step.text}</p>
+                  </div>
                 </Reveal>
               ))}
             </div>
@@ -419,7 +425,7 @@ export default function LandingPage() {
       {/* ── FINAL CTA ────────────────────────────────────────── */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 pb-20 lg:pb-24">
         <Reveal>
-          <div className="relative overflow-hidden rounded-3xl bg-gray-950 px-6 py-16 sm:px-16 text-center">
+          <div className="relative overflow-hidden rounded-3xl bg-gray-950 px-6 py-12 sm:py-16 sm:px-16 text-center">
             <div className="absolute -top-24 left-1/4 w-96 h-96 rounded-full bg-brand-600/30 blur-[100px] pointer-events-none" />
             <div className="absolute -bottom-24 right-1/4 w-96 h-96 rounded-full bg-violet-600/25 blur-[100px] pointer-events-none" />
             <div className="relative">
@@ -429,10 +435,10 @@ export default function LandingPage() {
               <p className="text-brand-100/80 text-lg max-w-xl mx-auto mb-8">
                 Browse our open roles or create a profile so we can reach out when the right one opens up.
               </p>
-              <div className="flex flex-wrap items-center justify-center gap-3">
+              <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center justify-center gap-3">
                 <Link
                   to="/jobs"
-                  className="group inline-flex items-center gap-2 px-6 py-3.5 bg-brand-500 hover:bg-brand-400 text-white font-semibold rounded-xl shadow-[0_10px_35px_-10px_rgba(79,94,255,0.7)] transition-all"
+                  className="group inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-brand-500 hover:bg-brand-400 text-white font-semibold rounded-xl shadow-[0_10px_35px_-10px_rgba(79,94,255,0.7)] transition-all"
                 >
                   <Users className="w-4 h-4" />
                   Explore open roles
@@ -440,7 +446,7 @@ export default function LandingPage() {
                 </Link>
                 <Link
                   to="/register"
-                  className="inline-flex items-center gap-2 px-6 py-3.5 text-white font-semibold rounded-xl border border-white/15 bg-white/[0.06] hover:bg-white/[0.12] backdrop-blur transition-colors"
+                  className="inline-flex items-center justify-center gap-2 px-6 py-3.5 text-white font-semibold rounded-xl border border-white/15 bg-white/[0.06] hover:bg-white/[0.12] backdrop-blur transition-colors"
                 >
                   Create account
                 </Link>
