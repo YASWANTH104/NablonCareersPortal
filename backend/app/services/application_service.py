@@ -10,20 +10,7 @@ from app.schemas.application import (
     ApplicationCreate, ApplicationResponse, ApplicationDetailResponse,
     ApplicantBrief, StageHistoryEntry,
 )
-
-
-VALID_TRANSITIONS = {
-    "applied":    ["screening", "rejected"],
-    "screening":  ["assessment", "tr1", "rejected"],
-    "assessment": ["tr1", "rejected"],
-    "tr1":        ["tr2", "hr", "offer", "rejected"],
-    "tr2":        ["hr", "offer", "rejected"],
-    "hr":         ["offer", "rejected"],
-    "offer":      ["hired", "rejected"],
-    "hired":      [],
-    "rejected":   [],
-    "withdrawn":  [],
-}
+from app.constants.stages import VALID_TRANSITIONS, STAGE_LABELS, REASON_REQUIRED_STAGES
 
 
 def _app_to_dict(app: Application) -> dict:
@@ -45,9 +32,11 @@ def _app_to_dict(app: Application) -> dict:
         "github_url": app.github_url,
         "current_ctc": app.current_ctc,
         "expected_ctc": app.expected_ctc,
+        "notice_period": app.notice_period,
         "answers": app.answers,
         "stage": app.stage,
         "rejection_reason": app.rejection_reason,
+        "drop_category": app.drop_category,
         "source": app.source,
         "agency_id": app.agency_id,
         "rating": app.rating,
@@ -106,6 +95,22 @@ async def submit_application(
     if user and data.date_of_birth:
         user.date_of_birth = data.date_of_birth
 
+    # Validate the referral (if any) rather than trusting a raw UUID from the
+    # client — silently ignore a stale/expired/email-mismatched referral
+    # instead of blocking the apply, consistent with how a mismatched
+    # agency_ref is handled above (best-effort attribution, not a hard gate).
+    referral = None
+    if data.referral_id:
+        from datetime import timezone as _tz
+        from app.models.referral import Referral
+        candidate = await db.get(Referral, data.referral_id)
+        if candidate:
+            now = datetime.now(_tz.utc)
+            expired = candidate.status == "expired" or (candidate.expires_at and candidate.expires_at < now)
+            email_matches = user and candidate.candidate_email.lower() == (user.email or "").lower()
+            if not expired and email_matches:
+                referral = candidate
+
     profile = await db.get(CandidateProfile, applicant_id)
     if not profile:
         profile = CandidateProfile(user_id=applicant_id)
@@ -124,12 +129,13 @@ async def submit_application(
             db, user=user, full_name=user.full_name,
         )
 
-    source = "referral" if data.referral_id else ("agency" if agency_id else "direct")
-    create_data = data.model_dump(exclude={"agency_ref", *PROFILE_FIELDS})
+    source = "referral" if referral else ("agency" if agency_id else "direct")
+    create_data = data.model_dump(exclude={"agency_ref", "referral_id", *PROFILE_FIELDS})
     application = Application(
         applicant_id=applicant_id,
         source=source,
         agency_id=agency_id,
+        referral_id=referral.id if referral else None,
         duplicate_flag=duplicate_flag,
         duplicate_reason=duplicate_reason,
         **create_data,
@@ -137,6 +143,13 @@ async def submit_application(
     db.add(application)
     await db.commit()
     await db.refresh(application)
+
+    if referral and referral.status in ("pending", "invited"):
+        try:
+            from app.services import referral_service
+            await referral_service.update_status(db, referral.id, "applied")
+        except Exception:
+            pass
 
     try:
         from app.tasks.email_tasks import send_application_received_email
@@ -169,6 +182,7 @@ async def submit_sourced_application(
     skills: Optional[str] = None,
     current_ctc: Optional[str] = None,
     expected_ctc: Optional[str] = None,
+    notice_period: Optional[str] = None,
 ) -> Application:
     """Create an application on behalf of a candidate (agency upload or HR/TA sourcing).
 
@@ -262,6 +276,7 @@ async def submit_sourced_application(
         github_url=github_url,
         current_ctc=(current_ctc.strip() if current_ctc and current_ctc.strip() else None),
         expected_ctc=(expected_ctc.strip() if expected_ctc and expected_ctc.strip() else None),
+        notice_period=(notice_period.strip() if notice_period and notice_period.strip() else None),
         duplicate_flag=duplicate_flag,
         duplicate_reason=duplicate_reason,
     )
@@ -370,6 +385,7 @@ EXCEL_COLUMN_ALIASES = {
     "linkedin": "linkedin_url", "linkedin url": "linkedin_url",
     "current ctc": "current_ctc", "current_ctc": "current_ctc",
     "expected ctc": "expected_ctc", "expected_ctc": "expected_ctc",
+    "notice period": "notice_period", "notice_period": "notice_period",
 }
 
 
@@ -403,8 +419,8 @@ def parse_bulk_excel(content: bytes) -> list[dict]:
             400,
             "The spreadsheet must have at least 'Full Name' and 'Email' columns "
             "(Phone, Current Location, Total Experience, Current Company, "
-            "Current Designation, Education, Skills, LinkedIn, Current CTC and "
-            "Expected CTC are optional).",
+            "Current Designation, Education, Skills, LinkedIn, Current CTC, "
+            "Expected CTC and Notice Period are optional).",
         )
 
     # Row numbers are tracked against the real spreadsheet (header = row 1) so
@@ -466,6 +482,7 @@ async def bulk_submit_from_excel(
                 skills=row.get("skills"),
                 current_ctc=row.get("current_ctc"),
                 expected_ctc=row.get("expected_ctc"),
+                notice_period=row.get("notice_period"),
             )
             results.append({
                 "row": i, "status": "success", "application_id": str(application.id),
@@ -490,6 +507,7 @@ async def get_my_applications(
     limit: int = 20,
 ) -> dict:
     from app.models.job import Job
+    from app.models.agency import Agency
 
     condition = Application.applicant_id == applicant_id
     total = (
@@ -499,8 +517,9 @@ async def get_my_applications(
     offset = (page - 1) * limit
     rows = (
         await db.execute(
-            select(Application, Job.title.label("job_title"))
+            select(Application, Job.title.label("job_title"), Agency.name.label("agency_name"))
             .join(Job, Job.id == Application.job_id)
+            .join(Agency, Agency.id == Application.agency_id, isouter=True)
             .where(condition)
             .order_by(Application.applied_at.desc())
             .offset(offset)
@@ -509,9 +528,10 @@ async def get_my_applications(
     ).all()
 
     items = []
-    for app, job_title in rows:
+    for app, job_title, agency_name in rows:
         d = _app_to_dict(app)
         d["job_title"] = job_title
+        d["agency_name"] = agency_name
         items.append(ApplicationResponse.model_validate(d))
 
     return {"items": items, "total": total, "page": page, "limit": limit, "pages": max(1, -(-total // limit))}
@@ -569,10 +589,12 @@ async def get_all_applications(
     limit: int = 20,
 ) -> dict:
     from app.models.user import User
+    from app.models.agency import Agency
 
     base = (
-        select(Application, User.full_name, User.email, User.avatar_url)
+        select(Application, User.full_name, User.email, User.avatar_url, Agency.name.label("agency_name"))
         .join(User, User.id == Application.applicant_id)
+        .join(Agency, Agency.id == Application.agency_id, isouter=True)
     )
 
     filters = []
@@ -602,8 +624,9 @@ async def get_all_applications(
     )).all()
 
     items = []
-    for app, full_name, email, avatar_url in rows:
+    for app, full_name, email, avatar_url, agency_name in rows:
         d = _app_to_dict(app)
+        d["agency_name"] = agency_name
         d["applicant"] = {
             "id": app.applicant_id,
             "full_name": full_name,
@@ -619,17 +642,19 @@ async def get_application_by_id(db: AsyncSession, application_id: uuid.UUID) -> 
     from app.models.user import User
     from app.models.interview import Interview
     from app.models.candidate_profile import CandidateProfile
+    from app.models.agency import Agency
 
     row = (await db.execute(
-        select(Application, User.full_name, User.email, User.avatar_url, User.date_of_birth)
+        select(Application, User.full_name, User.email, User.avatar_url, User.date_of_birth, Agency.name.label("agency_name"))
         .join(User, User.id == Application.applicant_id)
+        .join(Agency, Agency.id == Application.agency_id, isouter=True)
         .where(Application.id == application_id)
     )).first()
 
     if not row:
         raise HTTPException(404, "Application not found")
 
-    app, full_name, email, avatar_url, date_of_birth = row
+    app, full_name, email, avatar_url, date_of_birth, agency_name = row
     profile = await db.get(CandidateProfile, app.applicant_id)
 
     history = (await db.execute(
@@ -643,6 +668,7 @@ async def get_application_by_id(db: AsyncSession, application_id: uuid.UUID) -> 
     )).scalar_one()
 
     d = _app_to_dict(app)
+    d["agency_name"] = agency_name
     d["applicant"] = {
         "id": app.applicant_id,
         "full_name": full_name,
@@ -681,6 +707,7 @@ async def move_stage(
     moved_by: uuid.UUID,
     notes: Optional[str] = None,
     rejection_reason: Optional[str] = None,
+    drop_category: Optional[str] = None,
 ) -> Application:
     app = await db.get(Application, application_id)
     if not app:
@@ -715,18 +742,15 @@ async def move_stage(
 
     app.stage = new_stage
     app.stage_updated_at = datetime.utcnow()
-    if new_stage == "rejected" and rejection_reason:
-        app.rejection_reason = rejection_reason
+    if new_stage in REASON_REQUIRED_STAGES:
+        if rejection_reason:
+            app.rejection_reason = rejection_reason
+        if drop_category:
+            app.drop_category = drop_category
 
-    _STAGE_LABELS = {
-        "screening": "Screening", "assessment": "Assessment",
-        "tr1": "Technical Round 1", "tr2": "Technical Round 2",
-        "hr": "HR Interview", "offer": "Offer Extended",
-        "hired": "Hired", "rejected": "Application Closed",
-    }
     try:
         from app.models.notification import Notification
-        label = _STAGE_LABELS.get(new_stage, new_stage.replace("_", " ").title())
+        label = STAGE_LABELS.get(new_stage, new_stage.replace("_", " ").title())
         notif = Notification(
             user_id=app.applicant_id,
             type="stage_update",
@@ -740,6 +764,13 @@ async def move_stage(
 
     await db.commit()
     await db.refresh(app)
+
+    if app.referral_id and new_stage in ("hired", "rejected"):
+        try:
+            from app.services import referral_service
+            await referral_service.update_status(db, app.referral_id, new_stage)
+        except Exception:
+            pass
 
     try:
         from app.tasks.email_tasks import send_stage_update_email

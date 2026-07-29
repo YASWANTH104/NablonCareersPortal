@@ -499,7 +499,7 @@ async def _send_referral_invite_email_async(referral_id: str):
                 "candidate_name": referral.candidate_name,
                 "referrer_name": referrer_name,
                 "job_title": job_title,
-                "apply_url": f"{settings.FRONTEND_URL}/jobs/{job_slug}/apply",
+                "apply_url": f"{settings.FRONTEND_URL}/jobs/{job_slug}/apply?referral={referral.id}",
             },
         )
 
@@ -866,7 +866,7 @@ async def _send_offer_email_async(offer_id: str):
         if pdf_bytes:
             attachments.append({
                 "name": "offer_letter.pdf",
-                "attachmentType": "pdf",
+                "contentType": "application/pdf",
                 "contentInBase64": base64.b64encode(pdf_bytes).decode("utf-8"),
             })
 
@@ -1006,3 +1006,33 @@ async def _notify_hr_offer_accepted_async(offer_id: str):
         )
 
         logger.info(f"HR acceptance notification sent: offer={offer_id}, to={settings.HR_NOTIFICATION_EMAIL}")
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def send_report_email_task(self, to_emails: list[str], report_title: str, xlsx_base64: str, sent_by_name: str):
+    try:
+        asyncio.run(_send_report_email_async(to_emails, report_title, xlsx_base64, sent_by_name))
+    except Exception as exc:
+        logger.error(f"Report email failed: to={to_emails}: {exc}")
+        raise self.retry(exc=exc)
+
+
+async def _send_report_email_async(to_emails: list[str], report_title: str, xlsx_base64: str, sent_by_name: str):
+    from app.services.email_service import send_email_with_attachment
+
+    filename = f"{report_title.lower().replace(' ', '_')}_report.xlsx"
+    ok = await send_email_with_attachment(
+        to_email=to_emails,
+        subject=f"{report_title} Report — Nablon AI Careers",
+        template_name="report_email",
+        context={"report_title": report_title, "sent_by_name": sent_by_name},
+        attachments=[{
+            "name": filename,
+            "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "contentInBase64": xlsx_base64,
+        }],
+    )
+    if ok:
+        logger.info(f"Report email sent: report={report_title}, to={to_emails}")
+    else:
+        logger.error(f"Report email send failed (ACS/email_service returned False): report={report_title}, to={to_emails}")

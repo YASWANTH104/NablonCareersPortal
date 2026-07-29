@@ -14,7 +14,7 @@ jinja_env = Environment(
 
 
 async def send_email(
-    to_email: str,
+    to_email: str | list[str],
     subject: str,
     template_name: str,
     context: dict,
@@ -36,7 +36,7 @@ async def send_email(
 
 
 async def _send_via_acs(
-    to_email: str,
+    to_email: str | list[str],
     subject: str,
     html_content: str,
     attachments: list[dict] | None = None,
@@ -46,9 +46,10 @@ async def _send_via_acs(
 
     client = EmailClient.from_connection_string(settings.AZURE_COMMUNICATION_CONNECTION_STRING)
 
+    recipients = [to_email] if isinstance(to_email, str) else to_email
     message = {
         "senderAddress": settings.AZURE_EMAIL_SENDER,
-        "recipients": {"to": [{"address": to_email}]},
+        "recipients": {"to": [{"address": addr} for addr in recipients]},
         "content": {
             "subject": subject,
             "html": html_content,
@@ -67,13 +68,17 @@ async def _send_via_acs(
 
 
 async def send_email_with_attachment(
-    to_email: str,
+    to_email: str | list[str],
     subject: str,
     template_name: str,
     context: dict,
     attachments: list[dict] | None = None,
 ) -> bool:
-    """Send email with optional attachments. Each attachment: {name, attachmentType, contentInBase64}."""
+    """Send email with optional attachments. Each attachment: {name, contentType, contentInBase64} —
+    contentType must be a real MIME type (e.g. "application/pdf"), not a bare
+    extension; Azure Communication Services' Email API 400s with "Request body
+    validation error. See property 'attachments[0].contentType'" otherwise, and
+    also does not recognize a field named attachmentType at all."""
     try:
         template = jinja_env.get_template(f"{template_name}.html")
         html_content = template.render(**context)

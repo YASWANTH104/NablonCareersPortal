@@ -9,7 +9,7 @@ import toast from 'react-hot-toast';
 import {
   ArrowLeft, Star, ExternalLink, FileText, Calendar, MessageSquare,
   Clock, User, Github, Linkedin, Globe, ChevronDown, Plus, Loader2,
-  Video, Phone, MapPin, CheckCircle2, XCircle, AlertCircle, Send, FolderOpen, Download, Eye, X,
+  Video, Phone, MapPin, CheckCircle2, AlertCircle, Send, FolderOpen, Download, Eye, X,
   Pencil, Wallet, Briefcase, GraduationCap, AlertTriangle,
 } from 'lucide-react';
 import { applicationsApi } from '@/api/applications';
@@ -19,36 +19,10 @@ import { jobsApi } from '@/api/jobs';
 import { offersApi } from '@/api/offers';
 import { usersApi } from '@/api/users';
 import { documentsApi } from '@/api/documents';
+import StageReasonDialog from '@/components/shared/StageReasonDialog';
+import { PIPELINE_STAGES, STAGE_MAP, VALID_TRANSITIONS, REASON_REQUIRED_STAGES } from '@/constants/pipelineStages';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-
-const PIPELINE_STAGES = [
-  { key: 'applied',     label: 'Applied',     color: 'bg-blue-100 text-blue-800' },
-  { key: 'screening',   label: 'Screening',   color: 'bg-purple-100 text-purple-800' },
-  { key: 'assessment',  label: 'Assessment',  color: 'bg-orange-100 text-orange-800' },
-  { key: 'tr1',         label: 'TR1',         color: 'bg-indigo-100 text-indigo-800' },
-  { key: 'tr2',         label: 'TR2',         color: 'bg-indigo-100 text-indigo-800' },
-  { key: 'hr',          label: 'HR',          color: 'bg-violet-100 text-violet-800' },
-  { key: 'offer',       label: 'Offer',       color: 'bg-emerald-100 text-emerald-800' },
-  { key: 'hired',       label: 'Hired',       color: 'bg-green-100 text-green-800' },
-  { key: 'rejected',    label: 'Rejected',    color: 'bg-red-100 text-red-800' },
-  { key: 'withdrawn',   label: 'Withdrawn',   color: 'bg-gray-100 text-gray-600' },
-];
-
-const STAGE_MAP = Object.fromEntries(PIPELINE_STAGES.map((s) => [s.key, s]));
-
-const VALID_TRANSITIONS = {
-  applied:    ['screening', 'rejected'],
-  screening:  ['assessment', 'tr1', 'rejected'],
-  assessment: ['tr1', 'rejected'],
-  tr1:        ['tr2', 'hr', 'offer', 'rejected'],
-  tr2:        ['hr', 'offer', 'rejected'],
-  hr:         ['offer', 'rejected'],
-  offer:      ['hired', 'rejected'],
-  hired:      [],
-  rejected:   [],
-  withdrawn:  [],
-};
 
 const INTERVIEW_TYPES = ['video', 'phone', 'onsite', 'technical', 'hr', 'panel'];
 
@@ -949,121 +923,6 @@ function ScoreDot({ score, max = 5 }) {
   );
 }
 
-function RejectDialog({ candidateName, interviews, onConfirm, onCancel, isPending }) {
-  const withFeedback = interviews.filter((iv) => iv.feedback?.length > 0);
-  const noFeedback = interviews.filter((iv) => !iv.feedback?.length);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="fixed inset-0 bg-black/40" onClick={onCancel} />
-      <div className="relative bg-white rounded-2xl shadow-modal w-full max-w-lg z-10 flex flex-col max-h-[90vh]">
-
-        {/* Header */}
-        <div className="flex items-start gap-3 p-6 pb-4 flex-shrink-0">
-          <div className="w-9 h-9 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
-            <XCircle className="w-5 h-5 text-red-600" />
-          </div>
-          <div>
-            <h3 className="font-display font-semibold text-gray-900">Reject <span className="text-red-600">{candidateName}</span></h3>
-            <p className="text-sm text-gray-500 mt-0.5">Review interviewer feedback before confirming.</p>
-          </div>
-        </div>
-
-        {/* Feedback body — scrollable */}
-        <div className="overflow-y-auto px-6 pb-2 space-y-4 flex-1">
-          {interviews.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-6">No interviews on record for this candidate.</p>
-          ) : (
-            <>
-              {withFeedback.map((iv) => (
-                <div key={iv.id} className="border border-surface-200 rounded-xl overflow-hidden">
-                  <div className="bg-surface-50 px-4 py-2.5 flex items-center justify-between">
-                    <span className="text-sm font-semibold text-gray-800">
-                      Round {iv.round_number}{iv.title ? ` — ${iv.title}` : ''}
-                    </span>
-                    <span className="text-xs text-gray-400">{iv.feedback.length} response{iv.feedback.length !== 1 ? 's' : ''}</span>
-                  </div>
-                  <div className="divide-y divide-surface-100">
-                    {iv.feedback.map((fb, idx) => {
-                      const rec = RECOMMENDATION_LABELS[fb.recommendation];
-                      return (
-                        <div key={fb.id ?? idx} className="px-4 py-3 space-y-2.5">
-                          {rec && (
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${rec.color}`}>
-                              {rec.label}
-                            </span>
-                          )}
-                          <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
-                            {[
-                              ['Technical',       fb.technical_score],
-                              ['Communication',   fb.communication_score],
-                              ['Culture Fit',     fb.cultural_fit_score],
-                              ['Problem Solving', fb.problem_solving_score],
-                            ].filter(([, v]) => v != null).map(([label, val]) => (
-                              <div key={label} className="flex items-center justify-between gap-2">
-                                <span className="text-xs text-gray-500">{label}</span>
-                                <ScoreDot score={val} />
-                              </div>
-                            ))}
-                          </div>
-                          {fb.strengths && (
-                            <div>
-                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Strengths</p>
-                              <p className="text-sm text-gray-700 leading-relaxed">{fb.strengths}</p>
-                            </div>
-                          )}
-                          {fb.weaknesses && (
-                            <div>
-                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Areas for Growth</p>
-                              <p className="text-sm text-gray-700 leading-relaxed">{fb.weaknesses}</p>
-                            </div>
-                          )}
-                          {fb.notes && (
-                            <div>
-                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Notes</p>
-                              <p className="text-sm text-gray-700 leading-relaxed">{fb.notes}</p>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-              {noFeedback.map((iv) => (
-                <div key={iv.id} className="border border-dashed border-surface-300 rounded-xl px-4 py-3 flex items-center gap-2 text-sm text-gray-400">
-                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                  Round {iv.round_number}{iv.title ? ` — ${iv.title}` : ''}: no feedback submitted yet
-                </div>
-              ))}
-            </>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="flex gap-3 justify-end px-6 py-4 border-t border-surface-100 flex-shrink-0">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-surface-100 hover:bg-surface-200 rounded-lg transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => onConfirm()}
-            disabled={isPending}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-60 transition-colors"
-          >
-            {isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-            Confirm rejection
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── Edit candidate details (HR — available at any stage) ─────────────────────
 const DETAIL_INPUT =
   'w-full px-3 py-2 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent';
@@ -1080,6 +939,7 @@ function EditCandidateDetailsModal({ app, onClose, onSuccess }) {
       skills: p.skills ?? '',
       current_ctc: app.current_ctc ?? '',
       expected_ctc: app.expected_ctc ?? '',
+      notice_period: app.notice_period ?? '',
       cover_letter: app.cover_letter ?? '',
       linkedin_url: app.linkedin_url ?? '',
       portfolio_url: app.portfolio_url ?? '',
@@ -1122,6 +982,7 @@ function EditCandidateDetailsModal({ app, onClose, onSuccess }) {
             <Field name="current_location" label="Current location" placeholder="Bengaluru, India" />
             <Field name="current_ctc" label="Current CTC" placeholder="e.g. 18 LPA" />
             <Field name="expected_ctc" label="Expected CTC" placeholder="e.g. 24 LPA" />
+            <Field name="notice_period" label="Notice period" placeholder="e.g. 30 days" />
             <Field name="education" label="Education" placeholder="e.g. B.Tech, CSE" full />
           </div>
           <div>
@@ -1165,7 +1026,7 @@ export default function ApplicationDetailPage() {
   const [showScheduleAssessment, setShowScheduleAssessment] = useState(false);
   const [showRescheduleFor, setShowRescheduleFor] = useState(null);
   const [showFeedbackFor, setShowFeedbackFor] = useState(null);
-  const [showRejectDialog, setShowRejectDialog] = useState(false);
+  const [pendingReasonStage, setPendingReasonStage] = useState(null); // stage name awaiting a reason, or null
   const [editingDetails, setEditingDetails] = useState(false);
   const [noteText, setNoteText] = useState('');
   const [offerPdfUrl, setOfferPdfUrl] = useState(null);
@@ -1221,8 +1082,8 @@ export default function ApplicationDetailPage() {
   });
 
   const stageMutation = useMutation({
-    mutationFn: ({ stage, notes, rejection_reason }) =>
-      applicationsApi.moveStage(id, stage, notes, rejection_reason),
+    mutationFn: ({ stage, notes, rejection_reason, drop_category }) =>
+      applicationsApi.moveStage(id, stage, notes, rejection_reason, drop_category),
     onSuccess: (res) => {
       // Merge only stage fields into the cached detail — preserves rich applicant/job_title
       // that the lean PATCH response doesn't include
@@ -1235,7 +1096,7 @@ export default function ApplicationDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['hr-applications'] });
       toast.success('Stage updated');
       setStageMenuOpen(false);
-      setShowRejectDialog(false);
+      setPendingReasonStage(null);
     },
     onError: (err) => toast.error(err.response?.data?.detail ?? 'Cannot move to this stage'),
   });
@@ -1415,9 +1276,9 @@ export default function ApplicationDetailPage() {
                           title={blockedHired ? 'Candidate must accept and sign the offer letter first' : undefined}
                           onClick={() => {
                             if (blockedHired) return;
-                            if (stage === 'rejected') {
+                            if (REASON_REQUIRED_STAGES.has(stage)) {
                               setStageMenuOpen(false);
-                              setShowRejectDialog(true);
+                              setPendingReasonStage(stage);
                             } else {
                               stageMutation.mutate({ stage });
                             }
@@ -1513,6 +1374,7 @@ export default function ApplicationDetailPage() {
               { icon: MapPin, label: 'Current location', value: prof.current_location },
               { icon: Wallet, label: 'Current CTC', value: app.current_ctc },
               { icon: Wallet, label: 'Expected CTC', value: app.expected_ctc },
+              { icon: Clock, label: 'Notice period', value: app.notice_period },
               { icon: GraduationCap, label: 'Education', value: prof.education },
             ];
             return (
@@ -1597,7 +1459,11 @@ export default function ApplicationDetailPage() {
             <dl className="grid grid-cols-2 gap-3 text-sm">
               <div>
                 <dt className="text-gray-400">Source</dt>
-                <dd className="text-gray-700 capitalize mt-0.5">{app.source}</dd>
+                <dd className="text-gray-700 mt-0.5">
+                  {app.source === 'agency'
+                    ? (app.agency_name || 'Agency')
+                    : <span className="capitalize">{app.source}</span>}
+                </dd>
               </div>
               <div>
                 <dt className="text-gray-400">Interview count</dt>
@@ -2369,13 +2235,16 @@ export default function ApplicationDetailPage() {
         </div>
       )}
 
-      {/* Reject Candidate Dialog */}
-      {showRejectDialog && (
-        <RejectDialog
-          candidateName={app?.candidate_name ?? 'this candidate'}
+      {/* Stage reason dialog — rejected / interview_drop / offer_drop */}
+      {pendingReasonStage && (
+        <StageReasonDialog
+          stage={pendingReasonStage}
+          candidateName={app?.applicant?.full_name ?? 'this candidate'}
           interviews={interviews}
-          onConfirm={() => stageMutation.mutate({ stage: 'rejected' })}
-          onCancel={() => setShowRejectDialog(false)}
+          onConfirm={({ category, note }) =>
+            stageMutation.mutate({ stage: pendingReasonStage, rejection_reason: note, drop_category: category })
+          }
+          onCancel={() => setPendingReasonStage(null)}
           isPending={stageMutation.isPending}
         />
       )}

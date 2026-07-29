@@ -37,7 +37,8 @@ export const applicationsApi = {
   list: (params) => client.get('/applications', { params }),
   getById: (id) => client.get(`/applications/${id}`),
   update: (id, data) => client.patch(`/applications/${id}`, data),
-  moveStage: (id, stage, notes, rejection_reason) => client.patch(`/applications/${id}/stage`, { stage, notes, rejection_reason }),
+  moveStage: (id, stage, notes, rejection_reason, drop_category) =>
+    client.patch(`/applications/${id}/stage`, { stage, notes, rejection_reason, drop_category }),
   assign: (id, assigneeId) => client.patch(`/applications/${id}/assign`, { assignee_id: assigneeId }),
   toggleStar: (id) => client.patch(`/applications/${id}/star`),
   reviewDuplicate: (id) => client.patch(`/applications/${id}/duplicate-review`),

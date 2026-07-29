@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}{{ report_title }} Report – Nablon AI{% endblock %}
+
+{% block content %}
+<h2>{{ report_title }} Report</h2>
+
+<p>
+  {{ sent_by_name }} shared the <strong>{{ report_title }}</strong> report with you from
+  the Nablon AI Careers Portal. It's attached to this email as an Excel spreadsheet.
+</p>
+
+<p style="margin-top:24px; color:#6B7280; font-size:13px;">
+  This is an automated export — reach out to {{ sent_by_name }} if you have questions about the data.
+</p>
+{% endblock %}

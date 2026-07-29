@@ -117,12 +117,13 @@ export default function JobDetailPage() {
 
   useEffect(() => {
     const ref = searchParams.get('ref');
-    if (ref) {
-      sessionStorage.setItem('agency_ref', ref);
-      if (!isAgencyMode) {
-        // Redirect to focused apply layout
-        navigate(`/agency-apply/${slug}`, { replace: true });
-      }
+    const referralRef = searchParams.get('referral');
+    if (ref) sessionStorage.setItem('agency_ref', ref);
+    if (referralRef) sessionStorage.setItem('referral_ref', referralRef);
+    if ((ref || referralRef) && !isAgencyMode) {
+      // Redirect to the focused apply layout — used for any external invite
+      // link (agency or referral), not agency-exclusive despite the route name.
+      navigate(`/agency-apply/${slug}`, { replace: true });
     }
   }, [searchParams]);
 
