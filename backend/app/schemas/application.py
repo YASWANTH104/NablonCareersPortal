@@ -20,6 +20,7 @@ class ApplicationCreate(BaseModel):
     github_url: Optional[str] = None
     current_ctc: Optional[str] = None
     expected_ctc: Optional[str] = None
+    notice_period: Optional[str] = None
     answers: dict = {}
     referral_id: Optional[uuid.UUID] = None
     agency_ref: Optional[str] = None
@@ -51,6 +52,7 @@ class ApplicationUpdate(BaseModel):
     github_url: Optional[str] = None
     current_ctc: Optional[str] = None
     expected_ctc: Optional[str] = None
+    notice_period: Optional[str] = None
     # Candidate-profile fields (persisted to CandidateProfile / User) — routed
     # server-side, so both the candidate and HR can correct these details.
     date_of_birth: Optional[date] = None
@@ -66,6 +68,7 @@ class ApplicationStageUpdate(BaseModel):
     stage: str
     notes: Optional[str] = None
     rejection_reason: Optional[str] = None
+    drop_category: Optional[str] = None
 
 
 class ApplicationRatingUpdate(BaseModel):
@@ -112,11 +115,14 @@ class ApplicationResponse(BaseModel):
     github_url: Optional[str] = None
     current_ctc: Optional[str] = None
     expected_ctc: Optional[str] = None
+    notice_period: Optional[str] = None
     answers: dict
     stage: str
     rejection_reason: Optional[str] = None
+    drop_category: Optional[str] = None
     source: str
     agency_id: Optional[uuid.UUID] = None
+    agency_name: Optional[str] = None
     rating: Optional[int] = None
     is_starred: bool
     assigned_to: Optional[uuid.UUID] = None

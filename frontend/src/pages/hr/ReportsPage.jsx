@@ -8,6 +8,7 @@ import {
   BarChart2, TrendingUp, UserCheck, Clock, Building2, Activity, LineChart, Inbox, Briefcase,
 } from 'lucide-react';
 import { reportsApi } from '@/api/reports';
+import ReportExportBar from '@/components/shared/ReportExportBar';
 
 const DAYS_OPTIONS = [
   { label: 'Today', value: 1 },
@@ -758,6 +759,12 @@ export default function ReportsPage() {
   const [activeTab, setActiveTab] = useState('pipeline');
   const [days, setDays] = useState(90);
 
+  // Mirrors TrendReport's own autoBucket default — a manual bucket override
+  // toggled inside that tab isn't reflected here (known limitation: export
+  // uses the auto bucket, not whatever the user picked inside the tab).
+  const autoBucket = days <= 31 ? 'day' : days <= 182 ? 'week' : 'month';
+  const extraParams = activeTab === 'pipeline' ? {} : activeTab === 'trend' ? { days, bucket: autoBucket } : { days };
+
   return (
     <div>
       <div className="mb-6">
@@ -782,17 +789,24 @@ export default function ReportsPage() {
           ))}
         </div>
 
-        {activeTab !== 'pipeline' && (
-          <select
-            value={days}
-            onChange={(e) => setDays(Number(e.target.value))}
-            className="text-xs border border-surface-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
-          >
-            {DAYS_OPTIONS.map(({ label, value }) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
-          </select>
-        )}
+        <div className="flex items-center gap-3">
+          {activeTab !== 'pipeline' && (
+            <select
+              value={days}
+              onChange={(e) => setDays(Number(e.target.value))}
+              className="text-xs border border-surface-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              {DAYS_OPTIONS.map(({ label, value }) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          )}
+          <ReportExportBar
+            report={activeTab}
+            reportLabel={TABS.find((t) => t.key === activeTab)?.label ?? activeTab}
+            extraParams={extraParams}
+          />
+        </div>
       </div>
 
       <div className="bg-white rounded-xl border border-surface-200 p-6">

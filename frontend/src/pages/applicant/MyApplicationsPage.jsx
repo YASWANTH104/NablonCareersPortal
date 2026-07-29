@@ -1098,7 +1098,11 @@ export default function MyApplicationsPage() {
                           Applied {format(new Date(app.applied_at), 'MMM d, yyyy')}
                         </span>
                         {app.source && app.source !== 'direct' && (
-                          <span className="text-xs text-brand-600 capitalize">{app.source}</span>
+                          <span className="text-xs text-brand-600">
+                            {app.source === 'agency'
+                              ? (app.agency_name || 'Agency')
+                              : <span className="capitalize">{app.source}</span>}
+                          </span>
                         )}
                         {isOffer && (
                           <span className="text-xs text-emerald-600 font-medium">Action required</span>

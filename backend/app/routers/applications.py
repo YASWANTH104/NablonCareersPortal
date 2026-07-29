@@ -61,6 +61,7 @@ async def hr_submit_candidate(
     linkedin_url: Optional[str] = Form(None),
     current_ctc: Optional[str] = Form(None),
     expected_ctc: Optional[str] = Form(None),
+    notice_period: Optional[str] = Form(None),
     user=Depends(require_roles(*_HR_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
@@ -89,6 +90,7 @@ async def hr_submit_candidate(
         skills=skills,
         current_ctc=current_ctc or None,
         expected_ctc=expected_ctc or None,
+        notice_period=notice_period or None,
     )
     return {"application_id": str(application.id), "stage": application.stage}
 
@@ -140,13 +142,13 @@ async def bulk_upload_template(
     headers = [
         "Full Name", "Email", "Phone", "Current Location", "Total Experience",
         "Current Company", "Current Designation", "Education", "Skills",
-        "LinkedIn", "Current CTC", "Expected CTC",
+        "LinkedIn", "Current CTC", "Expected CTC", "Notice Period",
     ]
     ws.append(headers)
     ws.append([
         "Jordan Lee", "jordan.lee@example.com", "+91 98765 43210", "Bengaluru, India", "5 years",
         "Acme Corp", "Senior Data Scientist", "B.Tech, CSE, IIT Delhi", "Python, PyTorch, LLMs",
-        "https://linkedin.com/in/jordanlee", "18 LPA", "24 LPA",
+        "https://linkedin.com/in/jordanlee", "18 LPA", "24 LPA", "30 days",
     ])
     for col_idx in range(1, len(headers) + 1):
         ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = 20
@@ -256,7 +258,9 @@ async def move_stage(
     user=Depends(require_roles(*_HR_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
-    return await application_service.move_stage(db, application_id, data.stage, user.id, data.notes, data.rejection_reason)
+    return await application_service.move_stage(
+        db, application_id, data.stage, user.id, data.notes, data.rejection_reason, data.drop_category
+    )
 
 
 @router.patch("/{application_id}/star", response_model=ApplicationResponse)

@@ -23,6 +23,7 @@ const schema = z.object({
   skills: z.string().optional(),
   current_ctc: z.string().optional(),
   expected_ctc: z.string().optional(),
+  notice_period: z.string().optional(),
   cover_letter: z.string().optional(),
   linkedin_url: z.string().url('Enter a valid URL').optional().or(z.literal('')),
   portfolio_url: z.string().url('Enter a valid URL').optional().or(z.literal('')),
@@ -72,6 +73,7 @@ export default function ApplyPage() {
       skills: careerProfile?.skills ?? '',
       current_ctc: '',
       expected_ctc: '',
+      notice_period: '',
       cover_letter: '',
       linkedin_url: '',
       portfolio_url: '',
@@ -182,6 +184,12 @@ export default function ApplyPage() {
       const uploadRes = await uploadsApi.resume(resumeFile);
       const resumeUrl = uploadRes.data.url;
 
+      // Picked up from JobDetailPage, which captures ?ref=/?referral= off an
+      // agency or referral invite link into sessionStorage before redirecting
+      // here — this is the only place either value is ever read back out.
+      const agencyRef = sessionStorage.getItem('agency_ref') || undefined;
+      const referralRef = sessionStorage.getItem('referral_ref') || undefined;
+
       await applicationsApi.submit({
         job_id: job.id,
         resume_url: resumeUrl,
@@ -194,11 +202,17 @@ export default function ApplyPage() {
         skills: values.skills || undefined,
         current_ctc: values.current_ctc || undefined,
         expected_ctc: values.expected_ctc || undefined,
+        notice_period: values.notice_period || undefined,
         cover_letter: values.cover_letter || undefined,
         linkedin_url: values.linkedin_url || undefined,
         portfolio_url: values.portfolio_url || undefined,
         github_url: values.github_url || undefined,
+        agency_ref: agencyRef,
+        referral_id: referralRef,
       });
+
+      sessionStorage.removeItem('agency_ref');
+      sessionStorage.removeItem('referral_ref');
 
       queryClient.invalidateQueries({ queryKey: ['my-applications'] });
       setSubmitted(true);
@@ -389,6 +403,16 @@ export default function ApplyPage() {
               <input
                 {...register('expected_ctc')}
                 placeholder="e.g. 24 LPA"
+                className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Notice period <span className="text-gray-400 font-normal">(optional)</span>
+              </label>
+              <input
+                {...register('notice_period')}
+                placeholder="e.g. 30 days / Immediate"
                 className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
               />
             </div>

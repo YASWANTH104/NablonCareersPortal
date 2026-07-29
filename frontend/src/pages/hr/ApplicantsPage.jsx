@@ -15,20 +15,8 @@ import { agenciesApi } from '@/api/agencies';
 import { uploadsApi } from '@/api/uploads';
 import CandidateIntakeForm from '@/components/shared/CandidateIntakeForm';
 import BulkUploadModal from '@/components/shared/BulkUploadModal';
-
-const PIPELINE_STAGES = [
-  { key: 'applied',    label: 'Applied',    color: 'bg-blue-100 text-blue-800' },
-  { key: 'screening',  label: 'Screening',  color: 'bg-purple-100 text-purple-800' },
-  { key: 'assessment', label: 'Assessment', color: 'bg-orange-100 text-orange-800' },
-  { key: 'tr1',        label: 'TR1',        color: 'bg-indigo-100 text-indigo-800' },
-  { key: 'tr2',        label: 'TR2',        color: 'bg-indigo-100 text-indigo-800' },
-  { key: 'hr',         label: 'HR',         color: 'bg-violet-100 text-violet-800' },
-  { key: 'offer',      label: 'Offer',      color: 'bg-emerald-100 text-emerald-800' },
-  { key: 'hired',      label: 'Hired',      color: 'bg-green-100 text-green-800' },
-  { key: 'rejected',   label: 'Rejected',   color: 'bg-red-100 text-red-800' },
-];
-
-const STAGE_MAP = Object.fromEntries(PIPELINE_STAGES.map((s) => [s.key, s]));
+import StageReasonDialog from '@/components/shared/StageReasonDialog';
+import { PIPELINE_STAGES, STAGE_MAP, REASON_REQUIRED_STAGES } from '@/constants/pipelineStages';
 
 function initials(name) {
   return (name ?? '?')
@@ -142,6 +130,7 @@ function KanbanColumn({ stageKey, label, colorClass, cards, onCardClick }) {
 function KanbanView({ applications, queryKey, onCardClick }) {
   const queryClient = useQueryClient();
   const [activeApp, setActiveApp] = useState(null);
+  const [pendingDrop, setPendingDrop] = useState(null); // { app, toStage }
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -157,7 +146,8 @@ function KanbanView({ applications, queryKey, onCardClick }) {
   }, [applications]);
 
   const stageMutation = useMutation({
-    mutationFn: ({ id, stage }) => applicationsApi.moveStage(id, stage),
+    mutationFn: ({ id, stage, rejection_reason, drop_category }) =>
+      applicationsApi.moveStage(id, stage, undefined, rejection_reason, drop_category),
     onMutate: async ({ id, stage }) => {
       await queryClient.cancelQueries({ queryKey });
       const prev = queryClient.getQueryData(queryKey);
@@ -174,6 +164,7 @@ function KanbanView({ applications, queryKey, onCardClick }) {
       if (ctx?.prev) queryClient.setQueryData(queryKey, ctx.prev);
       toast.error(err.response?.data?.detail ?? 'Cannot move to this stage');
     },
+    onSuccess: () => setPendingDrop(null),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['hr-applications'] }),
   });
 
@@ -188,7 +179,11 @@ function KanbanView({ applications, queryKey, onCardClick }) {
     const toStage = over.id;
     const app = applications.find((a) => a.id === active.id);
     if (!app || app.stage === toStage) return;
-    stageMutation.mutate({ id: app.id, stage: toStage });
+    if (REASON_REQUIRED_STAGES.has(toStage)) {
+      setPendingDrop({ app, toStage });
+    } else {
+      stageMutation.mutate({ id: app.id, stage: toStage });
+    }
   }
 
   return (
@@ -218,6 +213,24 @@ function KanbanView({ applications, queryKey, onCardClick }) {
           </div>
         )}
       </DragOverlay>
+
+      {pendingDrop && (
+        <StageReasonDialog
+          stage={pendingDrop.toStage}
+          candidateName={pendingDrop.app.applicant?.full_name ?? 'this candidate'}
+          interviews={[]}
+          isPending={stageMutation.isPending}
+          onCancel={() => setPendingDrop(null)}
+          onConfirm={({ category, note }) =>
+            stageMutation.mutate({
+              id: pendingDrop.app.id,
+              stage: pendingDrop.toStage,
+              rejection_reason: note,
+              drop_category: category,
+            })
+          }
+        />
+      )}
     </DndContext>
   );
 }
@@ -281,7 +294,11 @@ function TableView({ applications, onRowClick }) {
                     {stage?.label ?? app.stage}
                   </span>
                 </td>
-                <td className="px-4 py-3.5 text-gray-500 capitalize">{app.source}</td>
+                <td className="px-4 py-3.5 text-gray-500">
+                  {app.source === 'agency'
+                    ? (app.agency_name || 'Agency')
+                    : <span className="capitalize">{app.source}</span>}
+                </td>
                 <td className="px-4 py-3.5">
                   {app.rating ? (
                     <div className="flex gap-0.5">

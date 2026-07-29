@@ -24,12 +24,16 @@ class Application(Base):
     # Free text (e.g. "18 LPA", "₹24,00,000") rather than numeric.
     current_ctc: Mapped[str | None] = mapped_column(String(50))
     expected_ctc: Mapped[str | None] = mapped_column(String(50))
+    notice_period: Mapped[str | None] = mapped_column(String(50))
     answers: Mapped[dict] = mapped_column(JSONB, default=dict)
 
     stage: Mapped[str] = mapped_column(String(50), default="applied", index=True)
-    # applied | screening | assessment | interview_1 | interview_2 | interview_3
-    # final_interview | offer | hired | rejected | withdrawn
+    # applied | screening | assessment | tr1 | tr2 | hr | offer | hired | rejected
+    # | withdrawn | interview_drop | offer_drop  (see app/constants/stages.py)
     rejection_reason: Mapped[str | None] = mapped_column(Text)
+    # Structured category for rejected/interview_drop/offer_drop, e.g. "got_another_offer" —
+    # rejection_reason above is reused as the free-text note across all three.
+    drop_category: Mapped[str | None] = mapped_column(String(50))
 
     source: Mapped[str] = mapped_column(String(50), default="direct")
     agency_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("agencies.id"))

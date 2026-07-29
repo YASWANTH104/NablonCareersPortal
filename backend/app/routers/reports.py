@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional
-from fastapi import APIRouter, Depends, Query
+from typing import Literal, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 
@@ -352,3 +353,86 @@ async def agency_performance(
 
     result.sort(key=lambda x: x["total_submitted"], reverse=True)
     return result
+
+
+ReportKey = Literal["funnel", "pipeline", "trend", "job", "source", "referral", "tth", "agency"]
+
+
+async def _fetch_report_data(report: str, *, db: AsyncSession, days: int, bucket: str = "day"):
+    """Dispatches to the existing GET handlers' underlying logic — calls them
+    directly as plain Python functions rather than duplicating their query
+    code. The `_=Depends(require_roles(...))` default parameter is simply
+    overridden with None here since dependency injection only happens at the
+    HTTP layer; auth for these calls is already enforced by the export/email
+    endpoint's own require_roles dependency."""
+    if report == "funnel":
+        return await hiring_funnel(department_id=None, days=days, source=None, _=None, db=db)
+    if report == "pipeline":
+        return await pipeline_snapshot(_=None, db=db)
+    if report == "trend":
+        return await applications_trend(days=days, bucket=bucket, _=None, db=db)
+    if report == "job":
+        return await job_performance(days=days, _=None, db=db)
+    if report == "source":
+        return await source_analysis(days=days, _=None, db=db)
+    if report == "referral":
+        return await referral_performance(days=days, _=None, db=db)
+    if report == "tth":
+        return await time_to_hire_report(days=days, _=None, db=db)
+    if report == "agency":
+        return await agency_performance(days=days, _=None, db=db)
+    raise HTTPException(400, f"Unknown report: {report}")
+
+
+@router.get("/export")
+async def export_report(
+    report: ReportKey = Query(...),
+    days: int = Query(90, ge=1, le=365),
+    bucket: str = Query("day"),
+    _=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.report_export_service import build_xlsx, REPORT_TITLES
+
+    data = await _fetch_report_data(report, db=db, days=days, bucket=bucket)
+    xlsx_bytes = build_xlsx(report, data)
+    filename = f"{REPORT_TITLES[report].lower().replace(' ', '_')}_report.xlsx"
+    return Response(
+        content=xlsx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+class ReportEmailRequest(BaseModel):
+    to_emails: list[EmailStr]
+
+    @field_validator("to_emails")
+    @classmethod
+    def _non_empty(cls, v: list[EmailStr]) -> list[EmailStr]:
+        if not v:
+            raise ValueError("At least one recipient email is required")
+        if len(v) > 25:
+            raise ValueError("At most 25 recipients at a time")
+        return v
+
+
+@router.post("/email")
+async def email_report(
+    data: ReportEmailRequest,
+    report: ReportKey = Query(...),
+    days: int = Query(90, ge=1, le=365),
+    bucket: str = Query("day"),
+    user=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    import base64
+    from app.services.report_export_service import build_xlsx, REPORT_TITLES
+    from app.tasks.email_tasks import send_report_email_task
+
+    report_data = await _fetch_report_data(report, db=db, days=days, bucket=bucket)
+    xlsx_bytes = build_xlsx(report, report_data)
+    send_report_email_task.delay(
+        [str(e) for e in data.to_emails], REPORT_TITLES[report], base64.b64encode(xlsx_bytes).decode(), user.full_name,
+    )
+    return {"status": "queued", "recipients": len(data.to_emails)}
