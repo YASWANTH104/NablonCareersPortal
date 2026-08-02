@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 
 from app.models.job import Job, Department, JobQuestion
+from app.models.user import User
 from app.schemas.job import JobCreate, JobUpdate, JobQuestionCreate
 from app.utils.slug import generate_slug
 
@@ -17,6 +18,26 @@ JOB_STATUS_TRANSITIONS = {
     "closed": ["archived"],
     "archived": [],
 }
+
+
+async def _name_map(db: AsyncSession, user_ids: set) -> dict:
+    ids = {uid for uid in user_ids if uid}
+    if not ids:
+        return {}
+    rows = (await db.execute(select(User.id, User.full_name).where(User.id.in_(ids)))).all()
+    return {row.id: row.full_name for row in rows}
+
+
+def _job_to_dict(job: Job, names: dict) -> dict:
+    data = {c.name: getattr(job, c.name) for c in Job.__table__.columns}
+    data["posted_by_name"] = names.get(job.posted_by)
+    data["hiring_manager_name"] = names.get(job.hiring_manager_id)
+    return data
+
+
+async def get_job_with_names(db: AsyncSession, job: Job) -> dict:
+    names = await _name_map(db, {job.posted_by, job.hiring_manager_id})
+    return _job_to_dict(job, names)
 
 
 async def list_jobs_public(
@@ -78,7 +99,11 @@ async def list_jobs_hr(
         await db.execute(select(Job).where(condition).order_by(Job.created_at.desc()).offset(offset).limit(limit))
     ).scalars().all()
 
-    return {"items": list(rows), "total": total, "page": page, "limit": limit, "pages": max(1, -(-total // limit))}
+    ids = {j.posted_by for j in rows} | {j.hiring_manager_id for j in rows}
+    names = await _name_map(db, ids)
+    items = [_job_to_dict(j, names) for j in rows]
+
+    return {"items": items, "total": total, "page": page, "limit": limit, "pages": max(1, -(-total // limit))}
 
 
 async def get_job_by_slug(db: AsyncSession, slug: str) -> Optional[Job]:

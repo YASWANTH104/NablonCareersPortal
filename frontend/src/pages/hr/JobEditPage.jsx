@@ -7,6 +7,7 @@ import { z } from 'zod';
 import toast from 'react-hot-toast';
 import { ArrowLeft, Loader2, Plus, X, Wand2, FileText, Upload, ExternalLink } from 'lucide-react';
 import { jobsApi } from '@/api/jobs';
+import { usersApi } from '@/api/users';
 import RichTextEditor from '@/components/shared/RichTextEditor';
 import DraftWithAiModal from '@/components/shared/DraftWithAiModal';
 import ImportJdPdfModal from '@/components/shared/ImportJdPdfModal';
@@ -32,6 +33,7 @@ const schema = z.object({
   openings: z.preprocess((v) => (v === '' ? 1 : parseInt(String(v), 10)), z.number().int().min(1, 'At least 1 opening required')),
   is_internal: z.boolean().default(false),
   closes_at: z.string().optional(),
+  hiring_manager_id: z.string().optional(),
 });
 
 const LOCATION_TYPES = ['remote', 'onsite', 'hybrid'];
@@ -97,6 +99,11 @@ export default function JobEditPage() {
     queryFn: () => jobsApi.listDepartments().then((r) => r.data),
   });
 
+  const { data: internalUsers = [] } = useQuery({
+    queryKey: ['internal-users'],
+    queryFn: () => usersApi.internalUsers().then((r) => r.data),
+  });
+
   const [showAiModal, setShowAiModal] = useState(false);
 
   const {
@@ -127,6 +134,7 @@ export default function JobEditPage() {
       openings: 1,
       is_internal: false,
       closes_at: '',
+      hiring_manager_id: '',
     },
   });
 
@@ -153,6 +161,7 @@ export default function JobEditPage() {
         openings: existing.openings ?? 1,
         is_internal: existing.is_internal ?? false,
         closes_at: closesAt,
+        hiring_manager_id: existing.hiring_manager_id ?? '',
       });
       setSkills(existing.skills_required ?? []);
       setJdPdf(existing.jd_pdf_url ? { url: existing.jd_pdf_url, name: existing.jd_pdf_name || 'Job description.pdf' } : null);
@@ -202,6 +211,7 @@ export default function JobEditPage() {
   const buildPayload = (values) => ({
     ...values,
     department_id: values.department_id || null,
+    hiring_manager_id: values.hiring_manager_id || null,
     experience_min: values.experience_min ?? null,
     experience_max: values.experience_max ?? null,
     salary_min: values.salary_min ?? null,
@@ -312,6 +322,21 @@ export default function JobEditPage() {
                   <option key={d.id} value={d.id}>{d.name}</option>
                 ))}
               </Select>
+            </div>
+          </div>
+
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <FieldLabel>Hiring manager</FieldLabel>
+              <Select {...register('hiring_manager_id')}>
+                <option value="">Unassigned</option>
+                {internalUsers.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.full_name} ({u.role.replace('_', ' ')})
+                  </option>
+                ))}
+              </Select>
+              <p className="mt-1 text-xs text-gray-400">The engineering/hiring manager who owns this req.</p>
             </div>
           </div>
 

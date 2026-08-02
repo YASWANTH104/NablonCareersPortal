@@ -41,6 +41,11 @@ class Application(Base):
     is_starred: Mapped[bool] = mapped_column(Boolean, default=False)
     assigned_to: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
 
+    # On-hold is orthogonal to `stage` — the candidate stays in their current
+    # Kanban column, just flagged paused (e.g. waiting on budget approval).
+    on_hold: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    hold_reason: Mapped[str | None] = mapped_column(Text)
+
     # Possible-duplicate detection — set when another candidate account shares this
     # applicant's normalized full name (identity may have changed email/phone since).
     # Never blocks the application; HR reviews and dismisses via duplicate_reviewed_*.

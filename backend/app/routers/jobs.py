@@ -109,7 +109,11 @@ async def get_job(
     # Re-sign the stored JD-PDF SAS URL so it doesn't 403 once its baked-in token
     # expires. Build the response first so we never mutate the persistent ORM row
     # (which could otherwise write the short-lived URL back on autoflush).
-    resp = JobResponse.model_validate(job)
+    # Recruiter/hiring-manager names are internal detail — only attached for HR.
+    if is_hr:
+        resp = JobResponse(**await job_service.get_job_with_names(db, job))
+    else:
+        resp = JobResponse.model_validate(job)
     if resp.jd_pdf_url:
         resp.jd_pdf_url = storage_service.refresh_url(resp.jd_pdf_url)
     return resp
@@ -123,7 +127,8 @@ async def create_job(
     user=Depends(require_roles(Role.HR_MANAGER, Role.ADMIN, Role.SUPER_ADMIN)),
     db: AsyncSession = Depends(get_db),
 ):
-    return await job_service.create_job(db, data, posted_by=user.id)
+    job = await job_service.create_job(db, data, posted_by=user.id)
+    return await job_service.get_job_with_names(db, job)
 
 
 @router.post("/generate-jd", response_model=JDGenerateResponse)
@@ -190,7 +195,8 @@ async def update_job(
     user=Depends(require_roles(Role.HR_MANAGER, Role.ADMIN, Role.SUPER_ADMIN)),
     db: AsyncSession = Depends(get_db),
 ):
-    return await job_service.update_job(db, job_id, data)
+    job = await job_service.update_job(db, job_id, data)
+    return await job_service.get_job_with_names(db, job)
 
 
 @router.patch("/{job_id}/status", response_model=JobResponse)
@@ -200,7 +206,8 @@ async def update_job_status(
     user=Depends(require_roles(Role.HR_MANAGER, Role.ADMIN, Role.SUPER_ADMIN)),
     db: AsyncSession = Depends(get_db),
 ):
-    return await job_service.update_job_status(db, job_id, data.status)
+    job = await job_service.update_job_status(db, job_id, data.status)
+    return await job_service.get_job_with_names(db, job)
 
 
 @router.delete("/{job_id}", status_code=204)

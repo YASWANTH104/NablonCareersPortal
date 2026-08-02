@@ -7,7 +7,7 @@ import {
 } from '@dnd-kit/core';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { formatDistanceToNow } from 'date-fns';
-import { Search, LayoutGrid, List, Star, GripVertical, X, UserPlus, UploadCloud, AlertTriangle } from 'lucide-react';
+import { Search, LayoutGrid, List, Star, GripVertical, X, UserPlus, UploadCloud, AlertTriangle, Pause } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { applicationsApi } from '@/api/applications';
 import { jobsApi } from '@/api/jobs';
@@ -16,6 +16,8 @@ import { uploadsApi } from '@/api/uploads';
 import CandidateIntakeForm from '@/components/shared/CandidateIntakeForm';
 import BulkUploadModal from '@/components/shared/BulkUploadModal';
 import StageReasonDialog from '@/components/shared/StageReasonDialog';
+import HoldReasonDialog from '@/components/shared/HoldReasonDialog';
+import { useHoldToggle } from '@/hooks/useHoldToggle';
 import { PIPELINE_STAGES, STAGE_MAP, REASON_REQUIRED_STAGES } from '@/constants/pipelineStages';
 
 function initials(name) {
@@ -29,7 +31,7 @@ function initials(name) {
 
 // ── Kanban Card ──────────────────────────────────────────────────────────────
 
-function KanbanCard({ application, onClick }) {
+function KanbanCard({ application, onClick, onToggleHold }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: application.id,
     data: { fromStage: application.stage },
@@ -45,9 +47,9 @@ function KanbanCard({ application, onClick }) {
     <div
       ref={setNodeRef}
       style={style}
-      className={`bg-white rounded-lg border border-surface-200 p-3 hover:border-brand-300 hover:shadow-sm transition-all ${
-        isDragging ? 'opacity-40 cursor-grabbing' : 'cursor-pointer'
-      }`}
+      className={`bg-white rounded-lg border p-3 hover:shadow-sm transition-all ${
+        application.on_hold ? 'border-amber-200' : 'border-surface-200 hover:border-brand-300'
+      } ${isDragging ? 'opacity-40 cursor-grabbing' : 'cursor-pointer'}`}
       onClick={() => !isDragging && onClick(application.id)}
     >
       <div className="flex items-start gap-2 mb-2">
@@ -72,7 +74,25 @@ function KanbanCard({ application, onClick }) {
         {application.is_starred && (
           <Star className="w-3.5 h-3.5 text-yellow-400 fill-yellow-400 flex-shrink-0" />
         )}
+        <button
+          onClick={(e) => { e.stopPropagation(); onToggleHold(application); }}
+          className={`p-0.5 rounded flex-shrink-0 transition-colors ${
+            application.on_hold ? 'text-amber-500 hover:text-amber-600' : 'text-gray-300 hover:text-gray-500'
+          }`}
+          title={
+            application.on_hold
+              ? `On hold${application.hold_reason ? `: ${application.hold_reason}` : ''} — click to resume`
+              : 'Put on hold'
+          }
+        >
+          <Pause className="w-3.5 h-3.5" />
+        </button>
       </div>
+      {application.on_hold && (
+        <span className="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 mb-1.5">
+          On Hold
+        </span>
+      )}
       <div className="flex items-center justify-between mt-2">
         {application.rating ? (
           <div className="flex gap-0.5">
@@ -100,7 +120,7 @@ function KanbanCard({ application, onClick }) {
 
 // ── Kanban Column ─────────────────────────────────────────────────────────────
 
-function KanbanColumn({ stageKey, label, colorClass, cards, onCardClick }) {
+function KanbanColumn({ stageKey, label, colorClass, cards, onCardClick, onToggleHold }) {
   const { isOver, setNodeRef } = useDroppable({ id: stageKey });
 
   return (
@@ -118,7 +138,7 @@ function KanbanColumn({ stageKey, label, colorClass, cards, onCardClick }) {
         }`}
       >
         {cards.map((app) => (
-          <KanbanCard key={app.id} application={app} onClick={onCardClick} />
+          <KanbanCard key={app.id} application={app} onClick={onCardClick} onToggleHold={onToggleHold} />
         ))}
       </div>
     </div>
@@ -127,7 +147,7 @@ function KanbanColumn({ stageKey, label, colorClass, cards, onCardClick }) {
 
 // ── Kanban View ───────────────────────────────────────────────────────────────
 
-function KanbanView({ applications, queryKey, onCardClick }) {
+function KanbanView({ applications, queryKey, onCardClick, onToggleHold }) {
   const queryClient = useQueryClient();
   const [activeApp, setActiveApp] = useState(null);
   const [pendingDrop, setPendingDrop] = useState(null); // { app, toStage }
@@ -179,6 +199,10 @@ function KanbanView({ applications, queryKey, onCardClick }) {
     const toStage = over.id;
     const app = applications.find((a) => a.id === active.id);
     if (!app || app.stage === toStage) return;
+    if (app.on_hold) {
+      toast.error('This candidate is on hold — resume before changing stage.');
+      return;
+    }
     if (REASON_REQUIRED_STAGES.has(toStage)) {
       setPendingDrop({ app, toStage });
     } else {
@@ -202,6 +226,7 @@ function KanbanView({ applications, queryKey, onCardClick }) {
             colorClass={color}
             cards={grouped[key] ?? []}
             onCardClick={onCardClick}
+            onToggleHold={onToggleHold}
           />
         ))}
       </div>
@@ -237,7 +262,7 @@ function KanbanView({ applications, queryKey, onCardClick }) {
 
 // ── Table View ────────────────────────────────────────────────────────────────
 
-function TableView({ applications, onRowClick }) {
+function TableView({ applications, onRowClick, onToggleHold }) {
   return (
     <div className="bg-white rounded-xl border border-surface-200 overflow-hidden">
       <table className="w-full text-sm">
@@ -258,6 +283,7 @@ function TableView({ applications, onRowClick }) {
             <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wide px-4 py-3">
               Applied
             </th>
+            <th className="px-4 py-3" />
           </tr>
         </thead>
         <tbody className="divide-y divide-surface-50">
@@ -290,9 +316,19 @@ function TableView({ applications, onRowClick }) {
                   </div>
                 </td>
                 <td className="px-4 py-3.5">
-                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${stage?.color ?? 'bg-gray-100 text-gray-600'}`}>
-                    {stage?.label ?? app.stage}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${stage?.color ?? 'bg-gray-100 text-gray-600'}`}>
+                      {stage?.label ?? app.stage}
+                    </span>
+                    {app.on_hold && (
+                      <span
+                        className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700"
+                        title={app.hold_reason ?? undefined}
+                      >
+                        On Hold
+                      </span>
+                    )}
+                  </div>
                 </td>
                 <td className="px-4 py-3.5 text-gray-500">
                   {app.source === 'agency'
@@ -319,6 +355,21 @@ function TableView({ applications, onRowClick }) {
                 </td>
                 <td className="px-4 py-3.5 text-xs text-gray-400">
                   {formatDistanceToNow(new Date(app.applied_at), { addSuffix: true })}
+                </td>
+                <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    onClick={() => onToggleHold(app)}
+                    className={`p-1 rounded transition-colors ${
+                      app.on_hold ? 'text-amber-500 hover:text-amber-600' : 'text-gray-300 hover:text-gray-500'
+                    }`}
+                    title={
+                      app.on_hold
+                        ? `On hold${app.hold_reason ? `: ${app.hold_reason}` : ''} — click to resume`
+                        : 'Put on hold'
+                    }
+                  >
+                    <Pause className="w-4 h-4" />
+                  </button>
                 </td>
               </tr>
             );
@@ -459,6 +510,8 @@ export default function ApplicantsPage() {
 
   const applications = data?.items ?? [];
 
+  const { pendingHold, setPendingHold, holdMutation, toggleHold } = useHoldToggle(queryKey);
+
   return (
     <div>
       {/* Header */}
@@ -593,12 +646,14 @@ export default function ApplicantsPage() {
           applications={applications}
           queryKey={queryKey}
           onCardClick={(id) => navigate(`/hr/applicants/${id}`)}
+          onToggleHold={toggleHold}
         />
       ) : (
         <>
           <TableView
             applications={applications}
             onRowClick={(id) => navigate(`/hr/applicants/${id}`)}
+            onToggleHold={toggleHold}
           />
           {data && data.pages > 1 && (
             <div className="flex items-center justify-end gap-3 mt-4">
@@ -627,6 +682,17 @@ export default function ApplicantsPage() {
       )}
       {showBulkUpload && (
         <BulkUploadModal jobs={jobsData} onClose={() => setShowBulkUpload(false)} />
+      )}
+
+      {pendingHold && (
+        <HoldReasonDialog
+          candidateName={pendingHold.applicant?.full_name ?? 'this candidate'}
+          isPending={holdMutation.isPending}
+          onCancel={() => setPendingHold(null)}
+          onConfirm={(reason) =>
+            holdMutation.mutate({ id: pendingHold.id, on_hold: true, hold_reason: reason })
+          }
+        />
       )}
     </div>
   );

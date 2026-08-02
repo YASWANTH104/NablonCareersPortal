@@ -92,6 +92,7 @@ class JobCreate(BaseModel):
     openings: int = 1
     is_internal: bool = False
     closes_at: Optional[datetime] = None
+    hiring_manager_id: Optional[uuid.UUID] = None
 
 
 class JobUpdate(BaseModel):
@@ -115,6 +116,7 @@ class JobUpdate(BaseModel):
     openings: Optional[int] = None
     is_internal: Optional[bool] = None
     closes_at: Optional[datetime] = None
+    hiring_manager_id: Optional[uuid.UUID] = None
 
 
 class JobStatusUpdate(BaseModel):
@@ -147,6 +149,9 @@ class JobResponse(BaseModel):
     status: str
     is_internal: bool
     posted_by: Optional[uuid.UUID] = None
+    posted_by_name: Optional[str] = None
+    hiring_manager_id: Optional[uuid.UUID] = None
+    hiring_manager_name: Optional[str] = None
     published_at: Optional[datetime] = None
     closes_at: Optional[datetime] = None
     created_at: datetime
