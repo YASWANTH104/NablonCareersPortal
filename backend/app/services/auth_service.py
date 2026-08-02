@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from fastapi import HTTPException, status
@@ -19,7 +20,27 @@ REFRESH_KEY_PREFIX = "refresh:"
 
 
 def _redis_client():
-    return aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    # redis.asyncio's SSL parsing only accepts lowercase
+    # "required"/"optional"/"none" for ssl_cert_reqs, while the sync
+    # redis-py client (used elsewhere for Celery) expects the uppercase
+    # ssl.CERT_REQUIRED enum name — so REDIS_URL may carry the uppercase
+    # form. from_url() docs are explicit that querystring values always
+    # win over kwargs, so passing ssl_cert_reqs as a kwarg alone can't
+    # override a conflicting value already in the URL — strip it from the
+    # URL first, then set it explicitly.
+    kwargs = {"decode_responses": True}
+    url = settings.REDIS_URL
+    if url.startswith("rediss://"):
+        parsed = urlparse(url)
+        query = parse_qs(parsed.query)
+        query.pop("ssl_cert_reqs", None)
+        url = urlunparse(parsed._replace(query=urlencode(query, doseq=True)))
+        # redis.asyncio's RedisSSLContext.__init__ only handles cert_reqs as
+        # None or a str ("none"/"optional"/"required") — passing the actual
+        # ssl.CERT_REQUIRED enum object hits neither branch, so it silently
+        # never sets self.cert_reqs at all (AttributeError on first use).
+        kwargs["ssl_cert_reqs"] = "required"
+    return aioredis.from_url(url, **kwargs)
 
 
 async def register_user(data: RegisterRequest, db: AsyncSession) -> User:
