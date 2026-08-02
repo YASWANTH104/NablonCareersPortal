@@ -10,7 +10,7 @@ import {
   ArrowLeft, Star, ExternalLink, FileText, Calendar, MessageSquare,
   Clock, User, Github, Linkedin, Globe, ChevronDown, Plus, Loader2,
   Video, Phone, MapPin, CheckCircle2, AlertCircle, Send, FolderOpen, Download, Eye, X,
-  Pencil, Wallet, Briefcase, GraduationCap, AlertTriangle,
+  Pencil, Wallet, Briefcase, GraduationCap, AlertTriangle, Pause, PlayCircle,
 } from 'lucide-react';
 import { applicationsApi } from '@/api/applications';
 import { interviewsApi } from '@/api/interviews';
@@ -20,6 +20,8 @@ import { offersApi } from '@/api/offers';
 import { usersApi } from '@/api/users';
 import { documentsApi } from '@/api/documents';
 import StageReasonDialog from '@/components/shared/StageReasonDialog';
+import HoldReasonDialog from '@/components/shared/HoldReasonDialog';
+import { useHoldToggle } from '@/hooks/useHoldToggle';
 import { PIPELINE_STAGES, STAGE_MAP, VALID_TRANSITIONS, REASON_REQUIRED_STAGES } from '@/constants/pipelineStages';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -1084,6 +1086,16 @@ export default function ApplicationDetailPage() {
   const stageMutation = useMutation({
     mutationFn: ({ stage, notes, rejection_reason, drop_category }) =>
       applicationsApi.moveStage(id, stage, notes, rejection_reason, drop_category),
+    onMutate: async ({ stage }) => {
+      // Optimistic — the pill updates instantly instead of waiting on the round trip,
+      // which is what made this feel laggy before (nothing changed until onSuccess).
+      await queryClient.cancelQueries({ queryKey: ['application-detail', id], exact: true });
+      const prev = queryClient.getQueryData(['application-detail', id]);
+      queryClient.setQueryData(['application-detail', id], (old) =>
+        old ? { ...old, stage } : old
+      );
+      return { prev };
+    },
     onSuccess: (res) => {
       // Merge only stage fields into the cached detail — preserves rich applicant/job_title
       // that the lean PATCH response doesn't include
@@ -1095,16 +1107,19 @@ export default function ApplicationDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['application-detail', id], exact: true });
       queryClient.invalidateQueries({ queryKey: ['hr-applications'] });
       toast.success('Stage updated');
-      setStageMenuOpen(false);
-      setPendingReasonStage(null);
     },
-    onError: (err) => toast.error(err.response?.data?.detail ?? 'Cannot move to this stage'),
+    onError: (err, _vars, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(['application-detail', id], ctx.prev);
+      toast.error(err.response?.data?.detail ?? 'Cannot move to this stage');
+    },
   });
 
   const starMutation = useMutation({
     mutationFn: () => applicationsApi.toggleStar(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['application-detail', id] }),
   });
+
+  const { pendingHold, setPendingHold, holdMutation, toggleHold } = useHoldToggle(['application-detail', id]);
 
   const dismissDuplicateMutation = useMutation({
     mutationFn: () => applicationsApi.reviewDuplicate(id),
@@ -1250,13 +1265,17 @@ export default function ApplicationDetailPage() {
             <div className="relative">
               <button
                 onClick={() => setStageMenuOpen((o) => !o)}
-                disabled={validNext.length === 0}
+                disabled={validNext.length === 0 || app.on_hold}
+                title={app.on_hold ? 'Resume from hold to change stage' : undefined}
                 className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold ${
                   currentStage?.color ?? 'bg-gray-100 text-gray-700'
-                } ${validNext.length > 0 ? 'hover:opacity-80 cursor-pointer' : 'cursor-default'}`}
+                } ${
+                  validNext.length > 0 && !app.on_hold ? 'hover:opacity-80 cursor-pointer' : 'cursor-default opacity-60'
+                }`}
               >
+                {stageMutation.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                 {currentStage?.label ?? app.stage}
-                {validNext.length > 0 && <ChevronDown className="w-3.5 h-3.5" />}
+                {validNext.length > 0 && !app.on_hold && <ChevronDown className="w-3.5 h-3.5" />}
               </button>
 
               {stageMenuOpen && (
@@ -1269,27 +1288,30 @@ export default function ApplicationDetailPage() {
                       const offerSigned =
                         offerData?.status === 'accepted' && !!offerData?.candidate_signature;
                       const blockedHired = stage === 'hired' && !offerSigned;
+                      const disabled = blockedHired || stageMutation.isPending;
                       return (
                         <button
                           key={stage}
-                          disabled={blockedHired}
+                          disabled={disabled}
                           title={blockedHired ? 'Candidate must accept and sign the offer letter first' : undefined}
                           onClick={() => {
-                            if (blockedHired) return;
+                            if (disabled) return;
+                            // Close immediately — waiting for the round trip to close this
+                            // is what made stage changes feel unresponsive.
+                            setStageMenuOpen(false);
                             if (REASON_REQUIRED_STAGES.has(stage)) {
-                              setStageMenuOpen(false);
                               setPendingReasonStage(stage);
                             } else {
                               stageMutation.mutate({ stage });
                             }
                           }}
                           className={`flex items-center gap-2 w-full px-3 py-2 text-sm text-left ${
-                            blockedHired
+                            disabled
                               ? 'text-gray-300 cursor-not-allowed'
                               : 'text-gray-700 hover:bg-surface-50'
                           }`}
                         >
-                          <span className={`w-2 h-2 rounded-full ${s?.color.split(' ')[0] ?? 'bg-gray-200'} ${blockedHired ? 'opacity-30' : ''}`} />
+                          <span className={`w-2 h-2 rounded-full ${s?.color.split(' ')[0] ?? 'bg-gray-200'} ${disabled ? 'opacity-30' : ''}`} />
                           <span>{s?.label ?? stage}</span>
                           {blockedHired && (
                             <span className="ml-auto text-xs text-gray-300">Awaiting signature</span>
@@ -1301,6 +1323,19 @@ export default function ApplicationDetailPage() {
                 </>
               )}
             </div>
+            <button
+              onClick={() => toggleHold(app)}
+              className={`p-1.5 rounded-lg transition-colors ${
+                app.on_hold ? 'text-amber-500 hover:text-amber-600 bg-amber-50' : 'text-gray-400 hover:text-gray-600 hover:bg-surface-100'
+              }`}
+              title={
+                app.on_hold
+                  ? `On hold${app.hold_reason ? `: ${app.hold_reason}` : ''} — click to resume`
+                  : 'Put on hold'
+              }
+            >
+              <Pause className="w-4 h-4" />
+            </button>
           </div>
         </div>
 
@@ -1320,6 +1355,28 @@ export default function ApplicationDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* On-hold banner */}
+      {app.on_hold && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-6 flex items-start gap-3">
+          <Pause className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-800">On hold</p>
+            <p className="text-sm text-amber-700 mt-0.5">
+              {app.hold_reason || 'No reason given.'} They'll stay in {currentStage?.label ?? app.stage} until resumed —
+              stage changes are blocked while on hold.
+            </p>
+          </div>
+          <button
+            onClick={() => toggleHold(app)}
+            disabled={holdMutation.isPending}
+            className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-800 bg-white border border-amber-300 rounded-lg hover:bg-amber-100 disabled:opacity-50"
+          >
+            <PlayCircle className="w-3.5 h-3.5" />
+            Resume
+          </button>
+        </div>
+      )}
 
       {/* Possible-duplicate review banner */}
       {app.duplicate_flag && !app.duplicate_reviewed_at && (
@@ -2246,6 +2303,17 @@ export default function ApplicationDetailPage() {
           }
           onCancel={() => setPendingReasonStage(null)}
           isPending={stageMutation.isPending}
+        />
+      )}
+
+      {pendingHold && (
+        <HoldReasonDialog
+          candidateName={pendingHold.applicant?.full_name ?? 'this candidate'}
+          isPending={holdMutation.isPending}
+          onCancel={() => setPendingHold(null)}
+          onConfirm={(reason) =>
+            holdMutation.mutate({ id: pendingHold.id, on_hold: true, hold_reason: reason })
+          }
         />
       )}
     </div>

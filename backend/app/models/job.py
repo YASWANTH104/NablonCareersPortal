@@ -45,6 +45,9 @@ class Job(Base):
     # draft | published | paused | closed | archived
     is_internal: Mapped[bool] = mapped_column(Boolean, default=False)
     posted_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    # Engineering/hiring manager this req is assigned to — any internal user,
+    # not a dedicated role. Distinct from posted_by (who created the listing).
+    hiring_manager_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     closes_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)

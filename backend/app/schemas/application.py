@@ -79,6 +79,11 @@ class ApplicationAssignUpdate(BaseModel):
     assignee_id: Optional[uuid.UUID] = None
 
 
+class ApplicationHoldUpdate(BaseModel):
+    on_hold: bool
+    hold_reason: Optional[str] = None
+
+
 class NoteCreate(BaseModel):
     note: str
 
@@ -126,6 +131,8 @@ class ApplicationResponse(BaseModel):
     rating: Optional[int] = None
     is_starred: bool
     assigned_to: Optional[uuid.UUID] = None
+    on_hold: bool = False
+    hold_reason: Optional[str] = None
     duplicate_flag: bool = False
     duplicate_reason: Optional[str] = None
     duplicate_reviewed_at: Optional[datetime] = None

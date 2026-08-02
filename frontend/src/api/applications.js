@@ -40,6 +40,7 @@ export const applicationsApi = {
   moveStage: (id, stage, notes, rejection_reason, drop_category) =>
     client.patch(`/applications/${id}/stage`, { stage, notes, rejection_reason, drop_category }),
   assign: (id, assigneeId) => client.patch(`/applications/${id}/assign`, { assignee_id: assigneeId }),
+  setHold: (id, onHold, holdReason) => client.patch(`/applications/${id}/hold`, { on_hold: onHold, hold_reason: holdReason }),
   toggleStar: (id) => client.patch(`/applications/${id}/star`),
   reviewDuplicate: (id) => client.patch(`/applications/${id}/duplicate-review`),
   setRating: (id, rating) => client.patch(`/applications/${id}/rating`, { rating }),

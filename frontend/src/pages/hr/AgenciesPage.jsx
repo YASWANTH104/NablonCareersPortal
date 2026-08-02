@@ -2,13 +2,14 @@ import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Building2, Plus, Copy, ChevronDown, ChevronRight, Trash2, Users,
-  X, Mail, TrendingUp, Link2,
+  X, Mail, TrendingUp, Link2, Power,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import { agenciesApi } from '@/api/agencies';
 import { jobsApi } from '@/api/jobs';
 import { reportsApi } from '@/api/reports';
+import ConfirmDialog from '@/components/shared/ConfirmDialog';
 
 const inputCls =
   'w-full text-sm border border-surface-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500';
@@ -95,9 +96,9 @@ function AssignmentCard({ assignment, onRemove, removing }) {
         <div className="flex items-center gap-4 flex-shrink-0">
           <CopyButton text={jobLink} label="Copy link" />
           <button
-            onClick={() => onRemove(assignment.id)}
+            onClick={() => onRemove(assignment)}
             disabled={removing}
-            className="text-gray-300 hover:text-red-400 transition-colors"
+            className="text-gray-300 hover:text-red-400 transition-colors disabled:opacity-40"
             title="Remove assignment"
           >
             <Trash2 className="w-3.5 h-3.5" />
@@ -114,6 +115,8 @@ function AgencyCard({ agency, perf, jobs }) {
   const [selectedJob, setSelectedJob] = useState('');
   const [maxSubs, setMaxSubs] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
+  const [pendingRemove, setPendingRemove] = useState(null); // assignment awaiting removal confirmation
+  const [pendingDeactivate, setPendingDeactivate] = useState(false);
   const queryClient = useQueryClient();
 
   const { data: assignments, refetch: refetchAssignments } = useQuery({
@@ -139,6 +142,7 @@ function AgencyCard({ agency, perf, jobs }) {
     mutationFn: (assignmentId) => agenciesApi.removeAssignment(assignmentId),
     onSuccess: () => {
       toast.success('Assignment removed');
+      setPendingRemove(null);
       refetchAssignments();
     },
     onError: () => toast.error('Failed to remove assignment'),
@@ -148,6 +152,7 @@ function AgencyCard({ agency, perf, jobs }) {
     mutationFn: () => agenciesApi.update(agency.id, { is_active: !agency.is_active }),
     onSuccess: () => {
       toast.success(agency.is_active ? 'Agency deactivated' : 'Agency activated');
+      setPendingDeactivate(false);
       queryClient.invalidateQueries({ queryKey: ['agencies'] });
     },
     onError: () => toast.error('Failed to update agency'),
@@ -197,12 +202,18 @@ function AgencyCard({ agency, perf, jobs }) {
           </div>
         </div>
 
-        <div className="flex items-center gap-4 flex-shrink-0 pt-1" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-3 flex-shrink-0 pt-1" onClick={(e) => e.stopPropagation()}>
           <CopyButton text={portalUrl} label="Portal link" />
+          <div className="w-px h-4 bg-surface-200" />
           <button
-            onClick={() => deactivateMutation.mutate()}
-            className="text-xs text-gray-400 hover:text-gray-700 font-medium whitespace-nowrap"
+            onClick={() => (agency.is_active ? setPendingDeactivate(true) : deactivateMutation.mutate())}
+            className={`flex items-center gap-1.5 text-xs font-medium whitespace-nowrap px-2 py-1 rounded-lg transition-colors ${
+              agency.is_active
+                ? 'text-gray-500 hover:text-red-600 hover:bg-red-50'
+                : 'text-green-600 hover:text-green-700 hover:bg-green-50'
+            }`}
           >
+            <Power className="w-3.5 h-3.5" />
             {agency.is_active ? 'Deactivate' : 'Activate'}
           </button>
           <button onClick={() => setExpanded((e) => !e)} className="text-gray-300 hover:text-gray-500">
@@ -291,12 +302,36 @@ function AgencyCard({ agency, perf, jobs }) {
               <AssignmentCard
                 key={a.id}
                 assignment={a}
-                onRemove={removeMutation.mutate}
+                onRemove={setPendingRemove}
                 removing={removeMutation.isPending}
               />
             ))}
           </div>
         </div>
+      )}
+
+      {pendingRemove && (
+        <ConfirmDialog
+          title="Remove job assignment?"
+          message={`"${agency.name}" will no longer see or be able to submit candidates for "${pendingRemove.job_title}". This can't be undone.`}
+          confirmLabel="Remove assignment"
+          danger
+          isPending={removeMutation.isPending}
+          onCancel={() => setPendingRemove(null)}
+          onConfirm={() => removeMutation.mutate(pendingRemove.id)}
+        />
+      )}
+
+      {pendingDeactivate && (
+        <ConfirmDialog
+          title={`Deactivate ${agency.name}?`}
+          message="Their portal link will stop working and they won't be able to submit new candidates. Existing assignments and submitted candidates are kept — you can reactivate anytime."
+          confirmLabel="Deactivate"
+          danger
+          isPending={deactivateMutation.isPending}
+          onCancel={() => setPendingDeactivate(false)}
+          onConfirm={() => deactivateMutation.mutate()}
+        />
       )}
     </div>
   );

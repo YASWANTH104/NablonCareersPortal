@@ -75,6 +75,7 @@ async def update_my_profile(
 async def list_users(
     role: Optional[str] = Query(None),
     panel_eligible: bool = Query(False),
+    internal_only: bool = Query(False),
     active_only: bool = Query(False),
     search: Optional[str] = Query(None),
     _=Depends(require_roles(*_HR_ROLES)),
@@ -86,6 +87,8 @@ async def list_users(
         filters.append(User.role.in_(list(PANEL_ROLES)))
         filters.append(User.is_active == True)
     else:
+        if internal_only:
+            filters.append(User.role != "applicant")
         if active_only:
             filters.append(User.is_active == True)
         if role:

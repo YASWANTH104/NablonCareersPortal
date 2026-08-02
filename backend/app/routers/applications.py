@@ -11,7 +11,7 @@ from app.dependencies import get_current_user, require_roles, Role
 from app.schemas.application import (
     ApplicationCreate, ApplicationResponse, ApplicationDetailResponse,
     ApplicationStageUpdate, ApplicationListResponse,
-    ApplicationRatingUpdate, ApplicationAssignUpdate,
+    ApplicationRatingUpdate, ApplicationAssignUpdate, ApplicationHoldUpdate,
     ApplicationUpdate, NoteCreate, StageHistoryEntry,
 )
 from app.services import application_service
@@ -301,6 +301,16 @@ async def assign_application(
     db: AsyncSession = Depends(get_db),
 ):
     return await application_service.assign_application(db, application_id, data.assignee_id)
+
+
+@router.patch("/{application_id}/hold", response_model=ApplicationResponse)
+async def set_hold(
+    application_id: uuid.UUID,
+    data: ApplicationHoldUpdate,
+    user=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await application_service.set_hold(db, application_id, data.on_hold, data.hold_reason)
 
 
 @router.post("/{application_id}/notes", response_model=StageHistoryEntry)

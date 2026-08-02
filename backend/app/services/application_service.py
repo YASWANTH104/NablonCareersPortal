@@ -42,6 +42,8 @@ def _app_to_dict(app: Application) -> dict:
         "rating": app.rating,
         "is_starred": app.is_starred,
         "assigned_to": app.assigned_to,
+        "on_hold": app.on_hold,
+        "hold_reason": app.hold_reason,
         "duplicate_flag": app.duplicate_flag,
         "duplicate_reason": app.duplicate_reason,
         "duplicate_reviewed_at": app.duplicate_reviewed_at,
@@ -713,6 +715,9 @@ async def move_stage(
     if not app:
         raise HTTPException(404, "Application not found")
 
+    if app.on_hold:
+        raise HTTPException(400, "Candidate is on hold — resume before changing stage.")
+
     allowed = VALID_TRANSITIONS.get(app.stage, [])
     if new_stage not in allowed:
         raise HTTPException(400, f"Cannot move from '{app.stage}' to '{new_stage}'")
@@ -843,6 +848,22 @@ async def assign_application(
     if not app:
         raise HTTPException(404, "Application not found")
     app.assigned_to = assignee_id
+    await db.commit()
+    await db.refresh(app)
+    return app
+
+
+async def set_hold(
+    db: AsyncSession,
+    application_id: uuid.UUID,
+    on_hold: bool,
+    hold_reason: Optional[str],
+) -> Application:
+    app = await db.get(Application, application_id)
+    if not app:
+        raise HTTPException(404, "Application not found")
+    app.on_hold = on_hold
+    app.hold_reason = hold_reason if on_hold else None
     await db.commit()
     await db.refresh(app)
     return app

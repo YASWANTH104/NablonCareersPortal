@@ -204,6 +204,8 @@ export default function HRJobsPage() {
                 <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wide px-4 py-3">Type</th>
                 <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wide px-4 py-3">Status</th>
                 <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wide px-4 py-3">Openings</th>
+                <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wide px-4 py-3">Recruiter</th>
+                <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wide px-4 py-3">Hiring Manager</th>
                 <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wide px-4 py-3">Created</th>
                 <th className="px-4 py-3" />
               </tr>
@@ -231,6 +233,8 @@ export default function HRJobsPage() {
                     </span>
                   </td>
                   <td className="px-4 py-4 text-gray-600">{job.openings}</td>
+                  <td className="px-4 py-4 text-gray-600">{job.posted_by_name ?? '—'}</td>
+                  <td className="px-4 py-4 text-gray-600">{job.hiring_manager_name ?? '—'}</td>
                   <td className="px-4 py-4 text-gray-400 text-xs">
                     {formatDistanceToNow(new Date(job.created_at), { addSuffix: true })}
                   </td>
