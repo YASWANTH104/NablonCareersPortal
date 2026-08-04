@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}New position: {{ job_title }}{% endblock %}
+
+{% block content %}
+<h2>Hi {{ full_name }},</h2>
+<p>
+  A new position has just opened up at <strong>Nablon AI</strong>:
+</p>
+<p style="font-size: 17px; font-weight: 700; color: #111827; margin: 4px 0;">{{ job_title }}</p>
+<p style="color: #6B7280; margin-top: 0;">
+  {% if department %}{{ department }}{% endif %}{% if department and location %} · {% endif %}{% if location %}{{ location }}{% endif %}
+</p>
+<p>
+  Know someone who'd be a great fit? You can refer them directly and we'll take it from there.
+</p>
+
+<a href="{{ refer_url }}" class="cta">Refer a candidate</a>
+
+<p style="margin-top: 24px; color: #6B7280; font-size: 13px;">
+  You're receiving this because new open roles that accept referrals are announced to everyone at Nablon AI.
+</p>
+{% endblock %}

@@ -26,17 +26,17 @@ const NAV_ITEMS = {
     { to: '/hr/interviews',         label: 'My Interviews',     icon: Calendar },
     { to: '/employee/refer',        label: 'Refer a Candidate', icon: UserCheck },
     { to: '/employee/my-referrals', label: 'My Referrals',      icon: Award },
-    { to: '/jobs',                  label: 'Browse Jobs',       icon: Briefcase },
+    { to: '/employee/jobs',         label: 'Browse Jobs',       icon: Briefcase },
   ],
   employee: [
     { to: '/employee/refer',         label: 'Refer a Candidate', icon: UserCheck },
     { to: '/employee/my-referrals',  label: 'My Referrals',      icon: Award },
-    { to: '/jobs',                   label: 'Browse Jobs',        icon: Briefcase },
+    { to: '/employee/jobs',          label: 'Browse Jobs',       icon: Briefcase },
   ],
   applicant: [
     { to: '/portal/applications', label: 'My Applications', icon: FileText },
     { to: '/portal/profile',      label: 'Profile',          icon: Users },
-    { to: '/jobs',                label: 'Browse Jobs',      icon: Briefcase },
+    { to: '/portal/jobs',         label: 'Browse Jobs',      icon: Briefcase },
   ],
 };
 

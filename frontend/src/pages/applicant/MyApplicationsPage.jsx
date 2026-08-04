@@ -1058,7 +1058,7 @@ export default function MyApplicationsPage() {
           <p className="text-gray-500 font-medium">No applications yet</p>
           <p className="text-gray-400 text-sm mt-1">Browse open positions and apply to get started.</p>
           <button
-            onClick={() => navigate('/jobs')}
+            onClick={() => navigate('/portal/jobs')}
             className="mt-4 px-5 py-2 bg-brand-500 text-white text-sm font-semibold rounded-lg hover:bg-brand-600"
           >
             Browse Jobs

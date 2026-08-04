@@ -49,8 +49,15 @@ async def list_jobs_public(
     employment_type: Optional[str] = None,
     page: int = 1,
     limit: int = 20,
+    audience: str = "public",
 ) -> dict:
-    filters = [Job.status == "published"]
+    # "public": anonymous visitors / candidates on the public job board — only
+    # jobs open to outside applicants. "referral": logged-in internal staff
+    # (any non-applicant role) browsing what they're allowed to refer for.
+    # Internal-only jobs are excluded from both — there's no external route,
+    # referral or otherwise, once a job is marked internal-only.
+    filters = [Job.status == "published", Job.is_internal.is_(False)]
+    filters.append(Job.allow_referrals.is_(True) if audience == "referral" else Job.allow_outsiders.is_(True))
 
     if search:
         filters.append(Job.title.ilike(f"%{search}%"))
@@ -149,10 +156,19 @@ async def update_job_status(db: AsyncSession, job_id: uuid.UUID, new_status: str
 
     job.status = new_status
     job.updated_at = datetime.utcnow()
-    if new_status == "published" and not job.published_at:
+    is_first_publish = new_status == "published" and not job.published_at
+    if is_first_publish:
         job.published_at = datetime.utcnow()
 
     await db.commit()
+
+    # Announce to the internal team once, on the job's first-ever publish —
+    # not on every pause/resume — and only when it's actually open to referrals
+    # (an internal-only or referrals-off job has nothing for them to act on).
+    if is_first_publish and not job.is_internal and job.allow_referrals:
+        from app.tasks.email_tasks import send_new_job_posted_email
+        send_new_job_posted_email.delay(str(job.id))
+
     await db.refresh(job)
     return job
 

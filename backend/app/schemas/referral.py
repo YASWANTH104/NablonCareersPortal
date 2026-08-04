@@ -1,7 +1,9 @@
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel
+
+TechnicalProficiency = Literal["beginner", "intermediate", "advanced", "expert"]
 
 
 class ReferralCreate(BaseModel):
@@ -10,6 +12,7 @@ class ReferralCreate(BaseModel):
     candidate_email: str
     candidate_phone: Optional[str] = None
     relationship: Optional[str] = None
+    technical_proficiency: Optional[TechnicalProficiency] = None
     note: Optional[str] = None
     resume_url: Optional[str] = None
 
@@ -34,6 +37,7 @@ class ReferralResponse(BaseModel):
     candidate_email: str
     candidate_phone: Optional[str] = None
     relationship: Optional[str] = None
+    technical_proficiency: Optional[TechnicalProficiency] = None
     note: Optional[str] = None
     resume_url: Optional[str] = None
     status: str

@@ -67,6 +67,7 @@ async def list_jobs(
 ):
     hr_roles = {Role.HR_MANAGER.value, Role.ADMIN.value, Role.SUPER_ADMIN.value}
     is_hr = current_user and current_user.role in hr_roles
+    is_internal_viewer = current_user is not None and current_user.role != Role.APPLICANT.value
 
     if is_hr:
         return await job_service.list_jobs_hr(
@@ -80,6 +81,7 @@ async def list_jobs(
         employment_type=employment_type,
         page=page,
         limit=limit,
+        audience="referral" if is_internal_viewer else "public",
     )
 
 
@@ -91,6 +93,7 @@ async def get_job(
 ):
     hr_roles = {Role.HR_MANAGER.value, Role.ADMIN.value, Role.SUPER_ADMIN.value}
     is_hr = current_user and current_user.role in hr_roles
+    is_internal_viewer = current_user is not None and current_user.role != Role.APPLICANT.value
 
     job = None
     try:
@@ -105,6 +108,17 @@ async def get_job(
     # Non-HR users can only see published jobs
     if not is_hr and job.status != "published":
         raise HTTPException(404, "Job not found")
+
+    # Same visibility rule as the listing: internal-only jobs are invisible to
+    # everyone outside HR; a non-internal job still needs its matching
+    # referral/outsider flag on for the viewer's audience.
+    if not is_hr:
+        if job.is_internal:
+            raise HTTPException(404, "Job not found")
+        if is_internal_viewer and not job.allow_referrals:
+            raise HTTPException(404, "Job not found")
+        if not is_internal_viewer and not job.allow_outsiders:
+            raise HTTPException(404, "Job not found")
 
     # Re-sign the stored JD-PDF SAS URL so it doesn't 403 once its baked-in token
     # expires. Build the response first so we never mutate the persistent ORM row

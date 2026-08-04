@@ -1036,3 +1036,55 @@ async def _send_report_email_async(to_emails: list[str], report_title: str, xlsx
         logger.info(f"Report email sent: report={report_title}, to={to_emails}")
     else:
         logger.error(f"Report email send failed (ACS/email_service returned False): report={report_title}, to={to_emails}")
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def send_new_job_posted_email(self, job_id: str):
+    """Fired once, the first time a job is published (see job_service.update_job_status),
+    and only when the job actually accepts referrals — announces the opening to
+    every internal (non-applicant) user with a CTA to the Refer page."""
+    try:
+        asyncio.run(_send_new_job_posted_async(job_id))
+    except Exception as exc:
+        logger.error(f"New job posted email failed: job={job_id}: {exc}")
+        raise self.retry(exc=exc)
+
+
+async def _send_new_job_posted_async(job_id: str):
+    from sqlalchemy import select
+    from app.config import settings
+    from app.models.job import Job
+    from app.models.user import User
+    from app.services.email_service import send_email
+
+    async with _task_session() as db:
+        job = await db.get(Job, uuid.UUID(job_id))
+        if not job:
+            return
+
+        department_name = None
+        if job.department_id:
+            from app.models.job import Department
+            dept = await db.get(Department, job.department_id)
+            department_name = dept.name if dept else None
+
+        recipients = (await db.execute(
+            select(User).where(User.role != "applicant", User.is_active.is_(True))
+        )).scalars().all()
+
+        refer_url = f"{settings.FRONTEND_URL}/employee/refer"
+        for user in recipients:
+            await send_email(
+                to_email=user.email,
+                subject=f"New position open: {job.title}",
+                template_name="new_job_posted",
+                context={
+                    "full_name": user.full_name,
+                    "job_title": job.title,
+                    "department": department_name,
+                    "location": job.location,
+                    "refer_url": refer_url,
+                },
+            )
+
+        logger.info(f"New job posted announcement sent: job={job_id}, recipients={len(recipients)}")

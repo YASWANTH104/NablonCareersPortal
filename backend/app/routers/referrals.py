@@ -1,6 +1,6 @@
 import uuid
 from typing import Optional
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -9,7 +9,7 @@ from app.schemas.referral import (
     ReferralCreate, ReferralResponse, ReferralListResponse,
     ReferralStatusUpdate, ReferralBonusUpdate,
 )
-from app.services import referral_service
+from app.services import referral_service, storage_service
 
 router = APIRouter(prefix="/referrals", tags=["referrals"])
 
@@ -19,10 +19,28 @@ _EMPLOYEE_PLUS = (Role.EMPLOYEE, Role.INTERVIEWER, Role.HR_MANAGER, Role.ADMIN, 
 
 @router.post("", response_model=ReferralResponse, status_code=201)
 async def create_referral(
-    data: ReferralCreate,
+    resume: UploadFile = File(...),
+    job_id: uuid.UUID = Form(...),
+    candidate_name: str = Form(...),
+    candidate_email: str = Form(...),
+    candidate_phone: Optional[str] = Form(None),
+    relationship: Optional[str] = Form(None),
+    technical_proficiency: Optional[str] = Form(None),
+    note: Optional[str] = Form(None),
     current_user=Depends(require_roles(*_EMPLOYEE_PLUS)),
     db: AsyncSession = Depends(get_db),
 ):
+    resume_url = await storage_service.upload_resume(resume, f"referral-{current_user.id}")
+    data = ReferralCreate(
+        job_id=job_id,
+        candidate_name=candidate_name,
+        candidate_email=candidate_email,
+        candidate_phone=candidate_phone,
+        relationship=relationship,
+        technical_proficiency=technical_proficiency or None,
+        note=note,
+        resume_url=resume_url,
+    )
     return await referral_service.create_referral(db, data, current_user.id)
 
 

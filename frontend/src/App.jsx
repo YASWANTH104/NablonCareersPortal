@@ -23,6 +23,7 @@ import ApplyPage from '@/pages/public/ApplyPage';
 // Applicant portal
 import MyApplicationsPage from '@/pages/applicant/MyApplicationsPage';
 import ProfilePage from '@/pages/applicant/ProfilePage';
+import BrowseJobsPage from '@/pages/applicant/BrowseJobsPage';
 
 // Employee hub
 import ReferPage from '@/pages/employee/ReferPage';
@@ -76,6 +77,7 @@ const router = createBrowserRouter([
         children: [
           { path: '/portal/applications', element: <MyApplicationsPage /> },
           { path: '/portal/profile', element: <ProfilePage /> },
+          { path: '/portal/jobs', element: <BrowseJobsPage /> },
         ],
       },
     ],
@@ -90,6 +92,7 @@ const router = createBrowserRouter([
         children: [
           { path: '/employee/refer', element: <ReferPage /> },
           { path: '/employee/my-referrals', element: <MyReferralsPage /> },
+          { path: '/employee/jobs', element: <BrowseJobsPage /> },
         ],
       },
     ],

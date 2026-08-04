@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { UserCheck, ChevronDown, RefreshCw, DollarSign } from 'lucide-react';
+import { UserCheck, ChevronDown, RefreshCw, DollarSign, FileText } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import { referralsApi } from '@/api/referrals';
@@ -13,6 +13,13 @@ const STATUS_CONFIG = {
   hired:       { label: 'Hired',       dot: 'bg-green-500',  text: 'text-green-700',  bg: 'bg-green-50' },
   rejected:    { label: 'Rejected',    dot: 'bg-red-400',    text: 'text-red-600',    bg: 'bg-red-50' },
   expired:     { label: 'Expired',     dot: 'bg-surface-300',text: 'text-gray-400',   bg: 'bg-surface-100' },
+};
+
+const PROFICIENCY_COLORS = {
+  beginner: 'bg-surface-100 text-gray-500',
+  intermediate: 'bg-yellow-100 text-yellow-700',
+  advanced: 'bg-blue-100 text-blue-700',
+  expert: 'bg-green-100 text-green-700',
 };
 
 const STATUS_OPTIONS = ['pending', 'invited', 'applied', 'in_progress', 'hired', 'rejected', 'expired'];
@@ -136,6 +143,26 @@ export default function ReferralsPage() {
                   <td className="px-4 py-3">
                     <p className="font-medium text-gray-900">{r.candidate_name}</p>
                     <p className="text-xs text-gray-400">{r.candidate_email}</p>
+                    <div className="flex items-center flex-wrap gap-1.5 mt-1.5">
+                      {r.resume_url && (
+                        <a
+                          href={r.resume_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-1 text-xs text-brand-600 hover:text-brand-700"
+                        >
+                          <FileText className="w-3 h-3" /> Resume
+                        </a>
+                      )}
+                      {r.technical_proficiency && (
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium capitalize ${PROFICIENCY_COLORS[r.technical_proficiency] ?? 'bg-surface-100 text-gray-500'}`}>
+                          {r.technical_proficiency}
+                        </span>
+                      )}
+                    </div>
+                    {r.relationship && (
+                      <p className="text-xs text-gray-400 mt-1">Knows them: {r.relationship}</p>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-gray-600 text-xs">{r.job_title}</td>
                   <td className="px-4 py-3 text-gray-600 text-xs">{r.referrer_name}</td>
