@@ -26,6 +26,8 @@ def _build_join_query(condition=None):
 
 
 def _to_dict(row) -> dict:
+    from app.services.storage_service import refresh_url
+
     r = row.Referral
     d = {c.name: getattr(r, c.name) for c in r.__table__.columns}
     d["job_title"] = row.job_title
@@ -33,12 +35,22 @@ def _to_dict(row) -> dict:
     d["referrer_name"] = row.referrer_name
     if d.get("bonus_amount") is not None:
         d["bonus_amount"] = float(d["bonus_amount"])
+    # Same expiring-SAS issue as application resumes/documents — the URL
+    # stored at upload time only carries a 7-day token, so re-sign on every read.
+    if d.get("resume_url"):
+        d["resume_url"] = refresh_url(d["resume_url"])
     return d
 
 
 async def create_referral(db: AsyncSession, data: ReferralCreate, referrer_id: uuid.UUID) -> dict:
     from datetime import datetime, timezone, timedelta
     from app.models.application import Application
+
+    job = await db.get(Job, data.job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if job.is_internal or not job.allow_referrals:
+        raise HTTPException(403, "This job is not open to referrals")
 
     # Block referral if candidate was rejected within the last 6 months
     candidate_user = (await db.execute(
@@ -82,6 +94,7 @@ async def create_referral(db: AsyncSession, data: ReferralCreate, referrer_id: u
         candidate_email=data.candidate_email,
         candidate_phone=data.candidate_phone,
         relationship=data.relationship,
+        technical_proficiency=data.technical_proficiency,
         note=data.note,
         resume_url=data.resume_url,
         status="pending",

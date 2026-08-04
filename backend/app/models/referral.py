@@ -18,6 +18,9 @@ class Referral(Base):
     candidate_email: Mapped[str] = mapped_column(String(255), nullable=False)
     candidate_phone: Mapped[str | None] = mapped_column(String(30))
     relationship: Mapped[str | None] = mapped_column(String(100))
+    # beginner | intermediate | advanced | expert — referrer's read on the
+    # candidate's technical level, collected alongside the resume.
+    technical_proficiency: Mapped[str | None] = mapped_column(String(20))
     note: Mapped[str | None] = mapped_column(Text)
     resume_url: Mapped[str | None] = mapped_column(Text)
 

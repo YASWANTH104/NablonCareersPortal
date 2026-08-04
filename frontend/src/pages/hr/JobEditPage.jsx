@@ -32,9 +32,19 @@ const schema = z.object({
   benefits: z.string().optional(),
   openings: z.preprocess((v) => (v === '' ? 1 : parseInt(String(v), 10)), z.number().int().min(1, 'At least 1 opening required')),
   is_internal: z.boolean().default(false),
+  allow_referrals: z.boolean().default(true),
+  allow_outsiders: z.boolean().default(true),
+  criticality: z.enum(['critical', 'high', 'medium', 'low']).default('medium'),
   closes_at: z.string().optional(),
   hiring_manager_id: z.string().optional(),
 });
+
+const CRITICALITY_LEVELS = [
+  { value: 'critical', label: 'Critical' },
+  { value: 'high', label: 'High' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'low', label: 'Low' },
+];
 
 const LOCATION_TYPES = ['remote', 'onsite', 'hybrid'];
 const EMPLOYMENT_TYPES = [
@@ -113,6 +123,7 @@ export default function JobEditPage() {
     control,
     getValues,
     setValue,
+    watch,
     formState: { errors, isSubmitting, isDirty },
   } = useForm({
     resolver: zodResolver(schema),
@@ -133,10 +144,17 @@ export default function JobEditPage() {
       benefits: '',
       openings: 1,
       is_internal: false,
+      allow_referrals: true,
+      allow_outsiders: true,
+      criticality: 'medium',
       closes_at: '',
       hiring_manager_id: '',
     },
   });
+
+  const watchIsInternal = watch('is_internal');
+  const watchAllowReferrals = watch('allow_referrals');
+  const watchAllowOutsiders = watch('allow_outsiders');
 
   useEffect(() => {
     if (existing) {
@@ -160,6 +178,9 @@ export default function JobEditPage() {
         benefits: existing.benefits ?? '',
         openings: existing.openings ?? 1,
         is_internal: existing.is_internal ?? false,
+        allow_referrals: existing.allow_referrals ?? true,
+        allow_outsiders: existing.allow_outsiders ?? true,
+        criticality: existing.criticality ?? 'medium',
         closes_at: closesAt,
         hiring_manager_id: existing.hiring_manager_id ?? '',
       });
@@ -388,11 +409,41 @@ export default function JobEditPage() {
             </div>
           </div>
 
-          <div className="flex gap-6">
-            <label className="flex items-center gap-2 cursor-pointer">
+          <div>
+            <FieldLabel>Role criticality</FieldLabel>
+            <Select {...register('criticality')} className="max-w-xs">
+              {CRITICALITY_LEVELS.map(({ value, label }) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </Select>
+            <p className="mt-1 text-xs text-gray-400">Shown on job cards to the whole internal team.</p>
+          </div>
+
+          <div className="pt-2 border-t border-surface-100">
+            <FieldLabel>Who can apply</FieldLabel>
+            <label className="flex items-center gap-2 cursor-pointer mb-3">
               <input {...register('is_internal')} type="checkbox" className="rounded border-surface-300 text-brand-500 focus:ring-brand-500" />
-              <span className="text-sm text-gray-700">Internal / employee-only job</span>
+              <span className="text-sm text-gray-700">Internal team only (hidden from the public job board and referrals)</span>
             </label>
+
+            {!watchIsInternal && (
+              <div className="ml-6 space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input {...register('allow_referrals')} type="checkbox" className="rounded border-surface-300 text-brand-500 focus:ring-brand-500" />
+                  <span className="text-sm text-gray-700">Open to employee referrals</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input {...register('allow_outsiders')} type="checkbox" className="rounded border-surface-300 text-brand-500 focus:ring-brand-500" />
+                  <span className="text-sm text-gray-700">Open to outside / direct applicants</span>
+                </label>
+
+                {!watchAllowReferrals && !watchAllowOutsiders && (
+                  <p className="text-xs text-amber-600 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                    Neither is on, so this job has no way for anyone to apply. Turn one back on, or mark it internal team only above.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </section>
 

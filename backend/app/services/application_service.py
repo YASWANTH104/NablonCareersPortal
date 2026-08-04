@@ -132,6 +132,20 @@ async def submit_application(
         )
 
     source = "referral" if referral else ("agency" if agency_id else "direct")
+
+    # Job-level visibility gate: an internal-only job has no external apply
+    # route at all; a non-internal job still needs its matching flag on for
+    # whichever route this submission is coming through (agency submissions
+    # go through a separate authenticated portal flow and aren't gated here).
+    from app.models.job import Job as JobModel
+    job = await db.get(JobModel, data.job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if source == "referral" and (job.is_internal or not job.allow_referrals):
+        raise HTTPException(403, "This job is not open to referral applications")
+    if source == "direct" and (job.is_internal or not job.allow_outsiders):
+        raise HTTPException(403, "This job is not open to public applications")
+
     create_data = data.model_dump(exclude={"agency_ref", "referral_id", *PROFILE_FIELDS})
     application = Application(
         applicant_id=applicant_id,

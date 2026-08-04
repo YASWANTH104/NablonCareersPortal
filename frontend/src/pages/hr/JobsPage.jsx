@@ -23,6 +23,13 @@ const STATUS_COLORS = {
   archived: 'bg-surface-100 text-gray-500',
 };
 
+const CRITICALITY_COLORS = {
+  critical: 'bg-red-100 text-red-700',
+  high: 'bg-orange-100 text-orange-700',
+  medium: 'bg-yellow-100 text-yellow-700',
+  low: 'bg-surface-100 text-gray-500',
+};
+
 function formatEmploymentType(val) {
   return val?.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) ?? '—';
 }
@@ -203,6 +210,7 @@ export default function HRJobsPage() {
                 <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wide px-5 py-3">Title</th>
                 <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wide px-4 py-3">Type</th>
                 <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wide px-4 py-3">Status</th>
+                <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wide px-4 py-3">Criticality</th>
                 <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wide px-4 py-3">Openings</th>
                 <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wide px-4 py-3">Recruiter</th>
                 <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wide px-4 py-3">Hiring Manager</th>
@@ -231,6 +239,13 @@ export default function HRJobsPage() {
                     <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize ${STATUS_COLORS[job.status] ?? 'bg-surface-100 text-gray-500'}`}>
                       {job.status}
                     </span>
+                  </td>
+                  <td className="px-4 py-4">
+                    {job.criticality && (
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize ${CRITICALITY_COLORS[job.criticality] ?? CRITICALITY_COLORS.medium}`}>
+                        {job.criticality}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-4 text-gray-600">{job.openings}</td>
                   <td className="px-4 py-4 text-gray-600">{job.posted_by_name ?? '—'}</td>

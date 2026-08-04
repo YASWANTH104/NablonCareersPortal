@@ -44,6 +44,14 @@ class Job(Base):
     status: Mapped[str] = mapped_column(String(20), default="draft", index=True)
     # draft | published | paused | closed | archived
     is_internal: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Only meaningful when is_internal is False — govern which external routes
+    # a candidate can use to reach this job. Both default True (today's fully
+    # open behavior). If a non-internal job has both off, it has no external
+    # route at all; enforced in job_service/application_service/referral_service.
+    allow_referrals: Mapped[bool] = mapped_column(Boolean, default=True)
+    allow_outsiders: Mapped[bool] = mapped_column(Boolean, default=True)
+    # critical | high | medium | low — internal-only signal shown on HR/employee job cards
+    criticality: Mapped[str] = mapped_column(String(10), default="medium")
     posted_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     # Engineering/hiring manager this req is assigned to — any internal user,
     # not a dedicated role. Distinct from posted_by (who created the listing).

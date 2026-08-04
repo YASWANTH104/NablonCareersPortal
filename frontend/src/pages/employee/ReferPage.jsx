@@ -3,16 +3,33 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { UserPlus, Briefcase, MapPin, X, Search } from 'lucide-react';
+import { UserPlus, Briefcase, MapPin, X, Search, Upload, FileText } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { jobsApi } from '@/api/jobs';
 import { referralsApi } from '@/api/referrals';
+
+const CRITICALITY_COLORS = {
+  critical: 'bg-red-100 text-red-700',
+  high: 'bg-orange-100 text-orange-700',
+  medium: 'bg-yellow-100 text-yellow-700',
+  low: 'bg-surface-100 text-gray-500',
+};
+
+const PROFICIENCY_OPTIONS = [
+  { value: 'beginner', label: 'Beginner' },
+  { value: 'intermediate', label: 'Intermediate' },
+  { value: 'advanced', label: 'Advanced' },
+  { value: 'expert', label: 'Expert' },
+];
 
 const schema = z.object({
   candidate_name: z.string().min(2, 'Required'),
   candidate_email: z.string().email('Valid email required'),
   candidate_phone: z.string().optional(),
-  relationship: z.string().optional(),
+  relationship: z.string().min(1, 'Required'),
+  technical_proficiency: z.enum(['beginner', 'intermediate', 'advanced', 'expert'], {
+    errorMap: () => ({ message: 'Required' }),
+  }),
   note: z.string().optional(),
 });
 
@@ -21,9 +38,11 @@ function ReferModal({ job, onClose }) {
   const { register, handleSubmit, formState: { errors } } = useForm({
     resolver: zodResolver(schema),
   });
+  const [resumeFile, setResumeFile] = useState(null);
+  const [resumeError, setResumeError] = useState(false);
 
   const mut = useMutation({
-    mutationFn: (data) => referralsApi.create({ ...data, job_id: job.id }),
+    mutationFn: (data) => referralsApi.create({ ...data, job_id: job.id, resume: resumeFile }),
     onSuccess: () => {
       toast.success('Referral submitted!');
       queryClient.invalidateQueries({ queryKey: ['my-referrals'] });
@@ -31,6 +50,20 @@ function ReferModal({ job, onClose }) {
     },
     onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to submit'),
   });
+
+  const onSubmit = (data) => {
+    if (!resumeFile) {
+      setResumeError(true);
+      return;
+    }
+    mut.mutate(data);
+  };
+
+  const handleResumeChange = (e) => {
+    const file = e.target.files?.[0] ?? null;
+    setResumeFile(file);
+    if (file) setResumeError(false);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
@@ -45,7 +78,7 @@ function ReferModal({ job, onClose }) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit((d) => mut.mutate(d))} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Full Name *</label>
@@ -78,13 +111,53 @@ function ReferModal({ job, onClose }) {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Relationship</label>
+              <label className="block text-xs font-medium text-gray-700 mb-1">How do you know them? *</label>
               <input
                 {...register('relationship')}
                 className="w-full border border-surface-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
                 placeholder="Ex-colleague, Friend..."
               />
+              {errors.relationship && <p className="text-xs text-red-500 mt-1">{errors.relationship.message}</p>}
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Candidate's technical proficiency *</label>
+            <select
+              {...register('technical_proficiency')}
+              defaultValue=""
+              className="w-full border border-surface-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              <option value="" disabled>Select a level...</option>
+              {PROFICIENCY_OPTIONS.map(({ value, label }) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+            {errors.technical_proficiency && <p className="text-xs text-red-500 mt-1">{errors.technical_proficiency.message}</p>}
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Candidate's resume *</label>
+            <label className="flex items-center gap-2.5 border border-dashed border-surface-300 rounded-lg px-3 py-3 text-sm cursor-pointer hover:border-brand-300 hover:bg-surface-50 transition-colors">
+              <input
+                type="file"
+                accept=".pdf,.doc,.docx"
+                onChange={handleResumeChange}
+                className="hidden"
+              />
+              {resumeFile ? (
+                <>
+                  <FileText className="w-4 h-4 text-brand-500 flex-shrink-0" />
+                  <span className="text-gray-700 truncate">{resumeFile.name}</span>
+                </>
+              ) : (
+                <>
+                  <Upload className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                  <span className="text-gray-500">Click to upload PDF or Word document</span>
+                </>
+              )}
+            </label>
+            {resumeError && <p className="text-xs text-red-500 mt-1">A resume is required to submit a referral</p>}
           </div>
 
           <div>
@@ -167,7 +240,14 @@ export default function ReferPage() {
               className="bg-white rounded-xl border border-surface-200 p-4 flex items-center justify-between hover:border-brand-200 transition-colors"
             >
               <div className="flex-1 min-w-0">
-                <p className="font-medium text-gray-900 text-sm truncate">{job.title}</p>
+                <div className="flex items-center gap-2">
+                  <p className="font-medium text-gray-900 text-sm truncate">{job.title}</p>
+                  {job.criticality && (
+                    <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wide ${CRITICALITY_COLORS[job.criticality] ?? CRITICALITY_COLORS.medium}`}>
+                      {job.criticality}
+                    </span>
+                  )}
+                </div>
                 <div className="flex items-center gap-3 mt-1">
                   {job.location_type && (
                     <span className="flex items-center gap-1 text-xs text-gray-500">

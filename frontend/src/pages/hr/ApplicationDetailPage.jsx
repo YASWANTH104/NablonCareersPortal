@@ -46,16 +46,38 @@ const RECOMMENDATION_LABELS = {
 
 // ── Schedule Interview Dialog ─────────────────────────────────────────────────
 
+// Meeting link only makes sense for a remote-style interview. Phone/onsite
+// rounds have no link to share — forcing one made HR paste a fake URL, which
+// then showed up as a bogus "Join meeting" button in the candidate/interviewer
+// emails. Require whichever field actually matches the interview_type instead.
+const isValidUrl = (v) => { try { new URL(v); return true; } catch { return false; } };
+
+function refineMeetingDetails(values, ctx) {
+  if (values.interview_type === 'phone') {
+    if (!values.location?.trim()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['location'], message: 'Phone number is required' });
+    }
+  } else if (values.interview_type === 'onsite') {
+    if (!values.location?.trim()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['location'], message: 'Location is required' });
+    }
+  } else if (!values.meeting_link?.trim()) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['meeting_link'], message: 'Meeting link is required' });
+  } else if (!isValidUrl(values.meeting_link)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['meeting_link'], message: 'Enter a valid URL' });
+  }
+}
+
 const scheduleSchema = z.object({
   round_number: z.coerce.number().min(1),
   title: z.string().optional(),
   interview_type: z.string().min(1, 'Required'),
   scheduled_at: z.string().min(1, 'Required'),
   duration_mins: z.coerce.number(),
-  meeting_link: z.string().min(1, 'Meeting link is required').url('Enter a valid URL'),
+  meeting_link: z.string().optional(),
   location: z.string().optional(),
   notes: z.string().optional(),
-});
+}).superRefine(refineMeetingDetails);
 
 function ScheduleInterviewDialog({ applicationId, defaultRoundNumber = 1, onClose, onSuccess }) {
   const [panelists, setPanelists] = useState([]);
@@ -70,11 +92,16 @@ function ScheduleInterviewDialog({ applicationId, defaultRoundNumber = 1, onClos
   const {
     register,
     handleSubmit,
+    control,
     formState: { errors, isSubmitting },
   } = useForm({
     resolver: zodResolver(scheduleSchema),
     defaultValues: { round_number: defaultRoundNumber, duration_mins: 60, interview_type: 'video' },
   });
+
+  const interviewType = useWatch({ control, name: 'interview_type' });
+  const needsPhone = interviewType === 'phone';
+  const needsLocation = interviewType === 'onsite';
 
   const createMutation = useMutation({
     mutationFn: (data) => interviewsApi.create(data),
@@ -190,20 +217,51 @@ function ScheduleInterviewDialog({ applicationId, defaultRoundNumber = 1, onClos
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Meeting link <span className="text-red-500">*</span>
-            </label>
-            <input
-              {...register('meeting_link')}
-              type="url"
-              placeholder="https://meet.google.com/..."
-              className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-            />
-            {errors.meeting_link && (
-              <p className="mt-1 text-xs text-red-500">{errors.meeting_link.message}</p>
-            )}
-          </div>
+          {needsPhone ? (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Phone number to call <span className="text-red-500">*</span>
+              </label>
+              <input
+                {...register('location')}
+                type="tel"
+                placeholder="+91 98765 43210"
+                className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              />
+              {errors.location && (
+                <p className="mt-1 text-xs text-red-500">{errors.location.message}</p>
+              )}
+            </div>
+          ) : needsLocation ? (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Location / address <span className="text-red-500">*</span>
+              </label>
+              <input
+                {...register('location')}
+                placeholder="Office address or meeting room"
+                className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              />
+              {errors.location && (
+                <p className="mt-1 text-xs text-red-500">{errors.location.message}</p>
+              )}
+            </div>
+          ) : (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Meeting link <span className="text-red-500">*</span>
+              </label>
+              <input
+                {...register('meeting_link')}
+                type="url"
+                placeholder="https://meet.google.com/..."
+                className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              />
+              {errors.meeting_link && (
+                <p className="mt-1 text-xs text-red-500">{errors.meeting_link.message}</p>
+              )}
+            </div>
+          )}
 
           {/* Panelists */}
           <div>
@@ -509,13 +567,17 @@ function ScheduleAssessmentDialog({ applicationId, onClose, onSuccess }) {
 const rescheduleSchema = z.object({
   scheduled_at: z.string().min(1, 'Required'),
   duration_mins: z.coerce.number(),
-  meeting_link: z.string().min(1, 'Meeting link is required').url('Enter a valid URL'),
-});
+  interview_type: z.string(),
+  meeting_link: z.string().optional(),
+  location: z.string().optional(),
+}).superRefine(refineMeetingDetails);
 
 function RescheduleInterviewDialog({ interview, onClose, onSuccess }) {
   const existingDate = interview.scheduled_at
     ? new Date(interview.scheduled_at).toISOString().slice(0, 16)
     : '';
+  const needsPhone = interview.interview_type === 'phone';
+  const needsLocation = interview.interview_type === 'onsite';
 
   const {
     register,
@@ -526,7 +588,9 @@ function RescheduleInterviewDialog({ interview, onClose, onSuccess }) {
     defaultValues: {
       scheduled_at: existingDate,
       duration_mins: interview.duration_mins ?? 60,
+      interview_type: interview.interview_type,
       meeting_link: interview.meeting_link ?? '',
+      location: interview.location ?? '',
     },
   });
 
@@ -536,6 +600,7 @@ function RescheduleInterviewDialog({ interview, onClose, onSuccess }) {
         scheduled_at: new Date(data.scheduled_at).toISOString(),
         duration_mins: Number(data.duration_mins),
         meeting_link: data.meeting_link || undefined,
+        location: data.location || undefined,
         status: 'rescheduled',
       }),
     onSuccess: () => {
@@ -573,18 +638,45 @@ function RescheduleInterviewDialog({ interview, onClose, onSuccess }) {
               </select>
             </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Meeting link <span className="text-red-500">*</span>
-            </label>
-            <input
-              {...register('meeting_link')}
-              type="url"
-              placeholder="https://meet.google.com/..."
-              className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-            />
-            {errors.meeting_link && <p className="mt-1 text-xs text-red-500">{errors.meeting_link.message}</p>}
-          </div>
+          {needsPhone ? (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Phone number to call <span className="text-red-500">*</span>
+              </label>
+              <input
+                {...register('location')}
+                type="tel"
+                placeholder="+91 98765 43210"
+                className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              />
+              {errors.location && <p className="mt-1 text-xs text-red-500">{errors.location.message}</p>}
+            </div>
+          ) : needsLocation ? (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Location / address <span className="text-red-500">*</span>
+              </label>
+              <input
+                {...register('location')}
+                placeholder="Office address or meeting room"
+                className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              />
+              {errors.location && <p className="mt-1 text-xs text-red-500">{errors.location.message}</p>}
+            </div>
+          ) : (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Meeting link <span className="text-red-500">*</span>
+              </label>
+              <input
+                {...register('meeting_link')}
+                type="url"
+                placeholder="https://meet.google.com/..."
+                className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              />
+              {errors.meeting_link && <p className="mt-1 text-xs text-red-500">{errors.meeting_link.message}</p>}
+            </div>
+          )}
           <div className="flex gap-3 pt-2">
             <button
               type="submit"
@@ -1674,7 +1766,7 @@ export default function ApplicationDetailPage() {
                       <Clock className="w-3.5 h-3.5 text-gray-400" />
                       {interview.duration_mins} min
                     </div>
-                    {interview.meeting_link && (
+                    {interview.meeting_link ? (
                       <a
                         href={interview.meeting_link}
                         target="_blank"
@@ -1684,7 +1776,16 @@ export default function ApplicationDetailPage() {
                         <ExternalLink className="w-3.5 h-3.5" />
                         Join meeting
                       </a>
-                    )}
+                    ) : interview.location ? (
+                      <div className="flex items-center gap-1.5 col-span-2">
+                        {interview.interview_type === 'phone' ? (
+                          <Phone className="w-3.5 h-3.5 text-gray-400" />
+                        ) : (
+                          <MapPin className="w-3.5 h-3.5 text-gray-400" />
+                        )}
+                        {interview.location}
+                      </div>
+                    ) : null}
                   </div>
 
                   {interview.notes && (

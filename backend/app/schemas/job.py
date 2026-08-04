@@ -1,7 +1,9 @@
 import uuid
 from datetime import datetime
 from pydantic import BaseModel
-from typing import Optional
+from typing import Literal, Optional
+
+Criticality = Literal["critical", "high", "medium", "low"]
 
 
 class DepartmentCreate(BaseModel):
@@ -91,6 +93,9 @@ class JobCreate(BaseModel):
     jd_pdf_name: Optional[str] = None
     openings: int = 1
     is_internal: bool = False
+    allow_referrals: bool = True
+    allow_outsiders: bool = True
+    criticality: Criticality = "medium"
     closes_at: Optional[datetime] = None
     hiring_manager_id: Optional[uuid.UUID] = None
 
@@ -115,6 +120,9 @@ class JobUpdate(BaseModel):
     jd_pdf_name: Optional[str] = None
     openings: Optional[int] = None
     is_internal: Optional[bool] = None
+    allow_referrals: Optional[bool] = None
+    allow_outsiders: Optional[bool] = None
+    criticality: Optional[Criticality] = None
     closes_at: Optional[datetime] = None
     hiring_manager_id: Optional[uuid.UUID] = None
 
@@ -148,6 +156,9 @@ class JobResponse(BaseModel):
     openings: int
     status: str
     is_internal: bool
+    allow_referrals: bool
+    allow_outsiders: bool
+    criticality: Criticality
     posted_by: Optional[uuid.UUID] = None
     posted_by_name: Optional[str] = None
     hiring_manager_id: Optional[uuid.UUID] = None
