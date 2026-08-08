@@ -7,7 +7,7 @@ celery_app = Celery(
     "nablon_careers",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=["app.tasks.email_tasks", "app.tasks.pdf_tasks", "app.tasks.interview_tasks"],
+    include=["app.tasks.email_tasks", "app.tasks.pdf_tasks", "app.tasks.interview_tasks", "app.tasks.calendar_tasks"],
 )
 
 conf = dict(

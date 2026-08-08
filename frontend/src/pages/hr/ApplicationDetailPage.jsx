@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { formatDistanceToNow, format } from 'date-fns';
+import { formatDistanceToNow, format, addDays } from 'date-fns';
 import toast from 'react-hot-toast';
 import {
   ArrowLeft, Star, ExternalLink, FileText, Calendar, MessageSquare,
@@ -19,6 +19,8 @@ import { jobsApi } from '@/api/jobs';
 import { offersApi } from '@/api/offers';
 import { usersApi } from '@/api/users';
 import { documentsApi } from '@/api/documents';
+import ResumeVersions from '@/components/shared/ResumeVersions';
+import ScheduleTimeGrid from '@/components/interviews/ScheduleTimeGrid';
 import StageReasonDialog from '@/components/shared/StageReasonDialog';
 import HoldReasonDialog from '@/components/shared/HoldReasonDialog';
 import { useHoldToggle } from '@/hooks/useHoldToggle';
@@ -35,6 +37,58 @@ const DURATION_OPTIONS = [
   { value: 90, label: '90 min' },
   { value: 120, label: '2 hr' },
 ];
+
+// The availability grid covers a working day; interviews outside it are rare
+// enough that the start-time field can still be typed in directly.
+const WORKDAY_START = '08:00';
+const WORKDAY_END = '20:00';
+
+const QUICK_DAYS = [
+  { label: 'Today', offset: 0 },
+  { label: 'Tomorrow', offset: 1 },
+  { label: 'In 2 days', offset: 2 },
+];
+
+/** `yyyy-MM-dd` in the browser's timezone, for <input type="date">. */
+const localDateValue = (date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+function StepHeading({ step, title, required }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-5 h-5 rounded-full bg-surface-100 text-gray-600 text-[11px] font-bold flex items-center justify-center">
+        {step}
+      </span>
+      <h4 className="text-sm font-semibold text-gray-900">
+        {title}{required && <span className="text-red-500"> *</span>}
+      </h4>
+    </div>
+  );
+}
+
+const AVAILABILITY_STYLES = {
+  free:          { text: 'Available', className: 'bg-green-100 text-green-700' },
+  tentative:     { text: 'Tentative', className: 'bg-yellow-100 text-yellow-700' },
+  busy:          { text: 'Busy', className: 'bg-red-100 text-red-700' },
+  busy_internal: { text: 'Double-booked', className: 'bg-red-100 text-red-700' },
+  oof:           { text: 'Out of office', className: 'bg-gray-200 text-gray-600' },
+  unknown:       { text: 'Unknown', className: 'bg-gray-100 text-gray-500' },
+};
+
+function AvailabilityChip({ status, label, loading }) {
+  if (loading) {
+    return <span className="text-[11px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-400 animate-pulse">Checking…</span>;
+  }
+  const style = AVAILABILITY_STYLES[status] ?? AVAILABILITY_STYLES.unknown;
+  return (
+    <span
+      title={label}
+      className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${style.className}`}
+    >
+      {style.text}
+    </span>
+  );
+}
 
 const RECOMMENDATION_LABELS = {
   strong_yes: { label: 'Strong Yes', color: 'text-green-700 bg-green-50' },
@@ -77,7 +131,15 @@ const scheduleSchema = z.object({
   meeting_link: z.string().optional(),
   location: z.string().optional(),
   notes: z.string().optional(),
-}).superRefine(refineMeetingDetails);
+  use_teams_meeting: z.boolean().optional(),
+}).superRefine((values, ctx) => {
+  // Auto-create path skips the manual meeting_link requirement entirely —
+  // the backend generates the Teams link once the interview is created.
+  if (values.interview_type !== 'phone' && values.interview_type !== 'onsite' && values.use_teams_meeting) {
+    return;
+  }
+  refineMeetingDetails(values, ctx);
+});
 
 function ScheduleInterviewDialog({ applicationId, defaultRoundNumber = 1, onClose, onSuccess }) {
   const [panelists, setPanelists] = useState([]);
@@ -93,15 +155,105 @@ function ScheduleInterviewDialog({ applicationId, defaultRoundNumber = 1, onClos
     register,
     handleSubmit,
     control,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm({
     resolver: zodResolver(scheduleSchema),
-    defaultValues: { round_number: defaultRoundNumber, duration_mins: 60, interview_type: 'video' },
+    defaultValues: { round_number: defaultRoundNumber, duration_mins: 60, interview_type: 'video', use_teams_meeting: true },
   });
 
   const interviewType = useWatch({ control, name: 'interview_type' });
+  const useTeamsMeeting = useWatch({ control, name: 'use_teams_meeting' });
+  const scheduledAtWatch = useWatch({ control, name: 'scheduled_at' });
+  const durationWatch = useWatch({ control, name: 'duration_mins' });
   const needsPhone = interviewType === 'phone';
   const needsLocation = interviewType === 'onsite';
+
+  // The day being browsed is held separately from the picked time so the
+  // availability grid can load as soon as a date is chosen — HR shouldn't have
+  // to guess a time before being shown which times are actually open.
+  const [browseDate, setBrowseDate] = useState(() => localDateValue(new Date()));
+  const [timeStr, setTimeStr] = useState('');
+
+  const dayWindow = browseDate
+    ? { start: new Date(`${browseDate}T${WORKDAY_START}:00`), end: new Date(`${browseDate}T${WORKDAY_END}:00`) }
+    : null;
+
+  // scheduled_at stays the single field the schema and API care about; the date
+  // and time controls just compose it.
+  useEffect(() => {
+    setValue('scheduled_at', browseDate && timeStr ? `${browseDate}T${timeStr}` : '', {
+      shouldValidate: !!(browseDate && timeStr),
+    });
+  }, [browseDate, timeStr, setValue]);
+
+  // Live availability check — informational only, never blocks submission.
+  // Debounced so it doesn't fire on every keystroke while HR is still picking a time.
+  const [availability, setAvailability] = useState({});
+  const [checkingAvailability, setCheckingAvailability] = useState(false);
+  const [daySchedule, setDaySchedule] = useState({});
+  const [loadingSchedule, setLoadingSchedule] = useState(false);
+  const debounceRef = useRef(null);
+
+  const panelistKey = panelists.map((p) => p.id).join(',');
+
+  // Whole-day busy blocks for the panel: keyed on the day and the panel only,
+  // so changing the time doesn't refetch the same day's schedule.
+  useEffect(() => {
+    if (!panelistKey || !dayWindow) {
+      setDaySchedule({});
+      return undefined;
+    }
+    let cancelled = false;
+    setLoadingSchedule(true);
+    interviewsApi
+      .panelistSchedule({
+        panelist_ids: panelistKey.split(','),
+        day_start: dayWindow.start.toISOString(),
+        day_end: dayWindow.end.toISOString(),
+      })
+      .then((res) => {
+        if (!cancelled) setDaySchedule(Object.fromEntries(res.data.map((s) => [s.user_id, s.busy_blocks])));
+      })
+      .catch(() => {
+        // Silent — the grid is a picking aid, not a precondition for scheduling.
+      })
+      .finally(() => { if (!cancelled) setLoadingSchedule(false); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panelistKey, browseDate]);
+
+  // Per-panelist verdict for the exact slot — the authoritative chip.
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (panelists.length === 0 || !scheduledAtWatch) {
+      setAvailability({});
+      setCheckingAvailability(false);
+      return undefined;
+    }
+    setCheckingAvailability(true);
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const res = await interviewsApi.checkAvailability({
+          panelist_ids: panelists.map((p) => p.id),
+          scheduled_at: new Date(scheduledAtWatch).toISOString(),
+          duration_mins: Number(durationWatch) || 60,
+        });
+        setAvailability(Object.fromEntries(res.data.map((a) => [a.user_id, a])));
+      } catch {
+        // Silent — availability is a courtesy, not required to schedule.
+      } finally {
+        setCheckingAvailability(false);
+      }
+    }, 600);
+    return () => clearTimeout(debounceRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panelists, scheduledAtWatch, durationWatch]);
+
+  const pickSlot = (date) => {
+    setBrowseDate(localDateValue(date));
+    setTimeStr(`${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`);
+  };
 
   const createMutation = useMutation({
     mutationFn: (data) => interviewsApi.create(data),
@@ -124,7 +276,7 @@ function ScheduleInterviewDialog({ applicationId, defaultRoundNumber = 1, onClos
       round_number: Number(values.round_number),
       scheduled_at: new Date(values.scheduled_at).toISOString(),
       duration_mins: Number(values.duration_mins),
-      meeting_link: values.meeting_link || undefined,
+      meeting_link: (needsPhone || needsLocation || values.use_teams_meeting) ? undefined : (values.meeting_link || undefined),
       location: values.location || undefined,
       notes: values.notes || undefined,
       title: values.title || undefined,
@@ -151,135 +303,79 @@ function ScheduleInterviewDialog({ applicationId, defaultRoundNumber = 1, onClos
       (!panelistSearch || u.full_name.toLowerCase().includes(panelistSearch.toLowerCase()))
   );
 
+  const selectedStart = scheduledAtWatch ? new Date(scheduledAtWatch) : null;
+  const selectedEnd = selectedStart
+    ? new Date(selectedStart.getTime() + (Number(durationWatch) || 60) * 60000)
+    : null;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
-        <h3 className="font-display font-bold text-gray-900 mb-5">Schedule Interview</h3>
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Round #</label>
-              <input
-                {...register('round_number')}
-                type="number"
-                min="1"
-                className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Title <span className="text-gray-400 font-normal">(optional)</span>
-              </label>
-              <input
-                {...register('title')}
-                className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                placeholder="e.g. Technical Round"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Type *</label>
-              <select
-                {...register('interview_type')}
-                className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white capitalize"
-              >
-                {INTERVIEW_TYPES.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-              {errors.interview_type && (
-                <p className="mt-1 text-xs text-red-500">{errors.interview_type.message}</p>
-              )}
-            </div>
-          </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-modal w-full max-w-3xl max-h-[92vh] overflow-y-auto">
+        <div className="sticky top-0 bg-white border-b border-surface-200 px-6 py-4 z-10">
+          <h3 className="font-display font-bold text-gray-900">Schedule Interview</h3>
+          <p className="text-xs text-gray-500 mt-0.5">Pick the panel, then a day, then an open slot.</p>
+        </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Date & Time *</label>
-              <input
-                {...register('scheduled_at')}
-                type="datetime-local"
-                className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-              />
-              {errors.scheduled_at && (
-                <p className="mt-1 text-xs text-red-500">{errors.scheduled_at.message}</p>
-              )}
+        <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-6">
+          {/* ── 1. What ──────────────────────────────────────────── */}
+          <section className="space-y-4">
+            <StepHeading step={1} title="Round details" />
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Round #</label>
+                <input
+                  {...register('round_number')}
+                  type="number"
+                  min="1"
+                  className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Title <span className="text-gray-400 font-normal">(optional)</span>
+                </label>
+                <input
+                  {...register('title')}
+                  className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  placeholder="e.g. Technical Round"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Type *</label>
+                <select
+                  {...register('interview_type')}
+                  className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white capitalize"
+                >
+                  {INTERVIEW_TYPES.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+                {errors.interview_type && (
+                  <p className="mt-1 text-xs text-red-500">{errors.interview_type.message}</p>
+                )}
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Duration</label>
-              <select
-                {...register('duration_mins')}
-                className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
-              >
-                {DURATION_OPTIONS.map((d) => (
-                  <option key={d.value} value={d.value}>{d.label}</option>
-                ))}
-              </select>
-            </div>
-          </div>
+          </section>
 
-          {needsPhone ? (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Phone number to call <span className="text-red-500">*</span>
-              </label>
-              <input
-                {...register('location')}
-                type="tel"
-                placeholder="+91 98765 43210"
-                className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-              />
-              {errors.location && (
-                <p className="mt-1 text-xs text-red-500">{errors.location.message}</p>
-              )}
-            </div>
-          ) : needsLocation ? (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Location / address <span className="text-red-500">*</span>
-              </label>
-              <input
-                {...register('location')}
-                placeholder="Office address or meeting room"
-                className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-              />
-              {errors.location && (
-                <p className="mt-1 text-xs text-red-500">{errors.location.message}</p>
-              )}
-            </div>
-          ) : (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Meeting link <span className="text-red-500">*</span>
-              </label>
-              <input
-                {...register('meeting_link')}
-                type="url"
-                placeholder="https://meet.google.com/..."
-                className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-              />
-              {errors.meeting_link && (
-                <p className="mt-1 text-xs text-red-500">{errors.meeting_link.message}</p>
-              )}
-            </div>
-          )}
+          {/* ── 2. Who ───────────────────────────────────────────── */}
+          <section className="space-y-3">
+            <StepHeading step={2} title="Interviewers" required />
 
-          {/* Panelists */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Interviewers <span className="text-red-500">*</span>
-            </label>
-
-            {/* Added panelists */}
             {panelists.length > 0 && (
-              <div className="mb-2 space-y-1.5">
+              <div className="flex flex-wrap gap-2">
                 {panelists.map((p) => (
-                  <div key={p.id} className="flex items-center gap-2 bg-surface-50 rounded-lg px-3 py-2">
-                    <div className="w-6 h-6 rounded-full bg-brand-100 flex items-center justify-center flex-shrink-0">
-                      <span className="text-brand-700 text-xs font-semibold">
-                        {p.full_name.charAt(0).toUpperCase()}
-                      </span>
-                    </div>
-                    <span className="text-sm text-gray-800 flex-1 truncate">{p.full_name}</span>
+                  <div key={p.id} className="flex items-center gap-2 bg-surface-50 border border-surface-200 rounded-lg pl-2 pr-1.5 py-1.5">
+                    <span className="w-6 h-6 rounded-full bg-brand-100 text-brand-700 text-xs font-semibold flex items-center justify-center flex-shrink-0">
+                      {p.full_name.charAt(0).toUpperCase()}
+                    </span>
+                    <span className="text-sm text-gray-800">{p.full_name}</span>
+                    {scheduledAtWatch && (
+                      <AvailabilityChip
+                        status={availability[p.id]?.status}
+                        label={availability[p.id]?.label}
+                        loading={checkingAvailability && !availability[p.id]}
+                      />
+                    )}
                     <select
                       value={p.panelRole}
                       onChange={(e) => updatePanelistRole(p.id, e.target.value)}
@@ -291,16 +387,16 @@ function ScheduleInterviewDialog({ applicationId, defaultRoundNumber = 1, onClos
                     <button
                       type="button"
                       onClick={() => removePanelist(p.id)}
-                      className="text-gray-400 hover:text-red-500 text-lg leading-none ml-1"
+                      aria-label={`Remove ${p.full_name}`}
+                      className="text-gray-400 hover:text-red-500 px-1"
                     >
-                      ×
+                      <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 ))}
               </div>
             )}
 
-            {/* Search to add */}
             <div className="relative">
               <input
                 type="text"
@@ -310,7 +406,7 @@ function ScheduleInterviewDialog({ applicationId, defaultRoundNumber = 1, onClos
                 className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
               />
               {panelistSearch && filteredUsers.length > 0 && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-surface-200 rounded-lg shadow-lg z-10 max-h-40 overflow-y-auto">
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-surface-200 rounded-lg shadow-lg z-20 max-h-40 overflow-y-auto">
                   {filteredUsers.map((u) => (
                     <button
                       key={u.id}
@@ -332,32 +428,184 @@ function ScheduleInterviewDialog({ applicationId, defaultRoundNumber = 1, onClos
                 </div>
               )}
               {panelistSearch && filteredUsers.length === 0 && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-surface-200 rounded-lg shadow-lg z-10 px-3 py-2 text-sm text-gray-400">
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-surface-200 rounded-lg shadow-lg z-20 px-3 py-2 text-sm text-gray-400">
                   No matching interviewers
                 </div>
               )}
             </div>
             {panelistError && (
-              <p className="mt-1 text-xs text-red-500">At least one interviewer is required</p>
+              <p className="text-xs text-red-500">At least one interviewer is required</p>
             )}
-          </div>
+          </section>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Notes <span className="text-gray-400 font-normal">(optional)</span>
-            </label>
-            <textarea
-              {...register('notes')}
-              rows={2}
-              className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
-            />
-          </div>
+          {/* ── 3. When ──────────────────────────────────────────── */}
+          <section className="space-y-3">
+            <StepHeading step={3} title="Date & time" required />
 
-          <div className="flex gap-3 pt-2">
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                <input
+                  type="date"
+                  value={browseDate}
+                  onChange={(e) => setBrowseDate(e.target.value)}
+                  className="px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Start time</label>
+                <input
+                  type="time"
+                  value={timeStr}
+                  step={900}
+                  onChange={(e) => setTimeStr(e.target.value)}
+                  className="px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Duration</label>
+                <select
+                  {...register('duration_mins')}
+                  className="px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
+                >
+                  {DURATION_OPTIONS.map((d) => (
+                    <option key={d.value} value={d.value}>{d.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex gap-1.5 pb-0.5">
+                {QUICK_DAYS.map(({ label, offset }) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => setBrowseDate(localDateValue(addDays(new Date(), offset)))}
+                    className={`px-2.5 py-2 rounded-lg text-xs font-medium border transition-colors ${
+                      browseDate === localDateValue(addDays(new Date(), offset))
+                        ? 'bg-brand-50 border-brand-300 text-brand-700'
+                        : 'bg-white border-surface-300 text-gray-600 hover:border-brand-300'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {dayWindow && (
+              <ScheduleTimeGrid
+                panelists={panelists}
+                busyByPanelist={daySchedule}
+                dayStart={dayWindow.start}
+                dayEnd={dayWindow.end}
+                durationMins={Number(durationWatch) || 60}
+                selectedStart={selectedStart}
+                onPick={pickSlot}
+                loading={loadingSchedule}
+              />
+            )}
+
+            {selectedStart ? (
+              <p className="flex items-center gap-2 text-sm text-gray-700 bg-brand-50 border border-brand-100 rounded-lg px-3 py-2">
+                <Calendar className="w-4 h-4 text-brand-500 flex-shrink-0" />
+                <span className="font-semibold">{format(selectedStart, 'EEEE, MMMM d')}</span>
+                <span className="text-gray-500 tabular-nums">
+                  {format(selectedStart, 'h:mm a')} – {format(selectedEnd, 'h:mm a')}
+                </span>
+              </p>
+            ) : (
+              <p className="text-xs text-gray-500">
+                Pick a slot above, or set the start time directly.
+              </p>
+            )}
+            {errors.scheduled_at && (
+              <p className="text-xs text-red-500">{errors.scheduled_at.message}</p>
+            )}
+          </section>
+
+          {/* ── 4. Where ─────────────────────────────────────────── */}
+          <section className="space-y-3">
+            <StepHeading step={4} title="Meeting details" />
+
+            {needsPhone ? (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Phone number to call <span className="text-red-500">*</span>
+                </label>
+                <input
+                  {...register('location')}
+                  type="tel"
+                  placeholder="+91 98765 43210"
+                  className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+                {errors.location && (
+                  <p className="mt-1 text-xs text-red-500">{errors.location.message}</p>
+                )}
+              </div>
+            ) : needsLocation ? (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Location / address <span className="text-red-500">*</span>
+                </label>
+                <input
+                  {...register('location')}
+                  placeholder="Office address or meeting room"
+                  className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+                {errors.location && (
+                  <p className="mt-1 text-xs text-red-500">{errors.location.message}</p>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <label className="flex items-start gap-2 text-sm font-medium text-gray-700">
+                  <input
+                    {...register('use_teams_meeting')}
+                    type="checkbox"
+                    className="mt-0.5 rounded border-surface-300 text-brand-500 focus:ring-brand-500"
+                  />
+                  <span>
+                    Auto-create Microsoft Teams meeting
+                    <span className="block text-xs font-normal text-gray-500 mt-0.5">
+                      Blocks the interviewer's and candidate's calendars and emails both the Teams link automatically. Requires the Teams calendar integration to be set up — leave unchecked to paste a manual link instead.
+                    </span>
+                  </span>
+                </label>
+                {!useTeamsMeeting && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Meeting link <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      {...register('meeting_link')}
+                      type="url"
+                      placeholder="https://meet.google.com/..."
+                      className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    />
+                    {errors.meeting_link && (
+                      <p className="mt-1 text-xs text-red-500">{errors.meeting_link.message}</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Notes <span className="text-gray-400 font-normal">(optional)</span>
+              </label>
+              <textarea
+                {...register('notes')}
+                rows={2}
+                className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+              />
+            </div>
+          </section>
+
+          <div className="flex gap-3 pt-2 border-t border-surface-100">
             <button
               type="submit"
               disabled={isSubmitting || createMutation.isPending}
-              className="flex items-center gap-2 px-5 py-2 bg-brand-500 text-white font-semibold rounded-lg text-sm hover:bg-brand-600 disabled:opacity-60"
+              className="flex items-center gap-2 px-5 py-2.5 bg-brand-500 text-white font-semibold rounded-lg text-sm hover:bg-brand-600 disabled:opacity-60 mt-4"
             >
               {(isSubmitting || createMutation.isPending) && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               Schedule
@@ -365,7 +613,7 @@ function ScheduleInterviewDialog({ applicationId, defaultRoundNumber = 1, onClos
             <button
               type="button"
               onClick={onClose}
-              className="px-5 py-2 text-sm text-gray-600 hover:text-gray-800"
+              className="px-5 py-2.5 text-sm text-gray-600 hover:text-gray-800 mt-4"
             >
               Cancel
             </button>
@@ -1634,51 +1882,12 @@ export default function ApplicationDetailPage() {
       {/* ── Resume Tab ── */}
       {activeTab === 'resume' && (
         <div className="bg-white rounded-xl border border-surface-200 p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-              <FileText className="w-4 h-4 text-gray-400" /> Resume
-            </h3>
-            {app.resume_url && (
-              <a
-                href={app.resume_url.startsWith('http') ? app.resume_url : `http://localhost:8000${app.resume_url}`}
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center gap-1.5 text-sm text-brand-600 hover:text-brand-700 font-medium"
-              >
-                Open <ExternalLink className="w-3.5 h-3.5" />
-              </a>
-            )}
-          </div>
-          {!app.resume_url ? (
-            <div className="flex items-center justify-center py-20 bg-surface-50 rounded-xl border border-dashed border-surface-300">
-              <div className="text-center">
-                <FileText className="w-10 h-10 text-gray-300 mx-auto mb-2" />
-                <p className="text-sm text-gray-500">No resume was provided for this candidate</p>
-                <p className="text-xs text-gray-400 mt-1">This candidate was added via bulk spreadsheet upload without a resume file.</p>
-              </div>
-            </div>
-          ) : app.resume_url.endsWith('.pdf') || app.resume_url.includes('.pdf') ? (
-            <iframe
-              src={app.resume_url.startsWith('http') ? app.resume_url : `http://localhost:8000${app.resume_url}`}
-              className="w-full h-[600px] border border-surface-200 rounded-lg"
-              title="Resume"
-            />
-          ) : (
-            <div className="flex items-center justify-center py-20 bg-surface-50 rounded-xl border border-dashed border-surface-300">
-              <div className="text-center">
-                <FileText className="w-10 h-10 text-gray-300 mx-auto mb-2" />
-                <p className="text-sm text-gray-500 mb-3">Preview not available for this file type</p>
-                <a
-                  href={app.resume_url.startsWith('http') ? app.resume_url : `http://localhost:8000${app.resume_url}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-sm text-brand-600 hover:text-brand-700 font-medium"
-                >
-                  Download resume
-                </a>
-              </div>
-            </div>
-          )}
+          <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2 mb-4">
+            <FileText className="w-4 h-4 text-gray-400" /> Resume
+          </h3>
+          {/* Every revision stays reachable — selecting one previews it below,
+              so a panel's feedback can be read against the version they saw. */}
+          <ResumeVersions applicationId={id} canUpload />
         </div>
       )}
 

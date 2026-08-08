@@ -13,6 +13,8 @@ from app.schemas.auth import (
     ResetPasswordRequest,
     VerifyEmailRequest,
     MessageResponse,
+    MicrosoftLoginUrlResponse,
+    MicrosoftCallbackRequest,
 )
 from app.schemas.user import UserResponse
 from app.services import auth_service
@@ -65,3 +67,17 @@ async def forgot_password(data: ForgotPasswordRequest, db: AsyncSession = Depend
 async def reset_password(data: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
     await auth_service.reset_password(data.token, data.new_password, db)
     return {"message": "Password reset successfully"}
+
+
+@router.get("/microsoft/login-url", response_model=MicrosoftLoginUrlResponse)
+async def microsoft_login_url(state: str):
+    # `state` is generated client-side and verified there too (against
+    # sessionStorage) before the callback is ever called — the backend just
+    # echoes it through the redirect unmodified, it holds no server session.
+    return {"authorize_url": auth_service.microsoft_authorize_url(state)}
+
+
+@router.post("/microsoft/callback", response_model=TokenResponse)
+async def microsoft_callback(data: MicrosoftCallbackRequest, db: AsyncSession = Depends(get_db)):
+    tokens = await auth_service.login_with_microsoft(data.code, db)
+    return TokenResponse(**tokens)

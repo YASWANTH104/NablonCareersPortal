@@ -106,6 +106,24 @@ class StageHistoryEntry(BaseModel):
     created_at: datetime
 
 
+class ApplicationResumeResponse(BaseModel):
+    """One revision in an application's resume history. `is_current` marks the
+    revision the application's resume_url currently points at."""
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    application_id: uuid.UUID
+    version: int
+    file_url: str
+    file_name: Optional[str] = None
+    note: Optional[str] = None
+    uploaded_by: Optional[uuid.UUID] = None
+    uploaded_by_name: Optional[str] = None
+    uploaded_by_role: Optional[str] = None
+    is_current: bool
+    created_at: datetime
+
+
 class ApplicationResponse(BaseModel):
     model_config = {"from_attributes": True}
 

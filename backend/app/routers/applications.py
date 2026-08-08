@@ -12,7 +12,7 @@ from app.schemas.application import (
     ApplicationCreate, ApplicationResponse, ApplicationDetailResponse,
     ApplicationStageUpdate, ApplicationListResponse,
     ApplicationRatingUpdate, ApplicationAssignUpdate, ApplicationHoldUpdate,
-    ApplicationUpdate, NoteCreate, StageHistoryEntry,
+    ApplicationUpdate, NoteCreate, StageHistoryEntry, ApplicationResumeResponse,
 )
 from app.services import application_service
 
@@ -249,6 +249,31 @@ async def update_application(
     db: AsyncSession = Depends(get_db),
 ):
     return await application_service.update_application(db, application_id, current_user, data)
+
+
+# Resume revisions. Both endpoints authorise inside the service rather than via
+# require_roles, because access depends on the row (HR and interviewers see any
+# application; a candidate only their own).
+@router.get("/{application_id}/resumes", response_model=list[ApplicationResumeResponse])
+async def list_resumes(
+    application_id: uuid.UUID,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await application_service.list_application_resumes(db, application_id, current_user)
+
+
+@router.post("/{application_id}/resumes", response_model=ApplicationResumeResponse, status_code=201)
+async def add_resume(
+    application_id: uuid.UUID,
+    resume: UploadFile = File(...),
+    note: Optional[str] = Form(None),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await application_service.add_application_resume(
+        db, application_id, current_user, resume, note
+    )
 
 
 @router.patch("/{application_id}/stage", response_model=ApplicationResponse)

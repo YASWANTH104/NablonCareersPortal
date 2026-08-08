@@ -2,6 +2,7 @@ from app.models.user import User
 from app.models.candidate_profile import CandidateProfile
 from app.models.job import Job, Department, JobQuestion
 from app.models.application import Application, ApplicationStageHistory
+from app.models.application_resume import ApplicationResume
 from app.models.referral import Referral
 from app.models.interview import Interview, InterviewPanelist, InterviewFeedback, CandidateInterviewSelfFeedback
 from app.models.assessment import Assessment
@@ -14,7 +15,7 @@ __all__ = [
     "User",
     "CandidateProfile",
     "Job", "Department", "JobQuestion",
-    "Application", "ApplicationStageHistory",
+    "Application", "ApplicationStageHistory", "ApplicationResume",
     "Referral",
     "Interview", "InterviewPanelist", "InterviewFeedback", "CandidateInterviewSelfFeedback",
     "Assessment",

@@ -65,16 +65,7 @@ async def register_user(data: RegisterRequest, db: AsyncSession) -> User:
     return user
 
 
-async def login_user(data: LoginRequest, db: AsyncSession) -> dict:
-    result = await db.execute(select(User).where(User.email == data.email))
-    user = result.scalar_one_or_none()
-
-    if not user or not verify_password(data.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-
-    if not user.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account deactivated")
-
+async def _issue_tokens(user: User, db: AsyncSession) -> dict:
     access_token = create_access_token(str(user.id))
     refresh_token = create_refresh_token(str(user.id))
 
@@ -86,6 +77,63 @@ async def login_user(data: LoginRequest, db: AsyncSession) -> dict:
     await db.commit()
 
     return {"access_token": access_token, "refresh_token": refresh_token}
+
+
+async def login_user(data: LoginRequest, db: AsyncSession) -> dict:
+    result = await db.execute(select(User).where(User.email == data.email))
+    user = result.scalar_one_or_none()
+
+    if not user or not verify_password(data.password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account deactivated")
+
+    return await _issue_tokens(user, db)
+
+
+def _ms_redirect_uri() -> str:
+    # Must byte-for-byte match the redirect URI registered on the Entra app —
+    # computed here once so the authorize-url step and the callback exchange
+    # step can never drift apart.
+    return f"{settings.FRONTEND_URL}/auth/microsoft/callback"
+
+
+def microsoft_authorize_url(state: str) -> str:
+    from app.services import ms_sso_service
+
+    if not ms_sso_service.is_configured():
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Microsoft sign-in is not configured")
+    return ms_sso_service.build_authorize_url(_ms_redirect_uri(), state)
+
+
+async def login_with_microsoft(code: str, db: AsyncSession) -> dict:
+    from app.services import ms_sso_service
+
+    if not ms_sso_service.is_configured():
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Microsoft sign-in is not configured")
+
+    userinfo = await ms_sso_service.exchange_code_for_userinfo(code, _ms_redirect_uri())
+    if not userinfo:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Microsoft sign-in failed — please try again")
+
+    result = await db.execute(select(User).where(User.email == userinfo["email"]))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No Nablon account found for {userinfo['email']}. Contact HR to get access, or sign in with your password if you already have an account.",
+        )
+    if user.role == "applicant":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Microsoft sign-in isn't available for candidate accounts — please sign in with your email and password.",
+        )
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account deactivated")
+
+    return await _issue_tokens(user, db)
 
 
 async def refresh_tokens(refresh_token: str) -> dict:

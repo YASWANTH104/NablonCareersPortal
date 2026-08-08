@@ -2,6 +2,8 @@ import client from './client';
 
 export const interviewsApi = {
   create: (data) => client.post('/interviews', data),
+  checkAvailability: (data) => client.post('/interviews/check-availability', data),
+  panelistSchedule: (data) => client.post('/interviews/panelist-schedule', data),
   list: (params) => client.get('/interviews', { params }),
   mine: (params) => client.get('/interviews/mine', { params }),
   getById: (id) => client.get(`/interviews/${id}`),

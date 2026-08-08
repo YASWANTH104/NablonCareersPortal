@@ -1,5 +1,6 @@
 import uuid
 from typing import Optional
+from datetime import datetime
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +13,8 @@ from app.schemas.interview import (
     InterviewListResponse,
     CandidateSelfFeedbackCreate, CandidateSelfFeedbackResponse,
     CandidateInterviewSummary,
+    AvailabilityCheckRequest, PanelistAvailability,
+    PanelistScheduleRequest, PanelistDaySchedule,
 )
 
 
@@ -34,16 +37,45 @@ async def create_interview(
     return await interview_service.create_interview(db, data, created_by=user.id)
 
 
+@router.post("/check-availability", response_model=list[PanelistAvailability])
+async def check_availability(
+    data: AvailabilityCheckRequest,
+    user=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await interview_service.check_panelist_availability(
+        db, data.panelist_ids, data.scheduled_at, data.duration_mins,
+        exclude_interview_id=data.exclude_interview_id,
+    )
+
+
+@router.post("/panelist-schedule", response_model=list[PanelistDaySchedule])
+async def panelist_schedule(
+    data: PanelistScheduleRequest,
+    user=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await interview_service.get_panelist_day_schedule(
+        db, data.panelist_ids, data.day_start, data.day_end,
+    )
+
+
+# date_from/date_to let the calendar views fetch exactly the window on screen
+# (a month grid or a week grid) in one unpaginated request; the agenda list
+# leaves them unset and keeps paginating.
 @router.get("/mine", response_model=InterviewListResponse)
 async def my_interviews(
     status: Optional[str] = Query(None),
+    date_from: Optional[datetime] = Query(None),
+    date_to: Optional[datetime] = Query(None),
     page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=500),
     user=Depends(require_roles(*_HR_AND_INTERVIEWER)),
     db: AsyncSession = Depends(get_db),
 ):
     return await interview_service.list_my_interviews(
-        db, user_id=user.id, status=status, page=page, limit=limit
+        db, user_id=user.id, status=status,
+        date_from=date_from, date_to=date_to, page=page, limit=limit,
     )
 
 
@@ -51,13 +83,16 @@ async def my_interviews(
 async def list_interviews(
     application_id: Optional[uuid.UUID] = Query(None),
     status: Optional[str] = Query(None),
+    date_from: Optional[datetime] = Query(None),
+    date_to: Optional[datetime] = Query(None),
     page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=500),
     user=Depends(require_roles(*_HR_AND_INTERVIEWER)),
     db: AsyncSession = Depends(get_db),
 ):
     return await interview_service.list_interviews(
-        db, application_id=application_id, status=status, page=page, limit=limit
+        db, application_id=application_id, status=status,
+        date_from=date_from, date_to=date_to, page=page, limit=limit,
     )
 
 

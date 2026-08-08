@@ -46,6 +46,15 @@ export const applicationsApi = {
   setRating: (id, rating) => client.patch(`/applications/${id}/rating`, { rating }),
   addNote: (id, note) => client.post(`/applications/${id}/notes`, { note }),
   getTimeline: (id) => client.get(`/applications/${id}/timeline`),
+  listResumes: (id) => client.get(`/applications/${id}/resumes`),
+  addResume: (id, file, note) => {
+    const form = new FormData();
+    form.append('resume', file);
+    if (note) form.append('note', note);
+    return client.post(`/applications/${id}/resumes`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
   withdraw: (id) => client.delete(`/applications/${id}/withdraw`),
   export: (params) => client.get('/applications/export', { params, responseType: 'blob' }),
   getMyInterviews: (id) => client.get(`/applications/${id}/interviews`),

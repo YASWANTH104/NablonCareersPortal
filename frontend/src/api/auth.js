@@ -15,4 +15,8 @@ export const authApi = {
 
   resetPassword: (token, newPassword) =>
     client.post('/auth/reset-password', { token, new_password: newPassword }),
+
+  microsoftLoginUrl: (state) => client.get('/auth/microsoft/login-url', { params: { state } }),
+
+  microsoftCallback: (code, state) => client.post('/auth/microsoft/callback', { code, state }),
 };

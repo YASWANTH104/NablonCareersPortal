@@ -16,8 +16,20 @@ const schema = z.object({
   password: z.string().min(1, 'Password is required'),
 });
 
+function MicrosoftLogo() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 21 21" aria-hidden="true">
+      <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+      <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+      <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+      <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+    </svg>
+  );
+}
+
 export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
+  const [msLoading, setMsLoading] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const { login } = useAuthStore();
@@ -43,6 +55,19 @@ export default function LoginPage() {
     }
   };
 
+  const onMicrosoftSignIn = async () => {
+    setMsLoading(true);
+    try {
+      const state = crypto.randomUUID();
+      sessionStorage.setItem('ms_sso_state', state);
+      const { data } = await authApi.microsoftLoginUrl(state);
+      window.location.href = data.authorize_url;
+    } catch (err) {
+      toast.error(err.response?.data?.detail ?? 'Microsoft sign-in is unavailable right now');
+      setMsLoading(false);
+    }
+  };
+
   return (
     <AuthLayout
       title="Welcome back"
@@ -56,6 +81,22 @@ export default function LoginPage() {
         </>
       }
     >
+      <button
+        type="button"
+        onClick={onMicrosoftSignIn}
+        disabled={msLoading}
+        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 border border-surface-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60 mb-5"
+      >
+        {msLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <MicrosoftLogo />}
+        Sign in with Microsoft
+      </button>
+
+      <div className="flex items-center gap-3 mb-5">
+        <div className="h-px flex-1 bg-surface-200" />
+        <span className="text-xs text-gray-400">or sign in with email</span>
+        <div className="h-px flex-1 bg-surface-200" />
+      </div>
+
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1.5">Email address</label>

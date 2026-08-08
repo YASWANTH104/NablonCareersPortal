@@ -14,6 +14,7 @@ import { interviewsApi } from '@/api/interviews';
 import { documentsApi } from '@/api/documents';
 import { offersApi } from '@/api/offers';
 import client from '@/api/client';
+import { ResumeVersionsModal } from '@/components/shared/ResumeVersions';
 
 const STAGE_CONFIG = {
   applied:         { label: 'Applied',          color: 'bg-blue-100 text-blue-700' },
@@ -30,6 +31,11 @@ const STAGE_CONFIG = {
 };
 
 const TERMINAL_STAGES = new Set(['hired', 'rejected', 'withdrawn']);
+// Mirrors _RESUME_CLOSED_STAGES in the backend: once an application is closed
+// there is nothing left to review, so the candidate can't swap their resume.
+const RESUME_LOCKED_STAGES = new Set([
+  'hired', 'rejected', 'withdrawn', 'interview_drop', 'offer_drop',
+]);
 // Candidates may edit their own details only early in the pipeline; the backend
 // enforces the same rule. HR can edit at any stage from the applicant console.
 const CANDIDATE_EDITABLE_STAGES = new Set(['applied', 'screening']);
@@ -971,6 +977,7 @@ export default function MyApplicationsPage() {
   const qc = useQueryClient();
   const [withdrawingId, setWithdrawingId] = useState(null);
   const [editingApp, setEditingApp] = useState(null);
+  const [resumeApp, setResumeApp] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
   const [autoFeedbackInterview, setAutoFeedbackInterview] = useState(null);
   const [page, setPage] = useState(1);
@@ -1037,6 +1044,14 @@ export default function MyApplicationsPage() {
             setEditingApp(null);
             qc.invalidateQueries({ queryKey: ['my-applications'] });
           }}
+        />
+      )}
+      {resumeApp && (
+        <ResumeVersionsModal
+          applicationId={resumeApp.id}
+          jobTitle={resumeApp.job_title}
+          canUpload={!RESUME_LOCKED_STAGES.has(resumeApp.stage)}
+          onClose={() => setResumeApp(null)}
         />
       )}
       <div className="mb-6">
@@ -1115,6 +1130,13 @@ export default function MyApplicationsPage() {
                   </div>
 
                   <div className="flex items-center gap-2 flex-shrink-0">
+                    <button
+                      onClick={() => setResumeApp(app)}
+                      className="p-1.5 text-gray-400 hover:text-brand-600 rounded-lg hover:bg-brand-50 transition-colors"
+                      title={RESUME_LOCKED_STAGES.has(app.stage) ? 'View resume history' : 'Update your resume'}
+                    >
+                      <FileText className="w-4 h-4" />
+                    </button>
                     {CANDIDATE_EDITABLE_STAGES.has(app.stage) && (
                       <button
                         onClick={() => setEditingApp(app)}
