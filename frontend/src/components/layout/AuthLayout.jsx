@@ -1,23 +1,23 @@
 import { forwardRef } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, ShieldCheck, Radar, FileSignature } from 'lucide-react';
+import { ArrowLeft, Target, Sparkles, TrendingUp } from 'lucide-react';
 import { HeroBackdrop } from '@/components/shared/effects';
 
 const POINTS = [
   {
-    icon: Radar,
-    title: 'Track every stage',
-    text: 'Screening, interviews, offer — followed live in your portal.',
+    icon: Target,
+    title: 'Work that ships, not pilots',
+    text: 'Agentic systems running live for Fortune 500 leaders in banking, healthcare and industry.',
   },
   {
-    icon: FileSignature,
-    title: 'Digital offers',
-    text: 'Review and e-sign your offer letter online, no paperwork.',
+    icon: Sparkles,
+    title: 'Frontier problems',
+    text: "Take on the hard parts of enterprise AI that most teams haven't touched yet.",
   },
   {
-    icon: ShieldCheck,
-    title: 'Your data, protected',
-    text: 'Applications and documents are handled confidentially.',
+    icon: TrendingUp,
+    title: 'Real ownership',
+    text: 'Small teams, high trust — your work reaches production, not a backlog.',
   },
 ];
 
@@ -39,11 +39,12 @@ export default function AuthLayout({ title, subtitle, children, footer }) {
 
         <div className="relative">
           <h2 className="font-display text-3xl xl:text-4xl font-bold text-white leading-tight mb-4">
-            Build agentic AI that{' '}
-            <span className="animated-gradient-text">runs the enterprise</span>
+            Join the team building{' '}
+            <span className="animated-gradient-text">agentic AI that runs the enterprise</span>
           </h2>
           <p className="text-brand-100/70 mb-10 max-w-sm">
-            One account for everything — applications, interviews, documents and offers.
+            We build production AI for global banking, MedTech and industrial leaders — and we're
+            looking for people who want to do work that matters.
           </p>
 
           <ul className="space-y-5">

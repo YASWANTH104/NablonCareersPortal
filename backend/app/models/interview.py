@@ -26,6 +26,11 @@ class Interview(Base):
     notes: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     last_feedback_reminder_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Set when meeting_link was auto-generated via Microsoft Graph (Teams). Needed
+    # to PATCH/DELETE the same calendar event on reschedule/cancel — Graph requires
+    # both the organizer mailbox and event id to address it.
+    ms_graph_event_id: Mapped[str | None] = mapped_column(String(255))
+    ms_graph_organizer_email: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
 

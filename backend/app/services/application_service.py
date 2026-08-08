@@ -1005,3 +1005,139 @@ async def withdraw_application(
     app.stage = "withdrawn"
     app.stage_updated_at = datetime.utcnow()
     await db.commit()
+
+
+# ── Resume revisions ──────────────────────────────────────────────────────────
+
+# Once an application is closed there is nothing left to review, so the
+# candidate can no longer swap their resume. HR keeps access throughout — they
+# may still need to correct a bad file on a hired candidate's record.
+_RESUME_CLOSED_STAGES = ("hired", "rejected", "withdrawn", "interview_drop", "offer_drop")
+
+
+async def _resume_access(db: AsyncSession, application_id: uuid.UUID, current_user):
+    """Load the application and classify the caller as HR, owner, or neither."""
+    app = await db.get(Application, application_id)
+    if not app:
+        raise HTTPException(404, "Application not found")
+
+    role = getattr(current_user, "role", None)
+    is_hr = role in _HR_EDIT_ROLES
+    is_interviewer = role == "interviewer"
+    is_owner = str(app.applicant_id) == str(current_user.id)
+    return app, is_hr, is_interviewer, is_owner
+
+
+async def list_application_resumes(
+    db: AsyncSession,
+    application_id: uuid.UUID,
+    current_user,
+) -> list[dict]:
+    from app.models.application_resume import ApplicationResume
+    from app.models.user import User as UserModel
+    from app.services.storage_service import refresh_url
+
+    app, is_hr, is_interviewer, is_owner = await _resume_access(db, application_id, current_user)
+    if not (is_hr or is_interviewer or is_owner):
+        raise HTTPException(403, "Not your application")
+
+    rows = (await db.execute(
+        select(ApplicationResume, UserModel.full_name)
+        .outerjoin(UserModel, UserModel.id == ApplicationResume.uploaded_by)
+        .where(ApplicationResume.application_id == application_id)
+        .order_by(ApplicationResume.version.desc())
+    )).all()
+
+    return [
+        {
+            "id": r.id,
+            "application_id": r.application_id,
+            "version": r.version,
+            # Same re-signing rule as every other stored blob URL — the SAS baked
+            # in at upload expires after 7 days (see storage_service.refresh_url).
+            "file_url": refresh_url(r.file_url),
+            "file_name": r.file_name,
+            "note": r.note,
+            "uploaded_by": r.uploaded_by,
+            "uploaded_by_name": name,
+            "uploaded_by_role": r.uploaded_by_role,
+            "is_current": r.file_url == app.resume_url,
+            "created_at": r.created_at,
+        }
+        for r, name in rows
+    ]
+
+
+async def add_application_resume(
+    db: AsyncSession,
+    application_id: uuid.UUID,
+    current_user,
+    file,
+    note: Optional[str] = None,
+) -> dict:
+    """Store a new resume revision and point the application at it."""
+    from app.models.application_resume import ApplicationResume
+    from app.services.storage_service import upload_resume
+
+    app, is_hr, _is_interviewer, is_owner = await _resume_access(db, application_id, current_user)
+
+    if not is_hr:
+        if not is_owner:
+            raise HTTPException(403, "Not your application")
+        if app.stage in _RESUME_CLOSED_STAGES:
+            raise HTTPException(
+                400,
+                "This application is closed — you can no longer update your resume. "
+                "Please contact the recruiter.",
+            )
+
+    file_url = await upload_resume(file, str(app.applicant_id))
+
+    # Versions are contiguous per application; MAX+1 rather than a count so a
+    # deleted row could never hand out a number that is already taken.
+    next_version = ((await db.execute(
+        select(func.max(ApplicationResume.version))
+        .where(ApplicationResume.application_id == application_id)
+    )).scalar() or 0) + 1
+
+    revision = ApplicationResume(
+        application_id=application_id,
+        version=next_version,
+        file_url=file_url,
+        file_name=getattr(file, "filename", None),
+        note=note or None,
+        uploaded_by=current_user.id,
+        uploaded_by_role=getattr(current_user, "role", None),
+    )
+    db.add(revision)
+
+    app.resume_url = file_url
+    app.updated_at = datetime.utcnow()
+
+    # Visible on the candidate timeline HR already reads, so a swapped resume
+    # isn't something you only discover by opening the resume tab.
+    who = "the candidate" if is_owner and not is_hr else getattr(current_user, "full_name", "HR")
+    db.add(ApplicationStageHistory(
+        application_id=application_id,
+        from_stage=app.stage,
+        to_stage=app.stage,
+        changed_by=current_user.id,
+        notes=f"Resume updated to v{next_version} by {who}" + (f" — {note}" if note else ""),
+    ))
+
+    await db.commit()
+    await db.refresh(revision)
+
+    return {
+        "id": revision.id,
+        "application_id": revision.application_id,
+        "version": revision.version,
+        "file_url": file_url,
+        "file_name": revision.file_name,
+        "note": revision.note,
+        "uploaded_by": revision.uploaded_by,
+        "uploaded_by_name": getattr(current_user, "full_name", None),
+        "uploaded_by_role": revision.uploaded_by_role,
+        "is_current": True,
+        "created_at": revision.created_at,
+    }

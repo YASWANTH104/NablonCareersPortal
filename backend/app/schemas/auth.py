@@ -40,5 +40,14 @@ class VerifyEmailRequest(BaseModel):
     token: str
 
 
+class MicrosoftLoginUrlResponse(BaseModel):
+    authorize_url: str
+
+
+class MicrosoftCallbackRequest(BaseModel):
+    code: str
+    state: str
+
+
 class MessageResponse(BaseModel):
     message: str

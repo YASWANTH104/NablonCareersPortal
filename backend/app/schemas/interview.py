@@ -34,6 +34,38 @@ class InterviewUpdate(BaseModel):
     notes: Optional[str] = None
 
 
+class AvailabilityCheckRequest(BaseModel):
+    panelist_ids: list[uuid.UUID]
+    scheduled_at: datetime
+    duration_mins: int = 60
+    exclude_interview_id: Optional[uuid.UUID] = None
+
+
+class PanelistAvailability(BaseModel):
+    user_id: uuid.UUID
+    full_name: str
+    status: str  # free | tentative | busy | oof | busy_internal | unknown
+    label: str
+
+
+class PanelistScheduleRequest(BaseModel):
+    panelist_ids: list[uuid.UUID]
+    day_start: datetime
+    day_end: datetime
+
+
+class BusyBlock(BaseModel):
+    start: datetime
+    end: datetime
+    status: str  # interview | busy | tentative | oof
+
+
+class PanelistDaySchedule(BaseModel):
+    user_id: uuid.UUID
+    full_name: str
+    busy_blocks: list[BusyBlock]
+
+
 class PanelistResponse(BaseModel):
     model_config = {"from_attributes": True}
 

@@ -38,6 +38,14 @@ class Settings(BaseSettings):
     AZURE_OPENAI_DEPLOYMENT: str = ""
     AZURE_OPENAI_API_VERSION: str = "2024-02-01"
 
+    MS_GRAPH_TENANT_ID: str = ""
+    MS_GRAPH_CLIENT_ID: str = ""
+    MS_GRAPH_CLIENT_SECRET: str = ""
+
+    @property
+    def ms_graph_configured(self) -> bool:
+        return bool(self.MS_GRAPH_TENANT_ID and self.MS_GRAPH_CLIENT_ID and self.MS_GRAPH_CLIENT_SECRET)
+
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"

@@ -1,6 +1,6 @@
 import uuid
 from typing import Optional
-from datetime import timedelta
+from datetime import datetime, timedelta
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
@@ -116,6 +116,161 @@ async def _check_panelist_conflicts(
 
     rows = (await db.execute(stmt)).all()
     return [row[0] for row in rows]
+
+
+async def _panelist_conflict_ids(
+    db: AsyncSession,
+    panelist_ids: list[uuid.UUID],
+    scheduled_at,
+    duration_mins: int,
+    exclude_interview_id: Optional[uuid.UUID] = None,
+) -> list[uuid.UUID]:
+    """Same overlap check as _check_panelist_conflicts but returns user_ids —
+    used by check_panelist_availability to flag which specific panelists conflict."""
+    if not panelist_ids:
+        return []
+
+    new_end = scheduled_at + timedelta(minutes=duration_mins or 60)
+    stmt = (
+        select(InterviewPanelist.user_id)
+        .join(Interview, Interview.id == InterviewPanelist.interview_id)
+        .where(
+            InterviewPanelist.user_id.in_(panelist_ids),
+            Interview.status.in_(["scheduled", "rescheduled"]),
+            Interview.scheduled_at < new_end,
+            Interview.scheduled_at + func.make_interval(
+                0, 0, 0, 0, 0, func.coalesce(Interview.duration_mins, 60)
+            ) > scheduled_at,
+        )
+    )
+    if exclude_interview_id:
+        stmt = stmt.where(Interview.id != exclude_interview_id)
+
+    rows = (await db.execute(stmt)).all()
+    return [row[0] for row in rows]
+
+
+_AVAILABILITY_LABELS = {
+    "busy_internal": "Already interviewing another candidate at this time",
+    "busy": "Busy on their Outlook calendar",
+    "tentative": "Tentatively booked on their Outlook calendar",
+    "oof": "Out of office",
+    "free": "Available",
+    "unknown": "Unable to check (Teams calendar integration not connected)",
+}
+
+
+async def check_panelist_availability(
+    db: AsyncSession,
+    panelist_ids: list[uuid.UUID],
+    scheduled_at,
+    duration_mins: int,
+    exclude_interview_id: Optional[uuid.UUID] = None,
+) -> list[dict]:
+    """Per-panelist availability for the proposed slot — checks our own DB for
+    double-booking against other interviews first (that's a hard conflict we know
+    about for certain), then falls back to their real Outlook free/busy via Graph
+    for anything we can't see (client calls, internal meetings, etc). Informational
+    only — HR decides whether to proceed, this never blocks scheduling itself."""
+    from app.models.user import User
+    from app.services import ms_graph_service
+
+    if not panelist_ids:
+        return []
+
+    users_by_id = {
+        u.id: u for u in (await db.execute(
+            select(User).where(User.id.in_(panelist_ids))
+        )).scalars().all()
+    }
+
+    internal_conflict_ids = set(
+        await _panelist_conflict_ids(db, panelist_ids, scheduled_at, duration_mins, exclude_interview_id)
+    )
+
+    emails = [u.email for u in users_by_id.values()]
+    graph_status: dict = {}
+    if emails:
+        try:
+            end = scheduled_at + timedelta(minutes=duration_mins or 60)
+            graph_status = await ms_graph_service.get_free_busy(emails[0], emails, scheduled_at, end)
+        except Exception:
+            graph_status = {}
+
+    results = []
+    for pid in panelist_ids:
+        user = users_by_id.get(pid)
+        if not user:
+            continue
+        status = "busy_internal" if pid in internal_conflict_ids else graph_status.get(user.email, "unknown")
+        results.append({
+            "user_id": pid,
+            "full_name": user.full_name,
+            "status": status,
+            "label": _AVAILABILITY_LABELS.get(status, status),
+        })
+    return results
+
+
+async def get_panelist_day_schedule(
+    db: AsyncSession,
+    panelist_ids: list[uuid.UUID],
+    day_start,
+    day_end,
+) -> list[dict]:
+    """Busy blocks for each panelist within [day_start, day_end) — for rendering a
+    day timeline HR can eyeball before picking a time, rather than checking one slot
+    at a time. Merges our own scheduled interviews (labeled "interview") with real
+    Outlook busy/tentative/oof blocks from Graph."""
+    from app.models.user import User
+    from app.services import ms_graph_service
+
+    if not panelist_ids:
+        return []
+
+    users_by_id = {
+        u.id: u for u in (await db.execute(
+            select(User).where(User.id.in_(panelist_ids))
+        )).scalars().all()
+    }
+
+    internal_rows = (await db.execute(
+        select(Interview, InterviewPanelist.user_id)
+        .join(InterviewPanelist, InterviewPanelist.interview_id == Interview.id)
+        .where(
+            InterviewPanelist.user_id.in_(panelist_ids),
+            Interview.status.in_(["scheduled", "rescheduled"]),
+            Interview.scheduled_at < day_end,
+            Interview.scheduled_at + func.make_interval(
+                0, 0, 0, 0, 0, func.coalesce(Interview.duration_mins, 60)
+            ) > day_start,
+        )
+    )).all()
+
+    internal_blocks: dict = {}
+    for interview, uid in internal_rows:
+        end = interview.scheduled_at + timedelta(minutes=interview.duration_mins or 60)
+        internal_blocks.setdefault(uid, []).append(
+            {"start": interview.scheduled_at, "end": end, "status": "interview"}
+        )
+
+    emails = [u.email for u in users_by_id.values()]
+    graph_blocks: dict = {}
+    if emails:
+        try:
+            graph_blocks = await ms_graph_service.get_busy_blocks(emails[0], emails, day_start, day_end)
+        except Exception:
+            graph_blocks = {}
+
+    results = []
+    for pid in panelist_ids:
+        user = users_by_id.get(pid)
+        if not user:
+            continue
+        blocks = list(internal_blocks.get(pid, [])) + list(graph_blocks.get(user.email, []))
+        blocks.sort(key=lambda b: b["start"])
+        results.append({"user_id": pid, "full_name": user.full_name, "busy_blocks": blocks})
+    return results
 
 
 def _feedback_to_dict(f: InterviewFeedback) -> dict:
@@ -268,9 +423,17 @@ async def create_interview(
     # Emails (including real ACS sends, which can take several seconds each) run
     # out-of-request via Celery — sending them inline here was why scheduling an
     # interview with panelists could take 10-20+ seconds before the API responded.
+    # If HR didn't supply their own meeting_link, auto-create a Teams meeting
+    # (also async — a Graph token fetch + event create is the same class of slow
+    # external call). That task fires the scheduled-notification email itself once
+    # it's done (or immediately, if Graph isn't configured), so only one path runs.
     try:
-        from app.tasks.email_tasks import send_interview_scheduled_notifications
-        send_interview_scheduled_notifications.delay(str(interview.id))
+        if not interview.meeting_link and panelists:
+            from app.tasks.calendar_tasks import create_teams_meeting_task
+            create_teams_meeting_task.delay(str(interview.id))
+        else:
+            from app.tasks.email_tasks import send_interview_scheduled_notifications
+            send_interview_scheduled_notifications.delay(str(interview.id))
     except Exception:
         pass
 
@@ -282,6 +445,8 @@ async def list_my_interviews(
     user_id: uuid.UUID,
     *,
     status: Optional[str] = None,
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
     page: int = 1,
     limit: int = 20,
 ) -> dict:
@@ -304,6 +469,10 @@ async def list_my_interviews(
             filters.append(Interview.status.in_(['scheduled', 'rescheduled']))
         else:
             filters.append(Interview.status == status)
+    if date_from:
+        filters.append(Interview.scheduled_at >= date_from)
+    if date_to:
+        filters.append(Interview.scheduled_at < date_to)
     if filters:
         base = base.where(and_(*filters))
 
@@ -364,6 +533,8 @@ async def list_interviews(
     *,
     application_id: Optional[uuid.UUID] = None,
     status: Optional[str] = None,
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
     page: int = 1,
     limit: int = 20,
 ) -> dict:
@@ -384,6 +555,10 @@ async def list_interviews(
             filters.append(Interview.status.in_(['scheduled', 'rescheduled']))
         else:
             filters.append(Interview.status == status)
+    if date_from:
+        filters.append(Interview.scheduled_at >= date_from)
+    if date_to:
+        filters.append(Interview.scheduled_at < date_to)
 
     if filters:
         base = base.where(and_(*filters))
@@ -553,8 +728,12 @@ async def update_interview(
             pass
 
         try:
-            from app.tasks.email_tasks import send_interview_rescheduled_notifications
-            send_interview_rescheduled_notifications.delay(str(interview_id))
+            if interview.ms_graph_event_id:
+                from app.tasks.calendar_tasks import update_teams_meeting_task
+                update_teams_meeting_task.delay(str(interview_id))
+            else:
+                from app.tasks.email_tasks import send_interview_rescheduled_notifications
+                send_interview_rescheduled_notifications.delay(str(interview_id))
         except Exception:
             pass
 
@@ -611,8 +790,12 @@ async def cancel_interview(db: AsyncSession, interview_id: uuid.UUID) -> None:
         pass
 
     try:
-        from app.tasks.email_tasks import send_interview_cancelled_notifications
-        send_interview_cancelled_notifications.delay(str(interview_id))
+        if interview.ms_graph_event_id:
+            from app.tasks.calendar_tasks import delete_teams_meeting_task
+            delete_teams_meeting_task.delay(str(interview_id))
+        else:
+            from app.tasks.email_tasks import send_interview_cancelled_notifications
+            send_interview_cancelled_notifications.delay(str(interview_id))
     except Exception:
         pass
 
