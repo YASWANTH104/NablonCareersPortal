@@ -56,10 +56,33 @@
 
   body {
     @apply bg-background text-foreground font-body;
+    /* A single stray wide child must never make the whole page pan sideways
+       on a phone — every legitimately wide block (tables, calendars, the
+       kanban board) already scrolls inside its own container. `clip` rather
+       than `hidden` because `hidden` would turn body into a scroll container
+       and break the `position: sticky` cards on the public job pages. */
+    overflow-x: clip;
   }
 
   h1, h2, h3, h4, h5, h6 {
     @apply font-display;
+  }
+
+  /* Long unbroken strings (emails, URLs, pasted tokens) are the other common
+     source of horizontal overflow on narrow screens. */
+  h1, h2, h3, h4, h5, h6, p, span, td, th, dd, dt, li, label {
+    overflow-wrap: break-word;
+  }
+
+  /* iOS Safari zooms the page whenever a focused field is under 16px. Keeping
+     the visual size but bumping the mobile font size avoids that zoom-and-
+     never-zoom-back trap on every form in the app. */
+  @media (max-width: 640px) {
+    input:not([type='checkbox']):not([type='radio']),
+    select,
+    textarea {
+      font-size: 16px;
+    }
   }
 }
 
@@ -138,6 +161,13 @@
   .prose blockquote { @apply border-l-4 border-brand-200 pl-4 italic text-gray-600 my-4; }
   .prose code { @apply font-mono text-[0.9em] bg-surface-100 px-1.5 py-0.5 rounded; }
   .prose hr { @apply my-6 border-surface-200; }
+  /* JD/offer HTML is authored elsewhere (TipTap, uploaded docs, AI drafts), so
+     it can contain blocks far wider than a phone. Contain them here rather
+     than letting them stretch the page. */
+  .prose img { @apply max-w-full h-auto; }
+  .prose pre { @apply overflow-x-auto max-w-full; }
+  .prose table { @apply w-full; }
+  .prose :is(table, .table-wrap) { @apply block overflow-x-auto max-w-full; }
 }
 
 /* ────────────────────────────────────────────────────────────────

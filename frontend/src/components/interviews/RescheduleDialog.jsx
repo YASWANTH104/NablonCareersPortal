@@ -77,8 +77,8 @@ export default function RescheduleDialog({ interview, onClose, onSuccess }) {
   });
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-2xl shadow-modal w-full max-w-md mx-4 p-6">
+    <div className="fixed inset-0 z-[60] flex items-start sm:items-center justify-center bg-black/40 p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-modal w-full max-w-md my-8 sm:my-0 p-5 sm:p-6">
         <div className="flex items-center gap-2 mb-1">
           <RefreshCw className="w-4 h-4 text-brand-500" />
           <h3 className="font-display font-bold text-gray-900">Reschedule Interview</h3>
@@ -87,7 +87,7 @@ export default function RescheduleDialog({ interview, onClose, onSuccess }) {
           {interview.title || `Round ${interview.round_number}`}
         </p>
         <form onSubmit={handleSubmit((v) => updateMut.mutate(v))} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">New Date & Time *</label>
               <input

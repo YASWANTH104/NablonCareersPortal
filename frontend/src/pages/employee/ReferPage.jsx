@@ -68,7 +68,7 @@ function ReferModal({ job, onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
-        <div className="flex items-center justify-between p-6 border-b border-surface-200">
+        <div className="flex items-center justify-between p-4 sm:p-6 border-b border-surface-200">
           <div>
             <h2 className="font-display font-semibold text-gray-900">Refer a Candidate</h2>
             <p className="text-sm text-gray-500 mt-0.5">{job.title}</p>
@@ -78,8 +78,8 @@ function ReferModal({ job, onClose }) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+        <form onSubmit={handleSubmit(onSubmit)} className="p-4 sm:p-6 space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Full Name *</label>
               <input
@@ -101,7 +101,7 @@ function ReferModal({ job, onClose }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Phone</label>
               <input

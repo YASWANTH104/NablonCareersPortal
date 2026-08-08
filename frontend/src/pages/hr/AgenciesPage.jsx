@@ -174,7 +174,7 @@ function AgencyCard({ agency, perf, jobs }) {
   return (
     <div className="bg-white border border-surface-200 rounded-xl overflow-hidden hover:border-surface-300 transition-colors">
       <div
-        className="flex items-start gap-4 px-5 py-4 cursor-pointer"
+        className="flex flex-wrap items-start gap-3 sm:gap-4 px-4 sm:px-5 py-4 cursor-pointer"
         onClick={() => setExpanded((e) => !e)}
       >
         <div
@@ -202,7 +202,7 @@ function AgencyCard({ agency, perf, jobs }) {
           </div>
         </div>
 
-        <div className="flex items-center gap-3 flex-shrink-0 pt-1" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-3 flex-shrink-0 pt-1 w-full sm:w-auto flex-wrap" onClick={(e) => e.stopPropagation()}>
           <CopyButton text={portalUrl} label="Portal link" />
           <div className="w-px h-4 bg-surface-200" />
           <button
@@ -253,7 +253,7 @@ function AgencyCard({ agency, perf, jobs }) {
                   ))}
                 </select>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Max submissions (optional)</label>
                   <input
@@ -455,14 +455,14 @@ export default function AgenciesPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div>
           <h1 className="font-display text-xl font-bold text-gray-900">Recruiting Agencies</h1>
           <p className="text-sm text-gray-500 mt-0.5">Manage agencies, track performance, and generate trackable job links</p>
         </div>
         <button
           onClick={() => setShowCreate(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white text-sm font-semibold rounded-lg hover:bg-brand-600 transition-colors"
+          className="flex items-center justify-center gap-2 px-4 py-2 bg-brand-500 text-white text-sm font-semibold rounded-lg hover:bg-brand-600 transition-colors flex-shrink-0"
         >
           <Plus className="w-4 h-4" />
           Add agency

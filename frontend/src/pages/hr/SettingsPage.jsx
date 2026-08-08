@@ -182,8 +182,8 @@ function InviteModal({ onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md my-8 p-5 sm:p-6">
         <div className="flex items-center justify-between mb-5">
           <h3 className="font-display font-bold text-gray-900">Invite Team Member</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
@@ -207,7 +207,7 @@ function InviteModal({ onClose }) {
               ))}
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
               <input {...register('department')} className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" placeholder="Engineering" />
@@ -386,17 +386,17 @@ function TeamTab() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
         <p className="text-sm text-gray-500">All users with access to this portal.</p>
         <button
           onClick={() => setShowInvite(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-xl hover:bg-brand-600 transition-colors"
+          className="flex items-center justify-center gap-2 px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-xl hover:bg-brand-600 transition-colors flex-shrink-0"
         >
           <UserPlus className="w-3.5 h-3.5" /> Invite
         </button>
       </div>
 
-      <div className="flex gap-2 mb-3">
+      <div className="flex flex-col sm:flex-row gap-2 mb-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
@@ -436,7 +436,8 @@ function TeamTab() {
             {search ? 'No users match your search.' : 'No team members yet. Invite someone to get started.'}
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[720px]">
             <thead>
               <tr className="border-b border-surface-200 bg-surface-50">
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Name</th>
@@ -452,6 +453,7 @@ function TeamTab() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
@@ -467,7 +469,7 @@ export default function SettingsPage() {
 
   return (
     <div>
-      <div className="flex gap-1 bg-surface-100 rounded-xl p-1 mb-6 w-fit">
+      <div className="flex gap-1 flex-wrap bg-surface-100 rounded-xl p-1 mb-6 w-full sm:w-fit">
         {TABS.map(({ key, label, icon: Icon }) => (
           <button
             key={key}

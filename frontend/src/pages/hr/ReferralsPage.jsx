@@ -125,7 +125,8 @@ export default function ReferralsPage() {
             <p className="text-gray-500 text-sm">No referrals found.</p>
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[820px]">
             <thead>
               <tr className="border-b border-surface-200 bg-surface-50">
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Candidate</th>
@@ -214,6 +215,7 @@ export default function ReferralsPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
 
         {pages > 1 && (

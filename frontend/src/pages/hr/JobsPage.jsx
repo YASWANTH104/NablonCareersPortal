@@ -138,14 +138,14 @@ export default function HRJobsPage() {
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div>
           <h1 className="font-display text-xl font-bold text-gray-900">Job Postings</h1>
           <p className="text-sm text-gray-500 mt-0.5">Manage and publish open roles</p>
         </div>
         <button
           onClick={() => navigate('/hr/jobs/new')}
-          className="flex items-center gap-2 px-4 py-2.5 bg-brand-500 text-white font-medium rounded-lg text-sm hover:bg-brand-600 transition-colors"
+          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-brand-500 text-white font-medium rounded-lg text-sm hover:bg-brand-600 transition-colors w-full sm:w-auto"
         >
           <Plus className="w-4 h-4" />
           New job
@@ -153,7 +153,7 @@ export default function HRJobsPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-surface-100 rounded-xl p-1 mb-6 w-fit">
+      <div className="flex gap-1 flex-wrap bg-surface-100 rounded-xl p-1 mb-6 w-full sm:w-fit">
         {STATUS_TABS.map((tab) => (
           <button
             key={tab.value}
@@ -204,7 +204,7 @@ export default function HRJobsPage() {
             ))}
           </div>
         ) : data?.items?.length > 0 ? (
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-[1000px]">
             <thead>
               <tr className="bg-surface-50 border-b border-surface-100">
                 <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wide px-5 py-3">Title</th>

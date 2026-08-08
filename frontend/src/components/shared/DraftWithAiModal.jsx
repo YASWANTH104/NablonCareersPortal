@@ -43,9 +43,9 @@ export default function DraftWithAiModal({ context, onApply, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[85dvh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-surface-100">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-4 sm:py-5 border-b border-surface-100">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center">
               <Sparkles className="w-4 h-4 text-white" />
@@ -61,7 +61,7 @@ export default function DraftWithAiModal({ context, onApply, onClose }) {
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+        <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 space-y-4">
           {!hasTitle ? (
             <div className="flex items-start gap-2.5 text-sm text-yellow-800 bg-yellow-50 border border-yellow-200 rounded-lg p-3">
               <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
@@ -148,7 +148,7 @@ export default function DraftWithAiModal({ context, onApply, onClose }) {
 
         {/* Footer */}
         {draft && (
-          <div className="flex items-center gap-3 px-6 py-4 border-t border-surface-100">
+          <div className="flex flex-wrap items-center gap-3 px-4 sm:px-6 py-4 border-t border-surface-100">
             <button
               type="button"
               onClick={() => { onApply(draft); onClose(); }}

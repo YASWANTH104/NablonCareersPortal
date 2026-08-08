@@ -53,7 +53,7 @@ function StageBadge({ stage }) {
 function WithdrawConfirmModal({ app, onClose, onConfirm, isPending }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 sm:p-6">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center flex-shrink-0">
             <AlertTriangle className="w-5 h-5 text-red-500" />
@@ -116,15 +116,15 @@ function EditApplicationModal({ app, onClose, onSuccess }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200">
+    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-4 bg-black/40 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg my-8 sm:my-0 max-h-none sm:max-h-[90dvh] sm:overflow-y-auto">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-surface-200">
           <h2 className="font-semibold text-gray-900">Edit Application</h2>
           <button onClick={onClose} className="p-1 rounded-lg hover:bg-surface-100 text-gray-400">
             <X className="w-4 h-4" />
           </button>
         </div>
-        <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit(onSubmit)} className="p-4 sm:p-6 space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Resume URL</label>
             <input
@@ -142,7 +142,7 @@ function EditApplicationModal({ app, onClose, onSuccess }) {
               placeholder="Tell us why you're a great fit..."
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Current CTC</label>
               <input
@@ -162,7 +162,7 @@ function EditApplicationModal({ app, onClose, onSuccess }) {
               />
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">LinkedIn</label>
               <input
@@ -464,8 +464,8 @@ function OfferActionPanel({ applicationId }) {
 
             {pdfBlobUrl && (
               <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-                <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl flex flex-col" style={{ height: '90vh' }}>
-                  <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200 flex-shrink-0">
+                <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl flex flex-col" style={{ height: '90dvh' }}>
+                  <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-surface-200 flex-shrink-0">
                     <h3 className="font-semibold text-gray-900">
                       {offer.candidate_signature ? 'Signed Offer Letter' : 'Offer Letter'}
                     </h3>
@@ -547,7 +547,7 @@ function OfferActionPanel({ applicationId }) {
             </button>
           </div>
           <div className="bg-surface-50 border border-surface-200 rounded-lg p-3 space-y-2 mb-3 text-sm text-gray-700">
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
               <span className="text-gray-400 text-xs">Role</span>
               <span className="font-medium text-xs">{offer.designation}</span>
               {offer.salary_ctc && (
@@ -637,8 +637,8 @@ function OfferActionPanel({ applicationId }) {
 
       {pdfBlobUrl && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl flex flex-col" style={{ height: '90vh' }}>
-            <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200 flex-shrink-0">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl flex flex-col" style={{ height: '90dvh' }}>
+            <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-surface-200 flex-shrink-0">
               <h3 className="font-semibold text-gray-900">
                 {offer?.candidate_signature ? 'Signed Offer Letter' : 'Offer Letter'}
               </h3>
@@ -802,7 +802,7 @@ function SelfFeedbackModal({ interview, onClose }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 overflow-y-auto">
       <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg my-4">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-surface-100">
+        <div className="flex items-center justify-between px-4 sm:px-6 pt-5 sm:pt-6 pb-4 border-b border-surface-100">
           <div>
             <h2 className="font-display font-bold text-gray-900">How did your interview go?</h2>
             <p className="text-xs text-gray-400 mt-0.5">{interviewTitle} · {interviewDate}</p>
@@ -1099,7 +1099,7 @@ export default function MyApplicationsPage() {
                     : 'border-surface-200 hover:border-brand-200 hover:shadow-sm'
                 }`}
               >
-                <div className="flex items-start justify-between gap-4">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-4">
                   <div className="flex items-start gap-3 flex-1 min-w-0">
                     <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 ${
                       isOffer ? 'bg-emerald-50' : 'bg-brand-50'
@@ -1132,7 +1132,7 @@ export default function MyApplicationsPage() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className="flex items-center gap-2 flex-shrink-0 self-end sm:self-auto -mt-1 sm:mt-0">
                     <button
                       onClick={() => setResumeApp(app)}
                       className="p-1.5 text-gray-400 hover:text-brand-600 rounded-lg hover:bg-brand-50 transition-colors"

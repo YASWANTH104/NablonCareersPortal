@@ -91,7 +91,7 @@ function SubmitCandidateModal({ portalToken, assignmentId, jobTitle, onClose }) 
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl w-full max-w-lg my-8 p-6">
+      <div className="bg-white rounded-2xl w-full max-w-lg my-8 p-5 sm:p-6">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="text-base font-bold text-gray-900">Submit a candidate</h3>
@@ -208,13 +208,13 @@ function AssignmentDetail({ portalToken, assignmentId, jobTitle, onBack }) {
 
       <div className="space-y-2">
         {data?.candidates.map((c) => (
-          <div key={c.application_id} className="flex items-center justify-between bg-white border border-surface-200 rounded-xl px-5 py-4 hover:border-surface-300 transition-colors">
-            <div className="flex items-center gap-3">
+          <div key={c.application_id} className="flex flex-wrap items-center justify-between gap-3 bg-white border border-surface-200 rounded-xl px-4 sm:px-5 py-4 hover:border-surface-300 transition-colors">
+            <div className="flex items-center gap-3 min-w-0">
               <div className="w-8 h-8 rounded-full bg-brand-100 flex items-center justify-center text-xs font-bold text-brand-700 flex-shrink-0">
                 {c.candidate_name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
               </div>
-              <div>
-                <p className="text-sm font-medium text-gray-900">{c.candidate_name}</p>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-gray-900 truncate">{c.candidate_name}</p>
                 <p className="text-xs text-gray-400">Applied {formatDistanceToNow(new Date(c.applied_at), { addSuffix: true })}</p>
               </div>
             </div>
@@ -311,9 +311,9 @@ export default function AgencyPortalPage() {
                 <button
                   key={a.assignment_id}
                   onClick={() => setSelectedAssignment(a)}
-                  className="w-full text-left bg-white border border-surface-200 rounded-xl px-5 py-4 hover:border-brand-300 hover:shadow-sm transition-all"
+                  className="w-full text-left bg-white border border-surface-200 rounded-xl px-4 sm:px-5 py-4 hover:border-brand-300 hover:shadow-sm transition-all"
                 >
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-3 sm:gap-4">
                     <div className="w-9 h-9 rounded-lg bg-surface-100 flex items-center justify-center flex-shrink-0">
                       <Briefcase className="w-4 h-4 text-gray-500" />
                     </div>
@@ -322,7 +322,7 @@ export default function AgencyPortalPage() {
                         <p className="font-semibold text-gray-900 text-sm truncate">{a.job_title}</p>
                         <span className="text-sm font-bold text-gray-900 flex-shrink-0">{a.submission_count}</span>
                       </div>
-                      <div className="flex items-center gap-3 mt-1 mb-2">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 mb-2">
                         <span className="text-xs text-gray-500 flex items-center gap-1">
                           <Users className="w-3 h-3" />
                           submitted{a.max_submissions ? ` / ${a.max_submissions} max` : ''}

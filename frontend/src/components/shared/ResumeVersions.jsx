@@ -216,7 +216,7 @@ export default function ResumeVersions({
           <iframe
             src={resolveFileUrl(selected.file_url)}
             title={`Resume v${selected.version}`}
-            className="w-full h-[600px] border border-surface-200 rounded-lg"
+            className="w-full h-[60vh] min-h-[320px] max-h-[600px] border border-surface-200 rounded-lg"
           />
         ) : (
           <div className="flex items-center justify-center py-16 bg-surface-50 rounded-xl border border-dashed border-surface-300">
@@ -244,8 +244,8 @@ export function ResumeVersionsModal({ applicationId, jobTitle, canUpload, onClos
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="fixed inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-modal w-full max-w-lg z-10 max-h-[90vh] flex flex-col">
-        <div className="flex items-start justify-between px-6 py-4 border-b border-surface-200">
+      <div className="relative bg-white rounded-2xl shadow-modal w-full max-w-lg z-10 max-h-[90dvh] flex flex-col">
+        <div className="flex items-start justify-between px-4 sm:px-6 py-4 border-b border-surface-200">
           <div>
             <h2 className="font-display font-semibold text-gray-900">Resume</h2>
             {jobTitle && <p className="text-xs text-gray-500 mt-0.5">{jobTitle}</p>}
@@ -254,7 +254,7 @@ export function ResumeVersionsModal({ applicationId, jobTitle, canUpload, onClos
             <X className="w-4 h-4" />
           </button>
         </div>
-        <div className="overflow-y-auto p-6">
+        <div className="overflow-y-auto p-4 sm:p-6">
           <ResumeVersions applicationId={applicationId} canUpload={canUpload} showPreview={false} />
         </div>
       </div>

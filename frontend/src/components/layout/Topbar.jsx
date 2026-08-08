@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, Search, X, LogOut, User, ChevronRight, AlertTriangle } from 'lucide-react';
+import { Bell, Search, X, LogOut, User, ChevronRight, AlertTriangle, Menu } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
 import { useAuthStore } from '@/store/authStore';
+import { useUIStore } from '@/store/uiStore';
 import { notificationsApi } from '@/api/notifications';
 import { jobsApi } from '@/api/jobs';
 import { applicationsApi } from '@/api/applications';
@@ -40,7 +41,7 @@ function NotificationDropdown({ onClose }) {
   }
 
   return (
-    <div className="absolute right-0 top-11 z-50 w-80 bg-white border border-surface-200 rounded-xl shadow-xl overflow-hidden">
+    <div className="absolute right-0 top-11 z-50 w-[calc(100vw-2rem)] max-w-xs sm:w-80 sm:max-w-none bg-white border border-surface-200 rounded-xl shadow-xl overflow-hidden">
       <div className="flex items-center justify-between px-4 py-3 border-b border-surface-200">
         <span className="text-sm font-semibold text-gray-900">Notifications</span>
         {(data?.unread_count ?? 0) > 0 && (
@@ -241,7 +242,7 @@ function AccountDropdown({ user, onClose, onSignOut }) {
     : '/portal/profile';
 
   return (
-    <div ref={ref} className="absolute right-0 top-11 z-50 w-64 bg-white border border-surface-200 rounded-xl shadow-xl overflow-hidden">
+    <div ref={ref} className="absolute right-0 top-11 z-50 w-[calc(100vw-2rem)] max-w-[16rem] bg-white border border-surface-200 rounded-xl shadow-xl overflow-hidden">
       {/* User info */}
       <div className="px-4 py-3 border-b border-surface-200 bg-surface-50">
         <div className="flex items-center gap-3">
@@ -287,6 +288,7 @@ function AccountDropdown({ user, onClose, onSignOut }) {
 
 export default function Topbar({ title }) {
   const { user, logout } = useAuthStore();
+  const { toggleMobileNav } = useUIStore();
   const navigate = useNavigate();
   const [showNotifs, setShowNotifs] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
@@ -333,14 +335,25 @@ export default function Topbar({ title }) {
 
   return (
     <>
-      <header className="h-16 border-b border-surface-200 bg-white flex items-center justify-between px-6">
-        <h1 className="text-lg font-display font-semibold text-gray-900">{title}</h1>
+      <header className="h-16 border-b border-surface-200 bg-white flex items-center justify-between gap-2 px-3 sm:px-6">
+        <div className="flex items-center gap-1 min-w-0">
+          {/* Hamburger — opens the off-canvas sidebar below lg */}
+          <button
+            onClick={toggleMobileNav}
+            aria-label="Open menu"
+            className="lg:hidden -ml-1 w-9 h-9 rounded-lg flex items-center justify-center text-gray-600 hover:bg-surface-100 transition-colors flex-shrink-0"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+          <h1 className="text-base sm:text-lg font-display font-semibold text-gray-900 truncate">{title}</h1>
+        </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
           {/* Search button */}
           <button
             onClick={() => setShowSearch(true)}
-            className="flex items-center gap-2 h-9 px-3 rounded-lg text-gray-500 hover:bg-surface-100 transition-colors border border-surface-200 text-sm"
+            aria-label="Search"
+            className="flex items-center justify-center sm:justify-start gap-2 w-9 sm:w-auto h-9 sm:px-3 rounded-lg text-gray-500 hover:bg-surface-100 transition-colors border-0 sm:border border-surface-200 text-sm"
           >
             <Search className="w-4 h-4" />
             <span className="hidden sm:inline text-xs text-gray-400">Search</span>
@@ -393,8 +406,8 @@ export default function Topbar({ title }) {
 
       {/* Sign out confirmation */}
       {showLogoutConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 sm:p-6">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center flex-shrink-0">
                 <AlertTriangle className="w-5 h-5 text-red-500" />
@@ -404,7 +417,7 @@ export default function Topbar({ title }) {
                 <p className="text-sm text-gray-500">You will need to sign in again to continue.</p>
               </div>
             </div>
-            <div className="flex gap-3 justify-end mt-4">
+            <div className="flex flex-col-reverse sm:flex-row gap-3 sm:justify-end mt-4">
               <button
                 onClick={() => setShowLogoutConfirm(false)}
                 className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 border border-surface-200 rounded-lg hover:bg-surface-50 transition-colors"

@@ -394,8 +394,8 @@ export default function OfferBuilderPage() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between mb-5 flex-shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5 flex-shrink-0">
+        <div className="flex items-start sm:items-center gap-3 min-w-0">
           <button
             onClick={() => {
               const appId = isNew ? applicationId : offer?.application_id;
@@ -426,7 +426,7 @@ export default function OfferBuilderPage() {
         </div>
 
         {/* Mobile panel toggle */}
-        <div className="flex gap-1 bg-surface-100 rounded-xl p-1 lg:hidden flex-shrink-0">
+        <div className="flex gap-1 bg-surface-100 rounded-xl p-1 lg:hidden flex-shrink-0 self-stretch sm:self-auto">
           {['form', 'preview'].map((p) => (
             <button
               key={p}
@@ -450,9 +450,9 @@ export default function OfferBuilderPage() {
       )}
 
       {/* Split layout */}
-      <div className="flex gap-5 flex-1 min-h-0">
+      <div className="flex flex-col lg:flex-row gap-5 flex-1 min-h-0">
         {/* Left column */}
-        <div className={`flex-shrink-0 w-96 overflow-y-auto space-y-5 ${activePanel === 'preview' ? 'hidden lg:block' : ''}`}>
+        <div className={`w-full lg:w-96 lg:flex-shrink-0 overflow-y-auto space-y-5 ${activePanel === 'preview' ? 'hidden lg:block' : ''}`}>
           {/* Candidate card */}
           {offer && (
             <div className="bg-white border border-surface-200 rounded-2xl p-4 flex items-center gap-3">
@@ -619,14 +619,14 @@ export default function OfferBuilderPage() {
             </div>
             <span className="text-xs text-gray-300">Variables are substituted in real-time</span>
           </div>
-          <div className="flex-1 bg-surface-100 rounded-2xl overflow-auto p-6">
+          <div className="flex-1 bg-surface-100 rounded-2xl overflow-auto p-3 sm:p-6">
             <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-sm border border-surface-200 min-h-full">
-              <div className="flex items-center gap-2 px-6 py-3 border-b border-surface-100">
+              <div className="flex items-center gap-2 px-4 sm:px-6 py-3 border-b border-surface-100">
                 <FileText className="w-4 h-4 text-gray-300" />
                 <span className="text-xs text-gray-400">Offer Letter</span>
               </div>
               <div
-                className="p-8"
+                className="p-4 sm:p-8 overflow-x-auto"
                 dangerouslySetInnerHTML={{ __html: previewHtml }}
               />
             </div>

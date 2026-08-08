@@ -78,7 +78,7 @@ export default function MonthCalendar({
               role="gridcell"
               tabIndex={0}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectDay(day); } }}
-              className={`relative min-h-[7rem] sm:min-h-[7.5rem] p-1.5 sm:p-2 cursor-pointer transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500 ${
+              className={`relative min-h-[4.25rem] sm:min-h-[7.5rem] p-1.5 sm:p-2 cursor-pointer transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500 ${
                 inMonth ? 'bg-white hover:bg-surface-50' : 'bg-surface-50/70 hover:bg-surface-100/70'
               } ${selected ? 'ring-2 ring-inset ring-brand-400 bg-brand-50/40' : ''}`}
             >

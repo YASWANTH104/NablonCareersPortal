@@ -105,15 +105,15 @@ function TemplateModal({ onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-surface-100">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90dvh] flex flex-col">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-surface-100">
           <h2 className="font-display text-lg font-bold text-gray-900">Offer Templates</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
         </div>
 
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-col sm:flex-row flex-1 overflow-hidden">
           {/* Template list */}
-          <div className="w-64 border-r border-surface-100 p-4 overflow-y-auto flex-shrink-0">
+          <div className="w-full sm:w-64 max-h-44 sm:max-h-none border-b sm:border-b-0 sm:border-r border-surface-100 p-4 overflow-y-auto flex-shrink-0">
             <button
               onClick={startNew}
               className="w-full flex items-center gap-2 px-3 py-2 bg-brand-50 text-brand-600 rounded-lg text-sm font-medium hover:bg-brand-100 transition-colors mb-3"
@@ -154,7 +154,7 @@ function TemplateModal({ onClose }) {
           </div>
 
           {/* Editor */}
-          <div className="flex-1 overflow-y-auto p-6">
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6">
             {!editing ? (
               <div className="flex flex-col items-center justify-center h-full text-gray-400">
                 <FileText className="w-12 h-12 mb-3" />
@@ -258,12 +258,12 @@ export default function OffersPage() {
       {showTemplates && <TemplateModal onClose={() => setShowTemplates(false)} />}
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div>
           <h1 className="font-display text-xl font-bold text-gray-900">Offer Letters</h1>
           <p className="text-sm text-gray-500 mt-0.5">{data?.total ?? 0} offer{data?.total !== 1 ? 's' : ''}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => navigate('/hr/applicants')}
             className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white text-sm font-semibold rounded-xl hover:bg-brand-600 transition-colors"
@@ -280,7 +280,7 @@ export default function OffersPage() {
       </div>
 
       {/* Status tabs */}
-      <div className="flex gap-1 bg-surface-100 rounded-xl p-1 mb-6 w-fit flex-wrap">
+      <div className="flex gap-1 bg-surface-100 rounded-xl p-1 mb-6 w-full sm:w-fit flex-wrap">
         {STATUS_TABS.map((tab) => (
           <button
             key={tab.value}
@@ -318,8 +318,8 @@ export default function OffersPage() {
           </button>
         </div>
       ) : (
-        <div className="bg-white border border-surface-200 rounded-2xl overflow-hidden">
-          <table className="w-full">
+        <div className="bg-white border border-surface-200 rounded-2xl overflow-x-auto">
+          <table className="w-full min-w-[860px]">
             <thead>
               <tr className="border-b border-surface-100 text-xs text-gray-400 uppercase tracking-wide">
                 <th className="text-left px-5 py-3 font-medium">Candidate</th>

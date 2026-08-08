@@ -12,7 +12,7 @@ export default function ConfirmDialog({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl w-full max-w-sm p-6">
+      <div className="bg-white rounded-2xl w-full max-w-sm p-5 sm:p-6">
         <div className="flex items-start gap-3 mb-4">
           <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
             danger ? 'bg-red-50' : 'bg-amber-50'

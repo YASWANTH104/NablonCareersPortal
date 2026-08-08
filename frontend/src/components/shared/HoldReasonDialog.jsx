@@ -5,7 +5,7 @@ export default function HoldReasonDialog({ candidateName, isPending, onCancel, o
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl w-full max-w-sm p-6">
+      <div className="bg-white rounded-2xl w-full max-w-sm p-5 sm:p-6">
         <h3 className="text-base font-bold text-gray-900 mb-1">Put {candidateName} on hold</h3>
         <p className="text-xs text-gray-500 mb-3">
           They'll stay in their current stage — just flagged as paused until you resume. No one can move

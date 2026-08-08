@@ -270,7 +270,7 @@ export default function JobEditPage() {
   return (
     <div className="max-w-3xl">
       {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex flex-wrap items-center gap-3 mb-6">
         <button
           onClick={() => navigate('/hr/jobs')}
           className="p-2 rounded-lg text-gray-400 hover:bg-surface-100 hover:text-gray-600 transition-colors"
@@ -292,7 +292,7 @@ export default function JobEditPage() {
           )}
         </div>
         {isEdit && existing && (
-          <div className="ml-auto flex gap-2">
+          <div className="w-full sm:w-auto sm:ml-auto flex gap-2 flex-wrap">
             {existing.status === 'draft' && (
               <button
                 onClick={() => statusMutation.mutate('published')}
@@ -326,7 +326,7 @@ export default function JobEditPage() {
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
         {/* Basic info */}
-        <section className="bg-white rounded-xl border border-surface-200 p-6 space-y-5">
+        <section className="bg-white rounded-xl border border-surface-200 p-4 sm:p-6 space-y-5">
           <h2 className="font-display font-semibold text-gray-900 text-base">Basic info</h2>
 
           <div className="grid sm:grid-cols-2 gap-4">
@@ -448,7 +448,7 @@ export default function JobEditPage() {
         </section>
 
         {/* Compensation */}
-        <section className="bg-white rounded-xl border border-surface-200 p-6 space-y-5">
+        <section className="bg-white rounded-xl border border-surface-200 p-4 sm:p-6 space-y-5">
           <h2 className="font-display font-semibold text-gray-900 text-base">Compensation</h2>
 
           <div className="grid sm:grid-cols-3 gap-4">
@@ -478,8 +478,8 @@ export default function JobEditPage() {
         </section>
 
         {/* JD document */}
-        <section className="bg-white rounded-xl border border-surface-200 p-6 space-y-4">
-          <div className="flex items-center justify-between">
+        <section className="bg-white rounded-xl border border-surface-200 p-4 sm:p-6 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
               <h2 className="font-display font-semibold text-gray-900 text-base">Job description document</h2>
               <p className="text-xs text-gray-500 mt-0.5">
@@ -525,8 +525,8 @@ export default function JobEditPage() {
         </section>
 
         {/* Content */}
-        <section className="bg-white rounded-xl border border-surface-200 p-6 space-y-5">
-          <div className="flex items-center justify-between">
+        <section className="bg-white rounded-xl border border-surface-200 p-4 sm:p-6 space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="font-display font-semibold text-gray-900 text-base">Job content</h2>
             <button
               type="button"
@@ -589,7 +589,7 @@ export default function JobEditPage() {
         </section>
 
         {/* Skills */}
-        <section className="bg-white rounded-xl border border-surface-200 p-6 space-y-4">
+        <section className="bg-white rounded-xl border border-surface-200 p-4 sm:p-6 space-y-4">
           <h2 className="font-display font-semibold text-gray-900 text-base">Skills required</h2>
 
           <div className="flex gap-2">
