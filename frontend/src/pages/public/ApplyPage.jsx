@@ -9,6 +9,7 @@ import toast from 'react-hot-toast';
 import { ArrowLeft, Upload, FileText, X, Loader2, CheckCircle } from 'lucide-react';
 import { jobsApi } from '@/api/jobs';
 import { applicationsApi } from '@/api/applications';
+import { FREE_TEXT_MAX } from '@/constants/fieldLimits';
 import { uploadsApi } from '@/api/uploads';
 import { usersApi } from '@/api/users';
 import { useAuthStore } from '@/store/authStore';
@@ -21,9 +22,9 @@ const schema = z.object({
   current_designation: z.string().min(1, 'Current designation is required'),
   education: z.string().min(1, 'Education is required'),
   skills: z.string().optional(),
-  current_ctc: z.string().optional(),
-  expected_ctc: z.string().optional(),
-  notice_period: z.string().optional(),
+  current_ctc: z.string().max(FREE_TEXT_MAX, 'Please keep this under 255 characters').optional(),
+  expected_ctc: z.string().max(FREE_TEXT_MAX, 'Please keep this under 255 characters').optional(),
+  notice_period: z.string().max(FREE_TEXT_MAX, 'Please keep this under 255 characters').optional(),
   cover_letter: z.string().optional(),
   linkedin_url: z.string().url('Enter a valid URL').optional().or(z.literal('')),
   portfolio_url: z.string().url('Enter a valid URL').optional().or(z.literal('')),
@@ -392,6 +393,7 @@ export default function ApplyPage() {
               </label>
               <input
                 {...register('current_ctc')}
+                maxLength={FREE_TEXT_MAX}
                 placeholder="e.g. 18 LPA"
                 className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
               />
@@ -402,6 +404,7 @@ export default function ApplyPage() {
               </label>
               <input
                 {...register('expected_ctc')}
+                maxLength={FREE_TEXT_MAX}
                 placeholder="e.g. 24 LPA"
                 className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
               />
@@ -412,6 +415,7 @@ export default function ApplyPage() {
               </label>
               <input
                 {...register('notice_period')}
+                maxLength={FREE_TEXT_MAX}
                 placeholder="e.g. 30 days / Immediate"
                 className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
               />

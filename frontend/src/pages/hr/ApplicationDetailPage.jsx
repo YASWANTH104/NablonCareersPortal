@@ -20,6 +20,7 @@ import { offersApi } from '@/api/offers';
 import { usersApi } from '@/api/users';
 import { documentsApi } from '@/api/documents';
 import ResumeVersions from '@/components/shared/ResumeVersions';
+import { FREE_TEXT_MAX } from '@/constants/fieldLimits';
 import ScheduleTimeGrid from '@/components/interviews/ScheduleTimeGrid';
 import StageReasonDialog from '@/components/shared/StageReasonDialog';
 import HoldReasonDialog from '@/components/shared/HoldReasonDialog';
@@ -1300,10 +1301,19 @@ function EditCandidateDetailsModal({ app, onClose, onSuccess }) {
     mut.mutate(values);
   };
 
+  // CTC and notice period are varchar(255) on the applications table; the rest
+  // of these route to CandidateProfile, which stores them as unbounded Text.
+  const CAPPED_FIELDS = new Set(['current_ctc', 'expected_ctc', 'notice_period']);
+
   const Field = ({ name, label, placeholder, full }) => (
     <div className={full ? 'sm:col-span-2' : ''}>
       <label className="block text-xs font-medium text-gray-700 mb-1">{label}</label>
-      <input {...register(name)} placeholder={placeholder} className={DETAIL_INPUT} />
+      <input
+        {...register(name)}
+        maxLength={CAPPED_FIELDS.has(name) ? FREE_TEXT_MAX : undefined}
+        placeholder={placeholder}
+        className={DETAIL_INPUT}
+      />
     </div>
   );
 

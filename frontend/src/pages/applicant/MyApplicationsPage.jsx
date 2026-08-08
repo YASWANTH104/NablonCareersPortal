@@ -15,6 +15,7 @@ import { documentsApi } from '@/api/documents';
 import { offersApi } from '@/api/offers';
 import client from '@/api/client';
 import { ResumeVersionsModal } from '@/components/shared/ResumeVersions';
+import { FREE_TEXT_MAX } from '@/constants/fieldLimits';
 
 const STAGE_CONFIG = {
   applied:         { label: 'Applied',          color: 'bg-blue-100 text-blue-700' },
@@ -146,6 +147,7 @@ function EditApplicationModal({ app, onClose, onSuccess }) {
               <label className="block text-xs font-medium text-gray-700 mb-1">Current CTC</label>
               <input
                 {...register('current_ctc')}
+                maxLength={FREE_TEXT_MAX}
                 className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
                 placeholder="e.g. 18 LPA"
               />
@@ -154,6 +156,7 @@ function EditApplicationModal({ app, onClose, onSuccess }) {
               <label className="block text-xs font-medium text-gray-700 mb-1">Expected CTC</label>
               <input
                 {...register('expected_ctc')}
+                maxLength={FREE_TEXT_MAX}
                 className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
                 placeholder="e.g. 24 LPA"
               />

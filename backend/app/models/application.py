@@ -22,9 +22,13 @@ class Application(Base):
     github_url: Mapped[str | None] = mapped_column(Text)
     # Compensation — collected optionally at apply time, editable later.
     # Free text (e.g. "18 LPA", "₹24,00,000") rather than numeric.
-    current_ctc: Mapped[str | None] = mapped_column(String(50))
-    expected_ctc: Mapped[str | None] = mapped_column(String(50))
-    notice_period: Mapped[str | None] = mapped_column(String(50))
+    # 255, not 50: these are deliberately free-text, and real answers overflowed
+    # a 50-char cap ("3 months, negotiable — currently serving until 15 Sept"),
+    # which surfaced as a Postgres StringDataRightTruncationError at commit and
+    # a bare 500 for whoever was submitting. See _validate_free_text_lengths.
+    current_ctc: Mapped[str | None] = mapped_column(String(255))
+    expected_ctc: Mapped[str | None] = mapped_column(String(255))
+    notice_period: Mapped[str | None] = mapped_column(String(255))
     answers: Mapped[dict] = mapped_column(JSONB, default=dict)
 
     stage: Mapped[str] = mapped_column(String(50), default="applied", index=True)

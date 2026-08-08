@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import toast from 'react-hot-toast';
 import { Upload, FileText, X, Loader2, Sparkles } from 'lucide-react';
+import { FREE_TEXT_MAX, capFreeText } from '@/constants/fieldLimits';
 
 const EMPTY = {
   full_name: '',
@@ -56,7 +57,10 @@ export default function CandidateIntakeForm({ onParse, onSubmit, submitLabel = '
         setFields((prev) => {
           const next = { ...prev };
           Object.keys(EMPTY).forEach((key) => {
-            if (!prev[key] && data[key]) next[key] = data[key];
+            // Capped here as well as on the inputs: the parser writes these
+            // straight into state, where maxLength doesn't apply, and a wordy
+            // AI-extracted notice period is exactly what overflowed the column.
+            if (!prev[key] && data[key]) next[key] = capFreeText(data[key]);
           });
           return next;
         });
@@ -191,15 +195,15 @@ export default function CandidateIntakeForm({ onParse, onSubmit, submitLabel = '
       <div className="grid sm:grid-cols-3 gap-3">
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1">Current CTC</label>
-          <input value={fields.current_ctc} onChange={setField('current_ctc')} placeholder="e.g. 18 LPA" className={inputCls} />
+          <input value={fields.current_ctc} onChange={setField('current_ctc')} maxLength={FREE_TEXT_MAX} placeholder="e.g. 18 LPA" className={inputCls} />
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1">Expected CTC</label>
-          <input value={fields.expected_ctc} onChange={setField('expected_ctc')} placeholder="e.g. 24 LPA" className={inputCls} />
+          <input value={fields.expected_ctc} onChange={setField('expected_ctc')} maxLength={FREE_TEXT_MAX} placeholder="e.g. 24 LPA" className={inputCls} />
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1">Notice period</label>
-          <input value={fields.notice_period} onChange={setField('notice_period')} placeholder="e.g. 30 days" className={inputCls} />
+          <input value={fields.notice_period} onChange={setField('notice_period')} maxLength={FREE_TEXT_MAX} placeholder="e.g. 30 days" className={inputCls} />
         </div>
       </div>
 

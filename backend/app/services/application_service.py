@@ -54,6 +54,27 @@ def _app_to_dict(app: Application) -> dict:
         "updated_at": app.updated_at,
     }
 
+FREE_TEXT_MAX = 255
+
+_FREE_TEXT_LABELS = {
+    "current_ctc": "Current CTC",
+    "expected_ctc": "Expected CTC",
+    "notice_period": "Notice period",
+}
+
+
+def _validate_free_text_lengths(**values: Optional[str]) -> None:
+    too_long = [
+        f"{_FREE_TEXT_LABELS[field]} ({len(value.strip())} characters)"
+        for field, value in values.items()
+        if value and len(value.strip()) > FREE_TEXT_MAX
+    ]
+    if too_long:
+        raise HTTPException(
+            400,
+            f"Please shorten to under {FREE_TEXT_MAX} characters: {', '.join(too_long)}",
+        )
+
 
 async def submit_application(
     db: AsyncSession,
@@ -61,6 +82,12 @@ async def submit_application(
     applicant_id: uuid.UUID,
 ) -> Application:
     from app.services import duplicate_detection_service as dupes
+
+    _validate_free_text_lengths(
+        current_ctc=data.current_ctc,
+        expected_ctc=data.expected_ctc,
+        notice_period=data.notice_period,
+    )
 
     # Block reapplication within 6 months of any rejection — same account, so this
     # is authoritative (unlike the fuzzy name match below).
@@ -214,6 +241,13 @@ async def submit_sourced_application(
     from app.models.job import Job
     from app.utils.security import hash_password, generate_token
     from app.services import duplicate_detection_service as dupes
+
+    # Before any writes — a failure here must not leave a half-created user.
+    _validate_free_text_lengths(
+        current_ctc=current_ctc,
+        expected_ctc=expected_ctc,
+        notice_period=notice_period,
+    )
 
     job = await db.get(Job, job_id)
     if not job:
@@ -959,6 +993,12 @@ async def update_application(
             )
 
     payload = data.model_dump(exclude_unset=True)
+
+    _validate_free_text_lengths(**{
+        field: payload[field]
+        for field in _FREE_TEXT_LABELS
+        if field in payload
+    })
 
     # Route profile fields to CandidateProfile and DOB to the user record.
     profile_updates = {k: payload.pop(k) for k in _PROFILE_UPDATE_FIELDS if k in payload}
