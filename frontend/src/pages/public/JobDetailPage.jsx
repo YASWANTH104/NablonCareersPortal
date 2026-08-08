@@ -64,8 +64,8 @@ function JdPdfModal({ url, name, onClose }) {
   const isPdf = /\.pdf($|\?)/i.test(name || url || '') || (!name && /\.pdf($|\?)/i.test(url));
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl flex flex-col" style={{ height: '88vh' }}>
-        <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200 flex-shrink-0">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl flex flex-col" style={{ height: '88dvh' }}>
+        <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-surface-200 flex-shrink-0">
           <h3 className="font-display font-semibold text-gray-900 truncate pr-4">
             {name || 'Job description'}
           </h3>

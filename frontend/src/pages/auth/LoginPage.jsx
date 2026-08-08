@@ -90,6 +90,11 @@ export default function LoginPage() {
         {msLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <MicrosoftLogo />}
         Sign in with Microsoft
       </button>
+      {/* Candidates share this page, so say who the button is for — their
+          Microsoft account is not in the Nablon tenant and would just fail. */}
+      <p className="-mt-3 mb-5 text-center text-xs text-gray-400">
+        For Nablon staff — your account is created on first sign-in.
+      </p>
 
       <div className="flex items-center gap-3 mb-5">
         <div className="h-px flex-1 bg-surface-200" />

@@ -311,17 +311,17 @@ function ScheduleInterviewDialog({ applicationId, defaultRoundNumber = 1, onClos
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-modal w-full max-w-3xl max-h-[92vh] overflow-y-auto">
-        <div className="sticky top-0 bg-white border-b border-surface-200 px-6 py-4 z-10">
+      <div className="bg-white rounded-2xl shadow-modal w-full max-w-3xl max-h-[92dvh] overflow-y-auto">
+        <div className="sticky top-0 bg-white border-b border-surface-200 px-4 sm:px-6 py-4 z-10">
           <h3 className="font-display font-bold text-gray-900">Schedule Interview</h3>
           <p className="text-xs text-gray-500 mt-0.5">Pick the panel, then a day, then an open slot.</p>
         </div>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-6">
+        <form onSubmit={handleSubmit(onSubmit)} className="p-4 sm:p-6 space-y-6">
           {/* ── 1. What ──────────────────────────────────────────── */}
           <section className="space-y-4">
             <StepHeading step={1} title="Round details" />
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Round #</label>
                 <input
@@ -703,12 +703,12 @@ function ScheduleAssessmentDialog({ applicationId, onClose, onSuccess }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-5 sm:p-6 max-h-[90dvh] overflow-y-auto">
         <h3 className="font-display font-bold text-gray-900 mb-5">Schedule Assessment</h3>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="col-span-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
               <input
                 {...register('title')}
@@ -861,11 +861,11 @@ function RescheduleInterviewDialog({ interview, onClose, onSuccess }) {
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 sm:p-6 max-h-[90dvh] overflow-y-auto">
         <h3 className="font-display font-bold text-gray-900 mb-5">Reschedule Interview</h3>
         <form onSubmit={handleSubmit((v) => updateMutation.mutate(v))} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">New Date & Time *</label>
               <input
@@ -1056,7 +1056,7 @@ function FeedbackForm({ interviewId, onSuccess }) {
       </div>
 
       {/* Text fields */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Strengths</label>
           <textarea
@@ -1212,7 +1212,7 @@ function InterviewFeedbackCard({ fb, interview }) {
 
       {/* Scores grid */}
       {scores.length > 0 && (
-        <div className="grid grid-cols-4 gap-3 mb-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
           {scores.map(({ label, val }) => (
             <div key={label} className="bg-surface-50 rounded-lg p-3 text-center">
               <p className="text-lg font-bold text-gray-900">{val}<span className="text-xs text-gray-400 font-normal">/5</span></p>
@@ -1224,7 +1224,7 @@ function InterviewFeedbackCard({ fb, interview }) {
 
       {/* Strengths / Weaknesses */}
       {(fb.strengths || fb.weaknesses) && (
-        <div className="grid grid-cols-2 gap-4 text-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
           {fb.strengths && (
             <div>
               <p className="text-xs font-semibold text-green-700 mb-1 flex items-center gap-1">
@@ -1320,13 +1320,13 @@ function EditCandidateDetailsModal({ app, onClose, onSuccess }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 overflow-y-auto">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl my-6">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-surface-200">
           <h2 className="font-semibold text-gray-900">Edit candidate details</h2>
           <button onClick={onClose} className="p-1 rounded-lg hover:bg-surface-100 text-gray-400">
             <X className="w-4 h-4" />
           </button>
         </div>
-        <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+        <form onSubmit={handleSubmit(onSubmit)} className="p-4 sm:p-6 space-y-4 max-h-[75dvh] overflow-y-auto">
           <div className="grid sm:grid-cols-2 gap-3">
             <Field name="current_company" label="Current company" placeholder="Company (or 'Fresher')" />
             <Field name="current_designation" label="Current designation" placeholder="e.g. Senior Data Scientist" />
@@ -1576,8 +1576,8 @@ export default function ApplicationDetailPage() {
       </Link>
 
       {/* Header card */}
-      <div className="bg-white rounded-2xl border border-surface-200 p-6 mb-6">
-        <div className="flex items-start gap-4">
+      <div className="bg-white rounded-2xl border border-surface-200 p-4 sm:p-6 mb-6">
+        <div className="flex flex-wrap items-start gap-4">
           {/* Avatar */}
           <div className="w-14 h-14 rounded-full bg-brand-100 flex items-center justify-center flex-shrink-0 text-xl font-bold text-brand-700">
             {(app.applicant?.full_name ?? '?').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
@@ -1586,7 +1586,7 @@ export default function ApplicationDetailPage() {
           {/* Info */}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="font-display text-2xl font-bold text-gray-900">
+              <h1 className="font-display text-xl sm:text-2xl font-bold text-gray-900 break-words">
                 {app.applicant?.full_name ?? 'Unknown'}
               </h1>
               <button
@@ -1608,7 +1608,7 @@ export default function ApplicationDetailPage() {
           </div>
 
           {/* Stage control */}
-          <div className="flex items-center gap-3 flex-shrink-0">
+          <div className="flex items-center gap-3 flex-shrink-0 w-full sm:w-auto flex-wrap">
             <div className="text-xs text-gray-400">
               Applied {formatDistanceToNow(new Date(app.applied_at), { addSuffix: true })}
             </div>
@@ -1976,7 +1976,7 @@ export default function ApplicationDetailPage() {
                     </div>
                   </div>
 
-                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-600">
+                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-gray-600">
                     <div className="flex items-center gap-1.5">
                       <Calendar className="w-3.5 h-3.5 text-gray-400" />
                       {format(new Date(interview.scheduled_at), 'PPp')}
@@ -1990,13 +1990,13 @@ export default function ApplicationDetailPage() {
                         href={interview.meeting_link}
                         target="_blank"
                         rel="noreferrer"
-                        className="flex items-center gap-1.5 text-brand-600 hover:text-brand-700 col-span-2"
+                        className="flex items-center gap-1.5 text-brand-600 hover:text-brand-700 sm:col-span-2"
                       >
                         <ExternalLink className="w-3.5 h-3.5" />
                         Join meeting
                       </a>
                     ) : interview.location ? (
-                      <div className="flex items-center gap-1.5 col-span-2">
+                      <div className="flex items-center gap-1.5 sm:col-span-2">
                         {interview.interview_type === 'phone' ? (
                           <Phone className="w-3.5 h-3.5 text-gray-400" />
                         ) : (
@@ -2104,7 +2104,7 @@ export default function ApplicationDetailPage() {
                   </div>
                 </div>
 
-                <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-600">
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-gray-600">
                   {a.deadline && (
                     <div className="flex items-center gap-1.5">
                       <Clock className="w-3.5 h-3.5 text-orange-400" />
@@ -2122,7 +2122,7 @@ export default function ApplicationDetailPage() {
                       href={a.platform_link}
                       target="_blank"
                       rel="noreferrer"
-                      className="flex items-center gap-1.5 text-brand-600 hover:text-brand-700 col-span-2"
+                      className="flex items-center gap-1.5 text-brand-600 hover:text-brand-700 sm:col-span-2"
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
                       Assessment link
@@ -2446,7 +2446,7 @@ export default function ApplicationDetailPage() {
               </div>
 
               {/* Details grid */}
-              <dl className="grid grid-cols-2 gap-4 text-sm border-t border-surface-100 pt-5">
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm border-t border-surface-100 pt-5">
                 <div>
                   <dt className="text-xs text-gray-400">Designation</dt>
                   <dd className="text-gray-800 font-medium mt-0.5">{offerData.designation}</dd>
@@ -2511,7 +2511,7 @@ export default function ApplicationDetailPage() {
 
               {offerPdfUrl && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-                  <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl flex flex-col" style={{ height: '90vh' }}>
+                  <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl flex flex-col" style={{ height: '90dvh' }}>
                     <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200 flex-shrink-0">
                       <h3 className="font-display font-semibold text-gray-900">
                         {offerData.candidate_signature ? 'Signed Offer Letter' : 'Offer Letter'}

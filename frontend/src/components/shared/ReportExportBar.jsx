@@ -38,7 +38,7 @@ export default function ReportExportBar({ report, reportLabel, extraParams = {} 
 
   return (
     <>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <button
           onClick={() => downloadMut.mutate()}
           disabled={downloadMut.isPending}

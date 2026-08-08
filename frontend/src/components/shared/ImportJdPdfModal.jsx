@@ -33,9 +33,9 @@ export default function ImportJdPdfModal({ onApplied, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[85dvh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-surface-100">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-4 sm:py-5 border-b border-surface-100">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center">
               <FileText className="w-4 h-4 text-white" />
@@ -51,13 +51,13 @@ export default function ImportJdPdfModal({ onApplied, onClose }) {
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+        <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 space-y-4">
           {/* Dropzone */}
           <div
             onClick={() => inputRef.current?.click()}
             onDragOver={(e) => e.preventDefault()}
             onDrop={onDrop}
-            className="cursor-pointer border-2 border-dashed border-surface-300 rounded-xl px-6 py-8 text-center hover:border-brand-300 hover:bg-brand-50/40 transition-colors"
+            className="cursor-pointer border-2 border-dashed border-surface-300 rounded-xl px-4 sm:px-6 py-8 text-center hover:border-brand-300 hover:bg-brand-50/40 transition-colors"
           >
             <input
               ref={inputRef}
@@ -135,7 +135,7 @@ export default function ImportJdPdfModal({ onApplied, onClose }) {
 
         {/* Footer */}
         {result && (
-          <div className="flex items-center gap-3 px-6 py-4 border-t border-surface-100">
+          <div className="flex flex-wrap items-center gap-3 px-4 sm:px-6 py-4 border-t border-surface-100">
             <button
               type="button"
               onClick={() => { onApplied(result); onClose(); }}

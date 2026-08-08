@@ -36,10 +36,10 @@ export default function StageReasonDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="fixed inset-0 bg-black/40" onClick={onCancel} />
-      <div className="relative bg-white rounded-2xl shadow-modal w-full max-w-lg z-10 flex flex-col max-h-[90vh]">
+      <div className="relative bg-white rounded-2xl shadow-modal w-full max-w-lg z-10 flex flex-col max-h-[90dvh]">
 
         {/* Header */}
-        <div className="flex items-start gap-3 p-6 pb-4 flex-shrink-0">
+        <div className="flex items-start gap-3 p-5 sm:p-6 pb-4 flex-shrink-0">
           <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${isReject ? 'bg-red-100' : 'bg-amber-100'}`}>
             {isReject ? <XCircle className="w-5 h-5 text-red-600" /> : <UserMinus className="w-5 h-5 text-amber-600" />}
           </div>
@@ -52,7 +52,7 @@ export default function StageReasonDialog({
         </div>
 
         {/* Body — scrollable */}
-        <div className="overflow-y-auto px-6 pb-2 space-y-4 flex-1">
+        <div className="overflow-y-auto px-5 sm:px-6 pb-2 space-y-4 flex-1">
           {isReject && (
             interviews.length === 0 ? (
               <p className="text-sm text-gray-400 text-center py-6">No interviews on record for this candidate.</p>
@@ -129,7 +129,7 @@ export default function StageReasonDialog({
         </div>
 
         {/* Footer */}
-        <div className="flex gap-3 justify-end px-6 py-4 border-t border-surface-100 flex-shrink-0">
+        <div className="flex flex-col-reverse sm:flex-row gap-3 sm:justify-end px-5 sm:px-6 py-4 border-t border-surface-100 flex-shrink-0">
           <button
             type="button"
             onClick={onCancel}

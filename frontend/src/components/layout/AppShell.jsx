@@ -27,11 +27,11 @@ export default function AppShell() {
   const title = getPageTitle(location.pathname);
 
   return (
-    <div className="flex h-screen bg-surface-50 overflow-hidden">
+    <div className="flex h-[100dvh] bg-surface-50 overflow-hidden">
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0">
         <Topbar title={title} />
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6">
           <Outlet />
         </main>
       </div>

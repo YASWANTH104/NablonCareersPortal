@@ -249,7 +249,7 @@ function ExcelTab({ jobs, onDone }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between bg-surface-50 border border-surface-200 rounded-lg px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 bg-surface-50 border border-surface-200 rounded-lg px-4 py-3">
         <p className="text-xs text-gray-500">
           Needs <span className="font-medium text-gray-700">Full Name</span> and <span className="font-medium text-gray-700">Email</span> columns — everything else is optional.
         </p>
@@ -317,7 +317,7 @@ export default function BulkUploadModal({ jobs, onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto">
       <div className="bg-white rounded-2xl w-full max-w-xl my-8">
-        <div className="flex items-center justify-between px-6 py-5 border-b border-surface-100">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-4 sm:py-5 border-b border-surface-100">
           <div>
             <h3 className="text-base font-bold text-gray-900">Bulk upload candidates</h3>
             <p className="text-xs text-gray-500 mt-0.5">Add many candidates to a job's pipeline at once</p>
@@ -346,7 +346,7 @@ export default function BulkUploadModal({ jobs, onClose }) {
           </button>
         </div>
 
-        <div className="p-6">
+        <div className="p-4 sm:p-6">
           {tab === 'resumes' ? <ResumesTab jobs={jobs} onDone={onClose} /> : <ExcelTab jobs={jobs} onDone={onClose} />}
         </div>
       </div>

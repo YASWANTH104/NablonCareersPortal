@@ -73,7 +73,7 @@ export default function MyReferralsPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-surface-100 rounded-xl p-1 mb-5 w-fit">
+      <div className="flex gap-1 flex-wrap bg-surface-100 rounded-xl p-1 mb-5 w-full sm:w-fit">
         {STATUS_TABS.map((tab) => (
           <button
             key={tab}
@@ -97,7 +97,8 @@ export default function MyReferralsPage() {
             <p className="text-gray-500 text-sm">No referrals yet in this category.</p>
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[640px]">
             <thead>
               <tr className="border-b border-surface-200 bg-surface-50">
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Candidate</th>
@@ -132,6 +133,7 @@ export default function MyReferralsPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
 
         {pages > 1 && (

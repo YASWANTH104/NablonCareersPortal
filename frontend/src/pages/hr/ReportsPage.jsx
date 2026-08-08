@@ -144,7 +144,7 @@ function PipelineSnapshotReport() {
         </div>
 
         <div className="overflow-x-auto rounded-lg border border-surface-100">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-[640px]">
             <thead>
               <tr className="border-b border-surface-200 bg-surface-50">
                 <th className="text-left py-2 px-3 text-xs font-medium text-gray-500">Source</th>
@@ -235,7 +235,7 @@ function TrendReport({ days }) {
 
       {showTable ? (
         <div className="overflow-x-auto rounded-lg border border-surface-100">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-[640px]">
             <thead>
               <tr className="border-b border-surface-200 bg-surface-50">
                 <th className="text-left py-2 px-3 text-xs font-medium text-gray-500">Period</th>
@@ -400,7 +400,7 @@ function SourceAnalysisReport({ days }) {
         <div>
           <SectionHeading title="Pipeline quality by source" subtitle="Applications, outcomes, and conversion for each source" />
           <div className="overflow-x-auto rounded-lg border border-surface-100">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm min-w-[640px]">
               <thead>
                 <tr className="border-b border-surface-200 bg-surface-50">
                   <th className="text-left py-2 px-3 text-xs font-medium text-gray-500">Source</th>
@@ -508,7 +508,7 @@ function TimeToHireReport({ days }) {
       </ResponsiveContainer>
 
       <div className="overflow-x-auto rounded-lg border border-surface-100">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm min-w-[640px]">
           <thead>
             <tr className="border-b border-surface-200 bg-surface-50">
               <th className="text-left py-2 px-3 text-xs font-medium text-gray-500">Department</th>
@@ -579,7 +579,7 @@ function JobPerformanceReport({ days }) {
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-surface-100">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm min-w-[640px]">
           <thead>
             <tr className="border-b border-surface-200 bg-surface-50">
               <th className="text-left py-2.5 px-3 text-xs font-medium text-gray-500">Job</th>
@@ -685,7 +685,7 @@ function AgencyPerformanceReport({ days }) {
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-surface-100">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm min-w-[640px]">
           <thead>
             <tr className="border-b border-surface-200 bg-surface-50">
               <th className="text-left py-2.5 px-3 text-xs font-medium text-gray-500">Agency</th>
@@ -789,7 +789,7 @@ export default function ReportsPage() {
           ))}
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           {activeTab !== 'pipeline' && (
             <select
               value={days}
@@ -809,7 +809,7 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-surface-200 p-6">
+      <div className="bg-white rounded-xl border border-surface-200 p-4 sm:p-6">
         {activeTab === 'pipeline' && <PipelineSnapshotReport />}
         {activeTab === 'funnel'   && <HiringFunnelReport days={days} />}
         {activeTab === 'trend'    && <TrendReport days={days} />}

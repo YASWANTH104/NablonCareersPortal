@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import {
   DndContext, DragOverlay, closestCorners,
-  PointerSensor, useSensor, useSensors,
+  PointerSensor, TouchSensor, useSensor, useSensors,
 } from '@dnd-kit/core';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { formatDistanceToNow } from 'date-fns';
@@ -153,7 +153,10 @@ function KanbanView({ applications, queryKey, onCardClick, onToggleHold }) {
   const [pendingDrop, setPendingDrop] = useState(null); // { app, toStage }
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    // Touch needs a press-and-hold to start a drag, otherwise every attempt to
+    // scroll the board (or the page) would be read as dragging a card.
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 6 } })
   );
 
   const grouped = useMemo(() => {
@@ -264,8 +267,8 @@ function KanbanView({ applications, queryKey, onCardClick, onToggleHold }) {
 
 function TableView({ applications, onRowClick, onToggleHold }) {
   return (
-    <div className="bg-white rounded-xl border border-surface-200 overflow-hidden">
-      <table className="w-full text-sm">
+    <div className="bg-white rounded-xl border border-surface-200 overflow-x-auto">
+      <table className="w-full text-sm min-w-[720px]">
         <thead>
           <tr className="bg-surface-50 border-b border-surface-100">
             <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wide px-5 py-3">
@@ -515,14 +518,14 @@ export default function ApplicantsPage() {
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div>
           <h1 className="font-display text-xl font-bold text-gray-900">Applicants</h1>
           <p className="text-sm text-gray-500 mt-0.5">
             {data?.total ?? 0} total applicants
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => setShowAddCandidate(true)}
             className="flex items-center gap-1.5 px-3.5 py-2 bg-brand-500 text-white text-sm font-semibold rounded-lg hover:bg-brand-600 transition-colors"
@@ -537,28 +540,32 @@ export default function ApplicantsPage() {
             <UploadCloud className="w-4 h-4" />
             Bulk upload
           </button>
-          <button
-            onClick={() => setView('kanban')}
-            className={`p-2 rounded-lg transition-colors ${
-              view === 'kanban'
-                ? 'bg-brand-500 text-white'
-                : 'bg-white border border-surface-200 text-gray-500 hover:text-gray-700'
-            }`}
-            title="Kanban view"
-          >
-            <LayoutGrid className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => setView('table')}
-            className={`p-2 rounded-lg transition-colors ${
-              view === 'table'
-                ? 'bg-brand-500 text-white'
-                : 'bg-white border border-surface-200 text-gray-500 hover:text-gray-700'
-            }`}
-            title="Table view"
-          >
-            <List className="w-4 h-4" />
-          </button>
+          {/* The two view toggles are one control — keep them on the same line
+              when the row wraps on narrow screens. */}
+          <div className="flex items-center gap-2 ml-auto sm:ml-0">
+            <button
+              onClick={() => setView('kanban')}
+              className={`p-2 rounded-lg transition-colors ${
+                view === 'kanban'
+                  ? 'bg-brand-500 text-white'
+                  : 'bg-white border border-surface-200 text-gray-500 hover:text-gray-700'
+              }`}
+              title="Kanban view"
+            >
+              <LayoutGrid className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setView('table')}
+              className={`p-2 rounded-lg transition-colors ${
+                view === 'table'
+                  ? 'bg-brand-500 text-white'
+                  : 'bg-white border border-surface-200 text-gray-500 hover:text-gray-700'
+              }`}
+              title="Table view"
+            >
+              <List className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -568,7 +575,7 @@ export default function ApplicantsPage() {
         <select
           value={selectedJobId}
           onChange={(e) => { setSelectedJobId(e.target.value); setPage(1); }}
-          className="text-sm border border-surface-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+          className="text-sm border border-surface-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 max-w-full min-w-0 flex-1 sm:flex-none"
         >
           <option value="">All jobs</option>
           {jobsData?.map((job) => (
@@ -581,7 +588,7 @@ export default function ApplicantsPage() {
           <select
             value={stageFilter}
             onChange={(e) => { setStageFilter(e.target.value); setPage(1); }}
-            className="text-sm border border-surface-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+            className="text-sm border border-surface-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 max-w-full min-w-0 flex-1 sm:flex-none"
           >
             <option value="">All stages</option>
             {PIPELINE_STAGES.map((s) => (
@@ -595,7 +602,7 @@ export default function ApplicantsPage() {
           <select
             value={agencyFilter}
             onChange={(e) => { setAgencyFilter(e.target.value); setPage(1); }}
-            className="text-sm border border-surface-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+            className="text-sm border border-surface-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 max-w-full min-w-0 flex-1 sm:flex-none"
           >
             <option value="">All sources</option>
             {agenciesData.map((a) => (
@@ -605,14 +612,14 @@ export default function ApplicantsPage() {
         )}
 
         {/* Search */}
-        <div className="relative">
+        <div className="relative w-full sm:w-52">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
             type="text"
             placeholder="Search by name…"
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-            className="pl-9 pr-8 py-2 border border-surface-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent w-52"
+            className="pl-9 pr-8 py-2 border border-surface-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent w-full"
           />
           {search && (
             <button
@@ -627,7 +634,7 @@ export default function ApplicantsPage() {
 
       {/* Content */}
       {isLoading ? (
-        <div className="grid grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           {Array.from({ length: 10 }).map((_, i) => (
             <div key={i} className="space-y-2">
               <div className="h-5 bg-surface-100 rounded animate-pulse w-20" />

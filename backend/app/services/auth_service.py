@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from fastapi import HTTPException, status
 import redis.asyncio as aioredis
 
@@ -117,19 +117,59 @@ async def login_with_microsoft(code: str, db: AsyncSession) -> dict:
     if not userinfo:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Microsoft sign-in failed — please try again")
 
-    result = await db.execute(select(User).where(User.email == userinfo["email"]))
-    user = result.scalar_one_or_none()
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No Nablon account found for {userinfo['email']}. Contact HR to get access, or sign in with your password if you already have an account.",
-        )
-    if user.role == "applicant":
+    # Everyone in the Nablon tenant is staff, so a successful sign-in is itself
+    # the proof of employment — but only for Members. Guests share the directory
+    # without working here (B2B-invited agency contacts, clients, contractors),
+    # so they must never be auto-provisioned.
+    if not ms_sso_service.is_member(userinfo):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Microsoft sign-in isn't available for candidate accounts — please sign in with your email and password.",
+            detail="Microsoft sign-in is only available to Nablon staff accounts. Contact HR if you believe this is a mistake.",
         )
+
+    email = userinfo["email"].lower()
+    # Case-INSENSITIVE match. Pydantic's EmailStr lowercases only the domain, so
+    # a registered "Priya.Raghavan@nablon.ai" is stored mixed-case, while Entra's
+    # `mail` attribute conventionally returns display-cased addresses too. A
+    # case-sensitive `==` here would miss the existing row and silently create a
+    # SECOND account for the same person — splitting their referrals and giving
+    # them one identity for password login and another for SSO. Ordered by
+    # created_at and taking the first so a pre-existing case-collision (two rows
+    # that differ only in case are both legal under the unique index) resolves to
+    # the original account instead of raising MultipleResultsFound.
+    result = await db.execute(
+        select(User).where(func.lower(User.email) == email).order_by(User.created_at)
+    )
+    user = result.scalars().first()
+
+    if not user:
+        # No password is ever set for an SSO-provisioned account. The column is
+        # NOT NULL, so it gets an unguessable hash — the same passwordless shape
+        # application_service.submit_sourced_application uses. They can claim a
+        # password later via the normal forgot-password flow if they want one.
+        user = User(
+            email=email,
+            password_hash=hash_password(generate_token()),
+            full_name=userinfo.get("name") or email.split("@")[0],
+            role="employee",
+            department=userinfo.get("department"),
+            is_active=True,
+            # Entra has already proven they control this mailbox.
+            is_verified=True,
+        )
+        db.add(user)
+        await db.flush()
+    elif user.role == "applicant":
+        # Shouldn't arise — Nablon doesn't accept internal applications — but a
+        # Member who registered as a candidate before SSO existed would land
+        # here. Their Entra Member status is the more authoritative signal, so
+        # correct the row rather than locking them out of the employee tools.
+        user.role = "employee"
+
+    # Any other role (interviewer / hr_manager / admin / super_admin) is left
+    # exactly as-is. Assigning "employee" unconditionally here would silently
+    # demote an HR manager every time they signed in with Microsoft.
+
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account deactivated")
 
