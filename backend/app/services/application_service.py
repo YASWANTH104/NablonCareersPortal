@@ -13,6 +13,34 @@ from app.schemas.application import (
 from app.constants.stages import VALID_TRANSITIONS, STAGE_LABELS, REASON_REQUIRED_STAGES
 
 
+async def _seed_initial_resume_version(db: AsyncSession, application: Application, applicant_id: uuid.UUID) -> None:
+    """Give a brand-new application its v1 resume-history row immediately.
+
+    The Resume tab (`ResumeVersions.jsx`) only ever reads `application_resumes`,
+    never `Application.resume_url` directly — so without this, every application
+    submitted after the one-time f7a8b9c0d1e2 backfill migration shows "no resume
+    on file" despite `resume_url` being set. Mirrors that migration's own
+    INSERT exactly (uploaded_by/role = the applicant), so the version history
+    reads the same regardless of whether v1 came from the backfill or from here.
+    Best-effort: a failure here must never block the application submission
+    itself, the same way the notification email sends around it are wrapped.
+    """
+    if not application.resume_url:
+        return
+    try:
+        from app.models.application_resume import ApplicationResume
+        db.add(ApplicationResume(
+            application_id=application.id,
+            version=1,
+            file_url=application.resume_url,
+            uploaded_by=applicant_id,
+            uploaded_by_role="applicant",
+        ))
+        await db.commit()
+    except Exception:
+        await db.rollback()
+
+
 def _app_to_dict(app: Application) -> dict:
     from app.services.storage_service import refresh_url
 
@@ -187,6 +215,8 @@ async def submit_application(
     await db.commit()
     await db.refresh(application)
 
+    await _seed_initial_resume_version(db, application, applicant_id)
+
     if referral and referral.status in ("pending", "invited"):
         try:
             from app.services import referral_service
@@ -333,6 +363,8 @@ async def submit_sourced_application(
     db.add(application)
     await db.commit()
     await db.refresh(application)
+
+    await _seed_initial_resume_version(db, application, user.id)
 
     try:
         if is_new_user:
