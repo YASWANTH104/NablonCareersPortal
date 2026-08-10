@@ -457,59 +457,6 @@ async def _send_document_request_email_async(application_id: str):
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
-def send_screening_invite_email_task(self, screening_response_id: str):
-    try:
-        asyncio.run(_send_screening_invite_email_async(screening_response_id))
-    except Exception as exc:
-        logger.error(f"Screening invite email failed: response={screening_response_id}: {exc}")
-        raise self.retry(exc=exc)
-
-
-async def _send_screening_invite_email_async(screening_response_id: str):
-    from app.models.application import Application
-    from app.models.user import User
-    from app.models.job import Job
-    from app.models.screening import ScreeningResponse
-    from app.services.email_service import send_email
-    from app.config import settings
-    from sqlalchemy import select
-    from datetime import datetime, timezone
-
-    resp_uuid = uuid.UUID(screening_response_id)
-
-    async with _task_session() as db:
-        resp = await db.get(ScreeningResponse, resp_uuid)
-        if not resp:
-            logger.warning(f"Screening response not found: {screening_response_id}")
-            return
-
-        row = (await db.execute(
-            select(User.full_name, User.email, Job.title)
-            .select_from(Application)
-            .join(User, User.id == Application.applicant_id)
-            .join(Job, Job.id == Application.job_id)
-            .where(Application.id == resp.application_id)
-        )).first()
-        if not row:
-            return
-
-        full_name, candidate_email, job_title = row
-        form_url = f"{settings.FRONTEND_URL}/screening/{resp.token}"
-
-        sent = await send_email(
-            to_email=candidate_email,
-            subject=f"Quick screening form for your {job_title} application at Nablon AI",
-            template_name="screening_form_invite",
-            context={"full_name": full_name, "job_title": job_title, "form_url": form_url},
-        )
-
-        if sent:
-            resp.email_sent_at = datetime.now(timezone.utc)
-            await db.commit()
-            logger.info(f"Screening invite email sent: response={screening_response_id}, to={candidate_email}")
-
-
-@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def send_referral_invite_email_task(self, referral_id: str):
     try:
         asyncio.run(_send_referral_invite_email_async(referral_id))
