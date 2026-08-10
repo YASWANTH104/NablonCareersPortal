@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}A quick screening form for your {{ job_title }} application – Nablon AI{% endblock %}
+
+{% block content %}
+<h2>Hi {{ full_name }},</h2>
+
+<p>
+  Thank you for applying for the <strong>{{ job_title }}</strong> role at Nablon AI. We've had a
+  strong response to this opening, and to help us move your application forward we'd like to
+  learn a bit more about your academic background, projects, and certifications.
+</p>
+
+<p>
+  Please take a few minutes to fill out the short screening form below — it covers your college
+  details, CGPA, key skills, certifications, and project experience.
+</p>
+
+<a href="{{ form_url }}" class="cta">Fill Screening Form</a>
+
+<p style="margin-top:28px; color:#6B7280; font-size:13px;">
+  This helps our team screen applications for the {{ job_title }} role more effectively. If you
+  have any questions, feel free to reach out to our HR team.
+</p>
+{% endblock %}
