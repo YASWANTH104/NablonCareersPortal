@@ -1,13 +1,13 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import {
   DndContext, DragOverlay, closestCorners,
   PointerSensor, TouchSensor, useSensor, useSensors,
 } from '@dnd-kit/core';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { formatDistanceToNow } from 'date-fns';
-import { Search, LayoutGrid, List, Star, GripVertical, X, UserPlus, UploadCloud, AlertTriangle, Pause } from 'lucide-react';
+import { Search, LayoutGrid, List, Star, GripVertical, X, UserPlus, UploadCloud, AlertTriangle, Pause, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { applicationsApi } from '@/api/applications';
 import { jobsApi } from '@/api/jobs';
@@ -34,7 +34,7 @@ function initials(name) {
 function KanbanCard({ application, onClick, onToggleHold }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: application.id,
-    data: { fromStage: application.stage },
+    data: { application },
   });
 
   const style = transform
@@ -120,8 +120,37 @@ function KanbanCard({ application, onClick, onToggleHold }) {
 
 // ── Kanban Column ─────────────────────────────────────────────────────────────
 
-function KanbanColumn({ stageKey, label, colorClass, cards, onCardClick, onToggleHold }) {
+// Rejected/withdrawn are terminal and rarely need deep browsing — they get one
+// flat capped fetch instead of a "Load more" affordance. Every other stage
+// lazy-loads a page at a time so a busy column never crowds out the rest.
+const LAZY_STAGES = new Set(
+  PIPELINE_STAGES.map((s) => s.key).filter((k) => k !== 'rejected' && k !== 'withdrawn')
+);
+const KANBAN_PAGE_SIZE = 30;
+const KANBAN_FLAT_LIMIT = 200;
+
+function kanbanStageQueryKey(stageKey, filters) {
+  return ['kanban-stage', stageKey, filters];
+}
+
+function KanbanColumn({ stageKey, label, colorClass, filters, onCardClick, onToggleHold }) {
   const { isOver, setNodeRef } = useDroppable({ id: stageKey });
+  const isLazy = LAZY_STAGES.has(stageKey);
+
+  const { data, isLoading, isFetchingNextPage, hasNextPage, fetchNextPage } = useInfiniteQuery({
+    queryKey: kanbanStageQueryKey(stageKey, filters),
+    queryFn: ({ pageParam = 1 }) =>
+      applicationsApi
+        .list({ ...filters, stage: stageKey, page: pageParam, limit: isLazy ? KANBAN_PAGE_SIZE : KANBAN_FLAT_LIMIT })
+        .then((r) => r.data),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) =>
+      isLazy && lastPage.page < lastPage.pages ? lastPage.page + 1 : undefined,
+    placeholderData: keepPreviousData,
+  });
+
+  const cards = useMemo(() => data?.pages.flatMap((p) => p.items) ?? [], [data]);
+  const total = data?.pages?.[0]?.total ?? 0;
 
   return (
     <div className="flex-shrink-0 w-56">
@@ -129,7 +158,7 @@ function KanbanColumn({ stageKey, label, colorClass, cards, onCardClick, onToggl
         <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${colorClass}`}>
           {label}
         </span>
-        <span className="text-xs text-gray-400 font-medium">{cards.length}</span>
+        <span className="text-xs text-gray-400 font-medium">{total}</span>
       </div>
       <div
         ref={setNodeRef}
@@ -137,9 +166,30 @@ function KanbanColumn({ stageKey, label, colorClass, cards, onCardClick, onToggl
           isOver ? 'bg-brand-50 border-2 border-dashed border-brand-300' : 'bg-surface-50'
         }`}
       >
-        {cards.map((app) => (
-          <KanbanCard key={app.id} application={app} onClick={onCardClick} onToggleHold={onToggleHold} />
-        ))}
+        {isLoading ? (
+          Array.from({ length: 2 }).map((_, i) => (
+            <div key={i} className="h-20 bg-surface-100 rounded-xl animate-pulse" />
+          ))
+        ) : (
+          <>
+            {cards.map((app) => (
+              <KanbanCard key={app.id} application={app} onClick={onCardClick} onToggleHold={onToggleHold} />
+            ))}
+            {hasNextPage && (
+              <button
+                onClick={() => fetchNextPage()}
+                disabled={isFetchingNextPage}
+                className="w-full flex items-center justify-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 py-2 rounded-lg hover:bg-surface-100 transition-colors disabled:opacity-50"
+              >
+                {isFetchingNextPage ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  `Load more (${total - cards.length})`
+                )}
+              </button>
+            )}
+          </>
+        )}
       </div>
     </div>
   );
@@ -147,7 +197,7 @@ function KanbanColumn({ stageKey, label, colorClass, cards, onCardClick, onToggl
 
 // ── Kanban View ───────────────────────────────────────────────────────────────
 
-function KanbanView({ applications, queryKey, onCardClick, onToggleHold }) {
+function KanbanView({ filters, onCardClick, onToggleHold }) {
   const queryClient = useQueryClient();
   const [activeApp, setActiveApp] = useState(null);
   const [pendingDrop, setPendingDrop] = useState(null); // { app, toStage }
@@ -159,48 +209,74 @@ function KanbanView({ applications, queryKey, onCardClick, onToggleHold }) {
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 6 } })
   );
 
-  const grouped = useMemo(() => {
-    const map = {};
-    PIPELINE_STAGES.forEach((s) => (map[s.key] = []));
-    applications.forEach((app) => {
-      if (map[app.stage] !== undefined) map[app.stage].push(app);
+  // Each column keeps its own paginated cache, so moving a card between
+  // columns means splicing it out of the source cache and into the target's
+  // first page directly, rather than patching one shared list.
+  function moveCardInCache(id, fromStage, toStage, appSnapshot) {
+    const fromKey = kanbanStageQueryKey(fromStage, filters);
+    const toKey = kanbanStageQueryKey(toStage, filters);
+
+    queryClient.setQueryData(fromKey, (old) => {
+      if (!old) return old;
+      return {
+        ...old,
+        pages: old.pages.map((page, i) => ({
+          ...page,
+          items: page.items.filter((a) => a.id !== id),
+          total: i === 0 ? Math.max(0, page.total - 1) : page.total,
+        })),
+      };
     });
-    return map;
-  }, [applications]);
+
+    queryClient.setQueryData(toKey, (old) => {
+      if (!old) return old;
+      const movedApp = { ...appSnapshot, stage: toStage };
+      return {
+        ...old,
+        pages: old.pages.map((page, i) =>
+          i === 0
+            ? { ...page, items: [movedApp, ...page.items], total: page.total + 1 }
+            : page
+        ),
+      };
+    });
+  }
 
   const stageMutation = useMutation({
     mutationFn: ({ id, stage, rejection_reason, drop_category }) =>
       applicationsApi.moveStage(id, stage, undefined, rejection_reason, drop_category),
-    onMutate: async ({ id, stage }) => {
-      await queryClient.cancelQueries({ queryKey });
-      const prev = queryClient.getQueryData(queryKey);
-      queryClient.setQueryData(queryKey, (old) => {
-        if (!old) return old;
-        return {
-          ...old,
-          items: old.items.map((a) => (a.id === id ? { ...a, stage } : a)),
-        };
-      });
-      return { prev };
+    onMutate: async ({ id, stage, app }) => {
+      const fromKey = kanbanStageQueryKey(app.stage, filters);
+      const toKey = kanbanStageQueryKey(stage, filters);
+      await queryClient.cancelQueries({ queryKey: fromKey });
+      await queryClient.cancelQueries({ queryKey: toKey });
+      const prevFrom = queryClient.getQueryData(fromKey);
+      const prevTo = queryClient.getQueryData(toKey);
+      moveCardInCache(id, app.stage, stage, app);
+      return { prevFrom, prevTo, fromKey, toKey };
     },
     onError: (err, _, ctx) => {
-      if (ctx?.prev) queryClient.setQueryData(queryKey, ctx.prev);
+      if (ctx?.prevFrom) queryClient.setQueryData(ctx.fromKey, ctx.prevFrom);
+      if (ctx?.prevTo) queryClient.setQueryData(ctx.toKey, ctx.prevTo);
       toast.error(err.response?.data?.detail ?? 'Cannot move to this stage');
     },
     onSuccess: () => setPendingDrop(null),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ['hr-applications'] }),
+    onSettled: (_data, _err, { app, stage }) => {
+      queryClient.invalidateQueries({ queryKey: ['hr-applications'] });
+      queryClient.invalidateQueries({ queryKey: kanbanStageQueryKey(app.stage, filters) });
+      queryClient.invalidateQueries({ queryKey: kanbanStageQueryKey(stage, filters) });
+    },
   });
 
   function handleDragStart({ active }) {
-    const app = applications.find((a) => a.id === active.id);
-    setActiveApp(app ?? null);
+    setActiveApp(active.data.current?.application ?? null);
   }
 
   function handleDragEnd({ active, over }) {
     setActiveApp(null);
     if (!over) return;
     const toStage = over.id;
-    const app = applications.find((a) => a.id === active.id);
+    const app = active.data.current?.application;
     if (!app || app.stage === toStage) return;
     if (app.on_hold) {
       toast.error('This candidate is on hold — resume before changing stage.');
@@ -209,7 +285,7 @@ function KanbanView({ applications, queryKey, onCardClick, onToggleHold }) {
     if (REASON_REQUIRED_STAGES.has(toStage)) {
       setPendingDrop({ app, toStage });
     } else {
-      stageMutation.mutate({ id: app.id, stage: toStage });
+      stageMutation.mutate({ id: app.id, stage: toStage, app });
     }
   }
 
@@ -227,7 +303,7 @@ function KanbanView({ applications, queryKey, onCardClick, onToggleHold }) {
             stageKey={key}
             label={label}
             colorClass={color}
-            cards={grouped[key] ?? []}
+            filters={filters}
             onCardClick={onCardClick}
             onToggleHold={onToggleHold}
           />
@@ -253,6 +329,7 @@ function KanbanView({ applications, queryKey, onCardClick, onToggleHold }) {
             stageMutation.mutate({
               id: pendingDrop.app.id,
               stage: pendingDrop.toStage,
+              app: pendingDrop.app,
               rejection_reason: note,
               drop_category: category,
             })
@@ -404,6 +481,7 @@ function AddCandidateModal({ jobs, onClose }) {
       await applicationsApi.hrSubmitCandidate({ ...payload, job_id: jobId, source });
       toast.success('Candidate added to the pipeline!');
       queryClient.invalidateQueries({ queryKey: ['hr-applications'] });
+      queryClient.invalidateQueries({ queryKey: ['kanban-stage'] });
       onClose();
     } catch (err) {
       if (err.response) toast.error(err.response.data?.detail ?? 'Failed to add candidate');
@@ -485,35 +563,41 @@ export default function ApplicantsPage() {
     queryFn: () => jobsApi.list({ limit: 100 }).then((r) => r.data.items),
   });
 
-  const queryParams = {
-    jobId: selectedJobId,
-    stage: view === 'kanban' ? '' : stageFilter,
-    agencyId: agencyFilter,
-    search,
-    page: view === 'kanban' ? 1 : page,
+  // Kanban's columns each fetch their own stage independently (see KanbanColumn) —
+  // this is only the shared filter shape they key off, plus the Table view's query.
+  const filters = {
+    job_id: selectedJobId || undefined,
+    agency_id: agencyFilter || undefined,
+    search: search || undefined,
   };
 
+  const queryParams = { jobId: selectedJobId, stage: stageFilter, agencyId: agencyFilter, search, page };
   const queryKey = ['hr-applications', queryParams];
 
   const { data, isLoading } = useQuery({
     queryKey,
     queryFn: () =>
       applicationsApi
-        .list({
-          job_id: selectedJobId || undefined,
-          stage: view === 'kanban' ? undefined : stageFilter || undefined,
-          agency_id: agencyFilter || undefined,
-          search: search || undefined,
-          page: view === 'kanban' ? 1 : page,
-          limit: view === 'kanban' ? 200 : 20,
-        })
+        .list({ ...filters, stage: stageFilter || undefined, page, limit: 20 })
         .then((r) => r.data),
     placeholderData: keepPreviousData,
+    enabled: view === 'table',
+  });
+
+  // Kanban has no single combined list to read a total off of — one cheap
+  // count-only fetch (limit=1) for the header stat instead.
+  const { data: kanbanTotal } = useQuery({
+    queryKey: ['hr-applications-total', filters],
+    queryFn: () => applicationsApi.list({ ...filters, page: 1, limit: 1 }).then((r) => r.data.total),
+    enabled: view === 'kanban',
   });
 
   const applications = data?.items ?? [];
+  const totalApplicants = view === 'kanban' ? (kanbanTotal ?? 0) : (data?.total ?? 0);
 
-  const { pendingHold, setPendingHold, holdMutation, toggleHold } = useHoldToggle(queryKey);
+  const { pendingHold, setPendingHold, holdMutation, toggleHold } = useHoldToggle(
+    view === 'kanban' ? (app) => kanbanStageQueryKey(app.stage, filters) : queryKey
+  );
 
   return (
     <div>
@@ -522,7 +606,7 @@ export default function ApplicantsPage() {
         <div>
           <h1 className="font-display text-xl font-bold text-gray-900">Applicants</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            {data?.total ?? 0} total applicants
+            {totalApplicants} total applicants
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -633,7 +717,13 @@ export default function ApplicantsPage() {
       </div>
 
       {/* Content */}
-      {isLoading ? (
+      {view === 'kanban' ? (
+        <KanbanView
+          filters={filters}
+          onCardClick={(id) => navigate(`/hr/applicants/${id}`)}
+          onToggleHold={toggleHold}
+        />
+      ) : isLoading ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           {Array.from({ length: 10 }).map((_, i) => (
             <div key={i} className="space-y-2">
@@ -648,13 +738,6 @@ export default function ApplicantsPage() {
         <div className="text-center py-20 text-gray-400">
           <p className="text-sm">No applicants found</p>
         </div>
-      ) : view === 'kanban' ? (
-        <KanbanView
-          applications={applications}
-          queryKey={queryKey}
-          onCardClick={(id) => navigate(`/hr/applicants/${id}`)}
-          onToggleHold={toggleHold}
-        />
       ) : (
         <>
           <TableView
@@ -697,7 +780,7 @@ export default function ApplicantsPage() {
           isPending={holdMutation.isPending}
           onCancel={() => setPendingHold(null)}
           onConfirm={(reason) =>
-            holdMutation.mutate({ id: pendingHold.id, on_hold: true, hold_reason: reason })
+            holdMutation.mutate({ id: pendingHold.id, on_hold: true, hold_reason: reason, app: pendingHold })
           }
         />
       )}
