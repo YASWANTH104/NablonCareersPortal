@@ -98,6 +98,7 @@ function ResumesTab({ jobs, onDone }) {
     onSuccess: (data) => {
       setResults(data.results);
       queryClient.invalidateQueries({ queryKey: ['hr-applications'] });
+      queryClient.invalidateQueries({ queryKey: ['kanban-stage'] });
       if (data.created > 0) toast.success(`${data.created} candidate${data.created !== 1 ? 's' : ''} added to the pipeline`);
     },
     onError: (err) => toast.error(err.response?.data?.detail ?? 'Bulk upload failed'),
@@ -223,6 +224,7 @@ function ExcelTab({ jobs, onDone }) {
     onSuccess: (data) => {
       setResults(data.results);
       queryClient.invalidateQueries({ queryKey: ['hr-applications'] });
+      queryClient.invalidateQueries({ queryKey: ['kanban-stage'] });
       if (data.created > 0) toast.success(`${data.created} candidate${data.created !== 1 ? 's' : ''} added to the pipeline`);
     },
     onError: (err) => toast.error(err.response?.data?.detail ?? 'Bulk upload failed'),
