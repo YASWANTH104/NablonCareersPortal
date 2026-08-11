@@ -19,6 +19,8 @@ import { jobsApi } from '@/api/jobs';
 import { offersApi } from '@/api/offers';
 import { usersApi } from '@/api/users';
 import { documentsApi } from '@/api/documents';
+import { interviewSlotsApi } from '@/api/interviewSlots';
+import { ROUND_MAP } from '@/constants/interviewRounds';
 import ResumeVersions from '@/components/shared/ResumeVersions';
 import { FREE_TEXT_MAX } from '@/constants/fieldLimits';
 import ScheduleTimeGrid from '@/components/interviews/ScheduleTimeGrid';
@@ -142,7 +144,62 @@ const scheduleSchema = z.object({
   refineMeetingDetails(values, ctx);
 });
 
-function ScheduleInterviewDialog({ applicationId, defaultRoundNumber = 1, onClose, onSuccess }) {
+function PublishedSlotPicker({ jobId, applicationId, onClose, onSuccess }) {
+  const { data: slots, isLoading } = useQuery({
+    queryKey: ['interview-slots-for-job', jobId],
+    queryFn: () => interviewSlotsApi.forJob(jobId).then((r) => r.data),
+    enabled: !!jobId,
+  });
+
+  const bookMutation = useMutation({
+    mutationFn: (slotId) => interviewSlotsApi.book({ slot_id: slotId, application_id: applicationId }),
+    onSuccess: () => {
+      toast.success('Interview scheduled');
+      onSuccess();
+      onClose();
+    },
+    onError: (err) => toast.error(err.response?.data?.detail ?? 'This slot was just taken — please pick another'),
+  });
+
+  if (isLoading) {
+    return <div className="flex justify-center py-10"><Loader2 className="w-5 h-5 animate-spin text-gray-400" /></div>;
+  }
+
+  if (!slots || slots.length === 0) {
+    return (
+      <p className="text-sm text-gray-400 text-center py-10">
+        No interviewers have published availability for this job yet.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {slots.map((s) => (
+        <div key={s.id} className="flex items-center justify-between gap-3 bg-surface-50 rounded-lg px-4 py-3">
+          <div>
+            <p className="text-sm font-medium text-gray-900">
+              {format(new Date(s.start_time), 'EEE, MMM d · h:mm a')}
+            </p>
+            <p className="text-xs text-gray-500">
+              {s.interviewer_name} · {ROUND_MAP[s.round_type]?.label ?? s.round_type} · {s.duration_mins} min
+            </p>
+          </div>
+          <button
+            onClick={() => bookMutation.mutate(s.id)}
+            disabled={bookMutation.isPending}
+            className="px-3 py-1.5 bg-brand-500 text-white text-xs font-semibold rounded-lg hover:bg-brand-600 disabled:opacity-50 transition-colors"
+          >
+            Book
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ScheduleInterviewDialog({ applicationId, jobId, defaultRoundNumber = 1, onClose, onSuccess }) {
+  const [mode, setMode] = useState('manual'); // 'manual' | 'published'
   const [panelists, setPanelists] = useState([]);
   const [panelistSearch, setPanelistSearch] = useState('');
   const [panelistError, setPanelistError] = useState(false);
@@ -314,9 +371,34 @@ function ScheduleInterviewDialog({ applicationId, defaultRoundNumber = 1, onClos
       <div className="bg-white rounded-2xl shadow-modal w-full max-w-3xl max-h-[92dvh] overflow-y-auto">
         <div className="sticky top-0 bg-white border-b border-surface-200 px-4 sm:px-6 py-4 z-10">
           <h3 className="font-display font-bold text-gray-900">Schedule Interview</h3>
-          <p className="text-xs text-gray-500 mt-0.5">Pick the panel, then a day, then an open slot.</p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {mode === 'manual' ? 'Pick the panel, then a day, then an open slot.' : 'Book directly from an interviewer’s published availability.'}
+          </p>
+          {jobId && (
+            <div className="flex gap-2 mt-3">
+              <button
+                type="button"
+                onClick={() => setMode('manual')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${mode === 'manual' ? 'bg-brand-500 text-white' : 'bg-surface-100 text-gray-600 hover:bg-surface-200'}`}
+              >
+                Manually schedule
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('published')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${mode === 'published' ? 'bg-brand-500 text-white' : 'bg-surface-100 text-gray-600 hover:bg-surface-200'}`}
+              >
+                Book a published slot
+              </button>
+            </div>
+          )}
         </div>
 
+        {mode === 'published' ? (
+          <div className="p-4 sm:p-6">
+            <PublishedSlotPicker jobId={jobId} applicationId={applicationId} onClose={onClose} onSuccess={onSuccess} />
+          </div>
+        ) : (
         <form onSubmit={handleSubmit(onSubmit)} className="p-4 sm:p-6 space-y-6">
           {/* ── 1. What ──────────────────────────────────────────── */}
           <section className="space-y-4">
@@ -620,6 +702,7 @@ function ScheduleInterviewDialog({ applicationId, defaultRoundNumber = 1, onClos
             </button>
           </div>
         </form>
+        )}
       </div>
     </div>
   );
@@ -2540,6 +2623,7 @@ export default function ApplicationDetailPage() {
       {showScheduleDialog && (
         <ScheduleInterviewDialog
           applicationId={id}
+          jobId={app?.job_id}
           defaultRoundNumber={
             (interviewsData?.items ?? []).reduce((max, iv) => Math.max(max, iv.round_number), 0) + 1
           }

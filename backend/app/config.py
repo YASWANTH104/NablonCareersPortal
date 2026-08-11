@@ -18,8 +18,6 @@ class Settings(BaseSettings):
     AZURE_STORAGE_CONNECTION_STRING: str = ""
     AZURE_STORAGE_CONTAINER: str = "nabloncareers"
 
-    AZURE_COMMUNICATION_CONNECTION_STRING: str = ""
-    AZURE_EMAIL_SENDER: str = ""
     EMAIL_FROM_NAME: str = "Nablon AI Careers"
 
     DIRECTOR_EMAIL: str = ""
@@ -41,6 +39,7 @@ class Settings(BaseSettings):
     MS_GRAPH_TENANT_ID: str = ""
     MS_GRAPH_CLIENT_ID: str = ""
     MS_GRAPH_CLIENT_SECRET: str = ""
+    MS_GRAPH_MAIL_SENDER: str = "noreply@nablon.ai"
 
     @property
     def ms_graph_configured(self) -> bool:
