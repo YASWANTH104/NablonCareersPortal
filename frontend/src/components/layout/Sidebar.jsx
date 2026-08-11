@@ -3,7 +3,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Briefcase, Users, Star, Calendar,
   FileText, BarChart2, Settings, LogOut, ChevronLeft,
-  ChevronRight, UserCheck, Award, AlertTriangle, Building2, X,
+  ChevronRight, UserCheck, Award, AlertTriangle, Building2, X, CalendarClock,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { useUIStore } from '@/store/uiStore';
@@ -16,6 +16,7 @@ const NAV_ITEMS = {
     { to: '/hr/jobs',        label: 'Jobs',         icon: Briefcase },
     { to: '/hr/applicants',  label: 'Applicants',   icon: Users },
     { to: '/hr/interviews',  label: 'Interviews',   icon: Calendar },
+    { to: '/hr/availability', label: 'Interviewer Availability', icon: CalendarClock },
     { to: '/hr/referrals',   label: 'Referrals',    icon: UserCheck },
     { to: '/hr/offers',      label: 'Offers',       icon: FileText },
     { to: '/hr/agencies',    label: 'Agencies',     icon: Building2 },
@@ -24,6 +25,7 @@ const NAV_ITEMS = {
   ],
   interviewer: [
     { to: '/hr/interviews',         label: 'My Interviews',     icon: Calendar },
+    { to: '/hr/availability',       label: 'My Availability',   icon: CalendarClock },
     { to: '/employee/refer',        label: 'Refer a Candidate', icon: UserCheck },
     { to: '/employee/my-referrals', label: 'My Referrals',      icon: Award },
     { to: '/employee/jobs',         label: 'Browse Jobs',       icon: Briefcase },

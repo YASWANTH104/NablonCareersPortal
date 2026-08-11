@@ -1,6 +1,6 @@
 import uuid
 from typing import Optional
-from fastapi import APIRouter, Depends, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -10,7 +10,8 @@ from app.schemas.agency import (
     JobAgencyAssignmentCreate, JobAgencyAssignmentResponse,
     AgencyPortalResponse,
 )
-from app.services import agency_service
+from app.schemas.interview_slot import AvailableSlotGroup, SlotResponse, AgencySlotBookRequest
+from app.services import agency_service, interview_slot_service
 
 router = APIRouter(tags=["agencies"])
 
@@ -169,3 +170,45 @@ async def agency_submit_candidate(
         notice_period=notice_period or None,
     )
     return {"application_id": str(application.id), "stage": application.stage}
+
+
+# ── Agency portal: interview slots ────────────────────────────────────────────
+
+@router.get(
+    "/agency-portal/{portal_token}/assignments/{assignment_id}/slots",
+    response_model=list[AvailableSlotGroup],
+)
+async def agency_available_slots(
+    portal_token: str,
+    assignment_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Anonymized — never reveals which interviewer a slot belongs to."""
+    _agency, assignment = await agency_service.validate_portal_assignment(db, portal_token, assignment_id)
+    return await interview_slot_service.get_available_slots_for_job(db, assignment.job_id)
+
+
+@router.post("/agency-portal/{portal_token}/assignments/{assignment_id}/slots/book", response_model=SlotResponse)
+async def agency_book_slot(
+    portal_token: str,
+    assignment_id: uuid.UUID,
+    data: AgencySlotBookRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models.application import Application
+
+    agency, assignment = await agency_service.validate_portal_assignment(db, portal_token, assignment_id)
+
+    application = await db.get(Application, data.application_id)
+    if not application or application.agency_id != agency.id or application.job_id != assignment.job_id:
+        raise HTTPException(404, "Candidate not found for this assignment")
+
+    return await interview_slot_service.book_slot(
+        db,
+        application_id=data.application_id,
+        job_id=assignment.job_id,
+        round_type=data.round_type,
+        start_time=data.start_time,
+        duration_mins=data.duration_mins,
+        booked_by_agency_id=agency.id,
+    )

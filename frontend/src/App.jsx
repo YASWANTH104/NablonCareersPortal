@@ -38,6 +38,7 @@ import ApplicantsPage from '@/pages/hr/ApplicantsPage';
 import ApplicationDetailPage from '@/pages/hr/ApplicationDetailPage';
 import ReferralsPage from '@/pages/hr/ReferralsPage';
 import InterviewsPage from '@/pages/hr/InterviewsPage';
+import AvailabilityPage from '@/pages/hr/AvailabilityPage';
 import OffersPage from '@/pages/hr/OffersPage';
 import OfferBuilderPage from '@/pages/hr/OfferBuilderPage';
 import OfferRespondPage from '@/pages/public/OfferRespondPage';
@@ -133,6 +134,7 @@ const router = createBrowserRouter([
         element: <AppShell />,
         children: [
           { path: '/hr/interviews', element: <InterviewsPage /> },
+          { path: '/hr/availability', element: <AvailabilityPage /> },
         ],
       },
     ],

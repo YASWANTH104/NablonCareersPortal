@@ -10,6 +10,7 @@ from app.models.offer import OfferLetter, OfferTemplate
 from app.models.notification import Notification, EmailLog, AuditLog
 from app.models.document import DocumentRequest, ApplicationDocument
 from app.models.agency import Agency, JobAgencyAssignment
+from app.models.interview_slot import InterviewSlot
 
 __all__ = [
     "User",
@@ -23,4 +24,5 @@ __all__ = [
     "Notification", "EmailLog", "AuditLog",
     "DocumentRequest", "ApplicationDocument",
     "Agency", "JobAgencyAssignment",
+    "InterviewSlot",
 ]

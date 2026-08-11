@@ -1,11 +1,15 @@
 import { useState, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Building2, ChevronRight, Users, Clock, UserPlus, X, Briefcase, TrendingUp } from 'lucide-react';
-import { format, formatDistanceToNow } from 'date-fns';
+import {
+  Building2, ChevronRight, Users, Clock, UserPlus, X, Briefcase, TrendingUp,
+  CalendarClock, CalendarX2, Loader2, Hourglass, XCircle, Info,
+} from 'lucide-react';
+import { format, formatDistanceToNow, isToday, isTomorrow, isSameDay } from 'date-fns';
 import { agenciesApi } from '@/api/agencies';
 import CandidateIntakeForm from '@/components/shared/CandidateIntakeForm';
+import { ROUND_MAP } from '@/constants/interviewRounds';
 
 const STAGE_LABELS = {
   applied: 'Applied',
@@ -33,12 +37,52 @@ const STAGE_COLORS = {
   withdrawn: 'bg-gray-100 text-gray-500',
 };
 
+// Terminal-ish stages get a dot indicator so the candidate list reads at a
+// glance without having to parse every badge color individually.
+const STAGE_DOT = {
+  hired: 'bg-green-500',
+  rejected: 'bg-red-400',
+  withdrawn: 'bg-gray-400',
+};
+
 function StageBadge({ stage }) {
   return (
-    <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${STAGE_COLORS[stage] ?? 'bg-gray-100 text-gray-600'}`}>
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${STAGE_COLORS[stage] ?? 'bg-gray-100 text-gray-600'}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${STAGE_DOT[stage] ?? 'bg-current opacity-60'}`} />
       {STAGE_LABELS[stage] ?? stage}
     </span>
   );
+}
+
+function SectionHeader({ icon: Icon, title, count, action }) {
+  return (
+    <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center gap-2">
+        <Icon className="w-4 h-4 text-gray-400" />
+        <h3 className="text-sm font-bold text-gray-900">{title}</h3>
+        {count != null && (
+          <span className="text-xs font-medium text-gray-400 bg-surface-100 rounded-full px-2 py-0.5">{count}</span>
+        )}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+// Groups anonymized slot rows by calendar day, so the agency scans "Today",
+// "Tomorrow", then real dates rather than a flat list of timestamps.
+function groupSlotsByDate(slots) {
+  const groups = [];
+  (slots ?? []).forEach((slot) => {
+    const day = new Date(slot.start_time);
+    let group = groups.find((g) => isSameDay(g.day, day));
+    if (!group) {
+      group = { day, label: isToday(day) ? 'Today' : isTomorrow(day) ? 'Tomorrow' : format(day, 'EEEE, MMM d'), slots: [] };
+      groups.push(group);
+    }
+    group.slots.push(slot);
+  });
+  return groups.sort((a, b) => a.day - b.day);
 }
 
 function StatTile({ label, value, tone = 'neutral' }) {
@@ -111,6 +155,198 @@ function SubmitCandidateModal({ portalToken, assignmentId, jobTitle, onClose }) 
   );
 }
 
+function BookSlotModal({ slot, candidates, onCancel, onPick, isPending }) {
+  const [selectedId, setSelectedId] = useState(null);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl w-full max-w-md p-5 sm:p-6">
+        <div className="flex items-start justify-between mb-1">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-brand-50 flex items-center justify-center flex-shrink-0">
+              <CalendarClock className="w-4.5 h-4.5 text-brand-600" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-gray-900">Book this slot</h3>
+              <p className="text-xs text-gray-500">
+                {format(new Date(slot.start_time), 'EEEE, MMM d · h:mm a')}
+              </p>
+            </div>
+          </div>
+          <button onClick={onCancel} className="text-gray-400 hover:text-gray-600 flex-shrink-0">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 mt-3 mb-4">
+          <span className="text-xs font-medium px-2 py-1 rounded-full bg-indigo-50 text-indigo-700">
+            {ROUND_MAP[slot.round_type]?.label ?? slot.round_type}
+          </span>
+          <span className="text-xs font-medium px-2 py-1 rounded-full bg-surface-100 text-gray-600">
+            {slot.duration_mins} min
+          </span>
+        </div>
+
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Which candidate is this for?</p>
+        <div className="max-h-64 overflow-y-auto space-y-1 -mx-1 px-1">
+          {candidates.length === 0 ? (
+            <div className="text-center py-8">
+              <Users className="w-6 h-6 text-gray-300 mx-auto mb-2" />
+              <p className="text-sm text-gray-400">No submitted candidates for this job yet</p>
+            </div>
+          ) : (
+            candidates.map((c) => (
+              <button
+                key={c.application_id}
+                disabled={isPending}
+                onClick={() => setSelectedId(c.application_id)}
+                className={`w-full flex items-center gap-3 text-left px-3 py-2.5 rounded-xl border transition-colors disabled:opacity-50 ${
+                  selectedId === c.application_id
+                    ? 'border-brand-300 bg-brand-50'
+                    : 'border-transparent hover:bg-surface-50'
+                }`}
+              >
+                <div className="w-7 h-7 rounded-full bg-brand-100 flex items-center justify-center text-[11px] font-bold text-brand-700 flex-shrink-0">
+                  {c.candidate_name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
+                </div>
+                <p className="text-sm font-medium text-gray-900 truncate">{c.candidate_name}</p>
+              </button>
+            ))
+          )}
+        </div>
+
+        <button
+          onClick={() => selectedId && onPick(selectedId)}
+          disabled={!selectedId || isPending}
+          className="w-full flex items-center justify-center gap-2 mt-4 px-4 py-2.5 bg-brand-500 text-white text-sm font-semibold rounded-lg hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {isPending && <Loader2 className="w-4 h-4 animate-spin" />}
+          Confirm booking
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SlotsSection({ portalToken, assignmentId, candidates }) {
+  const queryClient = useQueryClient();
+  const [bookingSlot, setBookingSlot] = useState(null);
+
+  const { data: slots, isLoading } = useQuery({
+    queryKey: ['agency-portal-slots', portalToken, assignmentId],
+    queryFn: () => agenciesApi.portalAvailableSlots(portalToken, assignmentId).then((r) => r.data),
+  });
+
+  const bookMutation = useMutation({
+    mutationFn: (applicationId) =>
+      agenciesApi.portalBookSlot(portalToken, assignmentId, {
+        start_time: bookingSlot.start_time,
+        round_type: bookingSlot.round_type,
+        duration_mins: bookingSlot.duration_mins,
+        application_id: applicationId,
+      }),
+    onSuccess: () => {
+      toast.success('Interview booked!');
+      setBookingSlot(null);
+      queryClient.invalidateQueries({ queryKey: ['agency-portal-slots', portalToken, assignmentId] });
+      queryClient.invalidateQueries({ queryKey: ['agency-portal-assignment', portalToken, assignmentId] });
+    },
+    onError: (err) => {
+      toast.error(err.response?.data?.detail ?? 'This slot was just booked — please pick another.');
+      setBookingSlot(null);
+      queryClient.invalidateQueries({ queryKey: ['agency-portal-slots', portalToken, assignmentId] });
+    },
+  });
+
+  if (isLoading) {
+    return (
+      <div className="mb-8">
+        <SectionHeader icon={CalendarClock} title="Available interview slots" />
+        <div className="bg-white border border-surface-200 rounded-2xl p-5 space-y-2 animate-pulse">
+          <div className="h-4 bg-surface-100 rounded w-24" />
+          <div className="h-11 bg-surface-100 rounded-lg" />
+          <div className="h-11 bg-surface-100 rounded-lg" />
+        </div>
+      </div>
+    );
+  }
+
+  const dateGroups = groupSlotsByDate(slots);
+  if (dateGroups.length === 0) {
+    return (
+      <div className="mb-8">
+        <SectionHeader icon={CalendarClock} title="Available interview slots" />
+        <div className="bg-white border border-dashed border-surface-300 rounded-2xl px-5 py-6 flex items-center gap-3">
+          <div className="w-9 h-9 rounded-full bg-surface-100 flex items-center justify-center flex-shrink-0">
+            <CalendarX2 className="w-4.5 h-4.5 text-gray-400" />
+          </div>
+          <p className="text-sm text-gray-500">
+            No interview slots published for this role right now — check back soon, or contact your Nablon AI point of contact.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const totalAvailable = (slots ?? []).reduce((sum, s) => sum + s.available_count, 0);
+
+  return (
+    <div className="mb-8">
+      <SectionHeader
+        icon={CalendarClock}
+        title="Available interview slots"
+        action={
+          <span className="text-xs text-gray-400 flex items-center gap-1">
+            <Info className="w-3 h-3" />
+            Interviewer identity is kept anonymous until booked
+          </span>
+        }
+      />
+      <div className="bg-white border border-surface-200 rounded-2xl p-4 sm:p-5 space-y-5">
+        {dateGroups.map((group) => (
+          <div key={group.day.toISOString()}>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">{group.label}</p>
+            <div className="grid sm:grid-cols-2 gap-2">
+              {group.slots.map((s, i) => (
+                <div
+                  key={i}
+                  className="flex items-center justify-between gap-3 bg-surface-50 hover:bg-surface-100 rounded-xl px-3.5 py-2.5 transition-colors"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900">{format(new Date(s.start_time), 'h:mm a')}</p>
+                    <p className="text-xs text-gray-500 truncate">
+                      {ROUND_MAP[s.round_type]?.label ?? s.round_type} · {s.duration_mins} min · {s.available_count} available
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setBookingSlot(s)}
+                    className="flex-shrink-0 px-3 py-1.5 bg-white border border-brand-200 text-brand-700 text-xs font-semibold rounded-lg hover:bg-brand-500 hover:text-white hover:border-brand-500 transition-colors"
+                  >
+                    Book
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+        <p className="text-xs text-gray-400 pt-1 border-t border-surface-100">
+          {totalAvailable} slot{totalAvailable !== 1 ? 's' : ''} open across {dateGroups.length} day{dateGroups.length !== 1 ? 's' : ''}
+        </p>
+      </div>
+
+      {bookingSlot && (
+        <BookSlotModal
+          slot={bookingSlot}
+          candidates={candidates}
+          isPending={bookMutation.isPending}
+          onCancel={() => setBookingSlot(null)}
+          onPick={(applicationId) => bookMutation.mutate(applicationId)}
+        />
+      )}
+    </div>
+  );
+}
+
 function AssignmentDetail({ portalToken, assignmentId, jobTitle, onBack }) {
   const [showSubmit, setShowSubmit] = useState(false);
   const { data, isLoading } = useQuery({
@@ -136,26 +372,46 @@ function AssignmentDetail({ portalToken, assignmentId, jobTitle, onBack }) {
   }
 
   const quotaFull = data?.max_submissions && data?.submission_count >= data.max_submissions;
+  const candidates = data?.candidates ?? [];
+  // Most recently updated first — the candidates an agency needs to act on
+  // (or check in on) surface at the top instead of sorting by submission order.
+  const sortedCandidates = [...candidates].sort(
+    (a, b) => new Date(b.stage_updated_at) - new Date(a.stage_updated_at)
+  );
 
   return (
     <div>
-      <button onClick={onBack} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-5">
-        ← Back to all jobs
+      <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 mb-5 group">
+        <ChevronRight className="w-4 h-4 rotate-180 transition-transform group-hover:-translate-x-0.5" />
+        All jobs
       </button>
 
-      <div className="bg-white border border-surface-200 rounded-2xl p-5 mb-6">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div>
-            <h2 className="text-lg font-bold text-gray-900">{data?.job_title}</h2>
-            <p className="text-sm text-gray-500 mt-0.5">
-              {data?.max_submissions ? `Max ${data.max_submissions} submissions` : 'Unlimited submissions'}
-              {data?.expires_at ? ` · Expires ${format(new Date(data.expires_at), 'MMM d, yyyy')}` : ''}
-            </p>
+      {/* Job header */}
+      <div className="bg-white border border-surface-200 rounded-2xl p-5 sm:p-6 mb-6">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="flex items-start gap-3.5 min-w-0">
+            <div className="w-11 h-11 rounded-xl bg-brand-50 flex items-center justify-center flex-shrink-0">
+              <Briefcase className="w-5 h-5 text-brand-600" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-lg font-bold text-gray-900 leading-snug">{data?.job_title}</h2>
+              <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-surface-100 text-gray-600">
+                  {data?.max_submissions ? `Max ${data.max_submissions} submissions` : 'Unlimited submissions'}
+                </span>
+                {data?.expires_at && (
+                  <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-surface-100 text-gray-600 flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    Expires {format(new Date(data.expires_at), 'MMM d, yyyy')}
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
           <button
             onClick={() => setShowSubmit(true)}
             disabled={quotaFull}
-            className="flex items-center gap-1.5 px-4 py-2 bg-brand-500 text-white text-sm font-semibold rounded-lg hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+            className="flex items-center gap-1.5 px-4 py-2.5 bg-brand-500 text-white text-sm font-semibold rounded-lg hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0 shadow-sm"
           >
             <UserPlus className="w-4 h-4" />
             Submit candidate
@@ -163,29 +419,18 @@ function AssignmentDetail({ portalToken, assignmentId, jobTitle, onBack }) {
         </div>
 
         {quotaFull && (
-          <p className="text-xs font-medium text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mt-4 inline-block">
+          <p className="text-xs font-medium text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mt-4 inline-flex items-center gap-1.5">
+            <XCircle className="w-3.5 h-3.5" />
             Submission limit reached for this job
           </p>
         )}
 
         {stageSummary.total > 0 && (
-          <div className="mt-5 pt-5 border-t border-surface-100 flex items-center gap-6 flex-wrap">
-            <div>
-              <p className="text-xl font-bold text-gray-900">{stageSummary.total}</p>
-              <p className="text-xs text-gray-400">Submitted</p>
-            </div>
-            <div>
-              <p className="text-xl font-bold text-amber-600">{stageSummary.inProgress}</p>
-              <p className="text-xs text-gray-400">In progress</p>
-            </div>
-            <div>
-              <p className="text-xl font-bold text-green-600">{stageSummary.hired}</p>
-              <p className="text-xs text-gray-400">Hired</p>
-            </div>
-            <div>
-              <p className="text-xl font-bold text-red-400">{stageSummary.rejected}</p>
-              <p className="text-xs text-gray-400">Not proceeding</p>
-            </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-5 pt-5 border-t border-surface-100">
+            <StatTile label="Submitted" value={stageSummary.total} />
+            <StatTile label="In progress" value={stageSummary.inProgress} tone="amber" />
+            <StatTile label="Hired" value={stageSummary.hired} tone="green" />
+            <StatTile label="Not proceeding" value={stageSummary.rejected} />
           </div>
         )}
       </div>
@@ -199,34 +444,51 @@ function AssignmentDetail({ portalToken, assignmentId, jobTitle, onBack }) {
         />
       )}
 
-      {data?.candidates.length === 0 && (
-        <div className="text-center py-12 text-gray-400 bg-white border border-surface-200 rounded-2xl">
+      <SlotsSection portalToken={portalToken} assignmentId={assignmentId} candidates={candidates} />
+
+      <SectionHeader icon={Users} title="Candidates" count={candidates.length} />
+      {candidates.length === 0 ? (
+        <div className="text-center py-12 text-gray-400 bg-white border border-dashed border-surface-300 rounded-2xl">
           <Users className="w-8 h-8 mx-auto mb-2 opacity-30" />
-          <p className="text-sm">No candidates submitted yet. Upload a resume with "Submit candidate", or share the job link.</p>
+          <p className="text-sm">No candidates submitted yet.</p>
+          <p className="text-xs mt-1">Upload a resume with "Submit candidate" above, or share the job link.</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {sortedCandidates.map((c) => {
+            const isTerminal = c.stage === 'rejected' || c.stage === 'withdrawn';
+            return (
+              <div
+                key={c.application_id}
+                className={`flex flex-wrap items-center justify-between gap-3 bg-white border rounded-xl px-4 sm:px-5 py-3.5 transition-colors ${
+                  isTerminal ? 'border-surface-100 opacity-70' : 'border-surface-200 hover:border-brand-200 hover:shadow-sm'
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                    c.stage === 'hired' ? 'bg-green-100 text-green-700' : 'bg-brand-100 text-brand-700'
+                  }`}>
+                    {c.candidate_name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 truncate">{c.candidate_name}</p>
+                    <p className="text-xs text-gray-400 flex items-center gap-1">
+                      <Hourglass className="w-3 h-3" />
+                      Applied {formatDistanceToNow(new Date(c.applied_at), { addSuffix: true })}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <StageBadge stage={c.stage} />
+                  <span className="text-xs text-gray-400 hidden sm:block">
+                    Updated {formatDistanceToNow(new Date(c.stage_updated_at), { addSuffix: true })}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
-
-      <div className="space-y-2">
-        {data?.candidates.map((c) => (
-          <div key={c.application_id} className="flex flex-wrap items-center justify-between gap-3 bg-white border border-surface-200 rounded-xl px-4 sm:px-5 py-4 hover:border-surface-300 transition-colors">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-8 h-8 rounded-full bg-brand-100 flex items-center justify-center text-xs font-bold text-brand-700 flex-shrink-0">
-                {c.candidate_name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-gray-900 truncate">{c.candidate_name}</p>
-                <p className="text-xs text-gray-400">Applied {formatDistanceToNow(new Date(c.applied_at), { addSuffix: true })}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <StageBadge stage={c.stage} />
-              <span className="text-xs text-gray-400 hidden sm:block">
-                Updated {formatDistanceToNow(new Date(c.stage_updated_at), { addSuffix: true })}
-              </span>
-            </div>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

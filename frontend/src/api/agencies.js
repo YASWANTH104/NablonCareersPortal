@@ -30,4 +30,8 @@ export const agenciesApi = {
       { headers: { 'Content-Type': 'multipart/form-data' } }
     );
   },
+  portalAvailableSlots: (portalToken, assignmentId) =>
+    client.get(`/agency-portal/${portalToken}/assignments/${assignmentId}/slots`),
+  portalBookSlot: (portalToken, assignmentId, data) =>
+    client.post(`/agency-portal/${portalToken}/assignments/${assignmentId}/slots/book`, data),
 };

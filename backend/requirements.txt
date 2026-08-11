@@ -12,7 +12,6 @@ python-multipart==0.0.12
 redis==5.2.0
 celery==5.4.0
 azure-storage-blob==12.23.0
-azure-communication-email==1.0.0
 jinja2==3.1.4
 weasyprint==62.3
 pydyf==0.10.0

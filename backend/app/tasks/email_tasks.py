@@ -1035,7 +1035,7 @@ async def _send_report_email_async(to_emails: list[str], report_title: str, xlsx
     if ok:
         logger.info(f"Report email sent: report={report_title}, to={to_emails}")
     else:
-        logger.error(f"Report email send failed (ACS/email_service returned False): report={report_title}, to={to_emails}")
+        logger.error(f"Report email send failed (email_service returned False): report={report_title}, to={to_emails}")
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)

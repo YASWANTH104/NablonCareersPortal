@@ -24,8 +24,10 @@ async def send_email(
         template = jinja_env.get_template(f"{template_name}.html")
         html_content = template.render(**context)
 
-        if settings.AZURE_COMMUNICATION_CONNECTION_STRING and settings.AZURE_EMAIL_SENDER:
-            return await _send_via_acs(to_email, subject, html_content)
+        from app.services import ms_graph_service
+
+        if ms_graph_service.is_configured():
+            return await _send_via_graph(to_email, subject, html_content)
         else:
             logger.info(f"[DEV] Email to {to_email}: {subject}")
             logger.debug(html_content[:200])
@@ -35,36 +37,54 @@ async def send_email(
         return False
 
 
-async def _send_via_acs(
+async def _send_via_graph(
     to_email: str | list[str],
     subject: str,
     html_content: str,
     attachments: list[dict] | None = None,
 ) -> bool:
-    import asyncio
-    from azure.communication.email import EmailClient
+    """Sends via Microsoft Graph's sendMail, as the noreply@nablon.ai shared
+    mailbox — the sole email transport now; ACS has been fully retired.
+    Reuses the same app-only token/app registration as the Teams calendar
+    integration (ms_graph_service), which already has Mail.Send consented
+    alongside Calendars.ReadWrite.
 
-    client = EmailClient.from_connection_string(settings.AZURE_COMMUNICATION_CONNECTION_STRING)
+    `attachments`, when given, use the same {name, contentType, contentInBase64}
+    shape callers already built for the old ACS path — translated here into
+    Graph's fileAttachment shape so nothing upstream (offer letters, report
+    exports) had to change."""
+    import httpx
+    from app.services import ms_graph_service
 
+    token = await ms_graph_service._get_app_token()
     recipients = [to_email] if isinstance(to_email, str) else to_email
     message = {
-        "senderAddress": settings.AZURE_EMAIL_SENDER,
-        "recipients": {"to": [{"address": addr} for addr in recipients]},
-        "content": {
-            "subject": subject,
-            "html": html_content,
-        },
+        "subject": subject,
+        "body": {"contentType": "HTML", "content": html_content},
+        "toRecipients": [{"emailAddress": {"address": addr}} for addr in recipients],
     }
     if attachments:
-        message["attachments"] = attachments
+        message["attachments"] = [
+            {
+                "@odata.type": "#microsoft.graph.fileAttachment",
+                "name": a["name"],
+                "contentType": a["contentType"],
+                "contentBytes": a["contentInBase64"],
+            }
+            for a in attachments
+        ]
 
-    def _sync_send():
-        poller = client.begin_send(message)
-        result = poller.result()
-        return result.get("status", "").lower() == "succeeded"
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            f"https://graph.microsoft.com/v1.0/users/{settings.MS_GRAPH_MAIL_SENDER}/sendMail",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"message": message, "saveToSentItems": "true"},
+        )
 
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _sync_send)
+    if resp.status_code == 202:
+        return True
+    logger.error(f"Graph sendMail failed ({resp.status_code}): {resp.text[:300]}")
+    return False
 
 
 async def send_email_with_attachment(
@@ -74,17 +94,15 @@ async def send_email_with_attachment(
     context: dict,
     attachments: list[dict] | None = None,
 ) -> bool:
-    """Send email with optional attachments. Each attachment: {name, contentType, contentInBase64} —
-    contentType must be a real MIME type (e.g. "application/pdf"), not a bare
-    extension; Azure Communication Services' Email API 400s with "Request body
-    validation error. See property 'attachments[0].contentType'" otherwise, and
-    also does not recognize a field named attachmentType at all."""
+    """Send email with optional attachments. Each attachment: {name, contentType, contentInBase64}."""
     try:
         template = jinja_env.get_template(f"{template_name}.html")
         html_content = template.render(**context)
 
-        if settings.AZURE_COMMUNICATION_CONNECTION_STRING and settings.AZURE_EMAIL_SENDER:
-            return await _send_via_acs(to_email, subject, html_content, attachments)
+        from app.services import ms_graph_service
+
+        if ms_graph_service.is_configured():
+            return await _send_via_graph(to_email, subject, html_content, attachments)
         else:
             logger.info(f"[DEV] Email+attachment to {to_email}: {subject} (attachments: {len(attachments or [])})")
             return True

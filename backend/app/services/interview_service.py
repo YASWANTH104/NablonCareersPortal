@@ -352,7 +352,7 @@ def _interview_to_response(
 async def create_interview(
     db: AsyncSession,
     data: InterviewCreate,
-    created_by: uuid.UUID,
+    created_by: Optional[uuid.UUID] = None,
 ) -> InterviewResponse:
     if data.panelists:
         conflicts = await _check_panelist_conflicts(
@@ -751,6 +751,19 @@ async def cancel_interview(db: AsyncSession, interview_id: uuid.UUID) -> None:
     )
     interview.status = "cancelled"
     await db.commit()
+
+    # If this interview came from a published interviewer slot, cancelling it
+    # returns that capacity to the pool rather than losing it permanently.
+    from app.models.interview_slot import InterviewSlot
+    slot = (await db.execute(
+        select(InterviewSlot).where(InterviewSlot.interview_id == interview_id)
+    )).scalar_one_or_none()
+    if slot:
+        slot.status = "open"
+        slot.interview_id = None
+        slot.booked_by_agency_id = None
+        slot.booked_by_user_id = None
+        await db.commit()
 
     try:
         from app.models.notification import Notification
