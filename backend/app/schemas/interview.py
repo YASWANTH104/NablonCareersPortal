@@ -84,6 +84,8 @@ class InterviewFeedbackCreate(BaseModel):
     strengths: Optional[str] = None
     weaknesses: Optional[str] = None
     notes: Optional[str] = None
+    attachment_url: Optional[str] = None
+    attachment_name: Optional[str] = None
 
 
 class InterviewFeedbackResponse(BaseModel):
@@ -101,6 +103,8 @@ class InterviewFeedbackResponse(BaseModel):
     strengths: Optional[str] = None
     weaknesses: Optional[str] = None
     notes: Optional[str] = None
+    attachment_url: Optional[str] = None
+    attachment_name: Optional[str] = None
     is_shared_with_candidate: bool
     created_at: datetime
 

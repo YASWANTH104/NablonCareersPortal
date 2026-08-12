@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import {
   DndContext, DragOverlay, closestCorners,
@@ -542,16 +542,55 @@ function AddCandidateModal({ jobs, onClose }) {
 
 export default function ApplicantsPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
 
-  const [view, setView] = useState('kanban');
+  // Carried into ApplicationDetailPage as location.state.from so its "All
+  // applicants" back-link can return to this exact filtered view instead of
+  // a bare /hr/applicants — see the note by the filter state below for why.
+  const openApplication = (appId) =>
+    navigate(`/hr/applicants/${appId}`, { state: { from: `${location.pathname}${location.search}` } });
+
+  // Filters live in the URL (not plain useState) so they survive opening an
+  // application and navigating back — a bare useState here resets to defaults
+  // on every remount, which is exactly what "picking a job filter, opening an
+  // applicant, then going back resets to All jobs" was: ApplicantsPage gets
+  // unmounted when navigating to /hr/applicants/:id and remounts fresh on
+  // return, so the filter has to be recovered from somewhere that survives
+  // that — the URL, same as ApplicationDetailPage's own tab state.
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const view = searchParams.get('view') || 'kanban';
+  const selectedJobId = searchParams.get('jobId') || '';
+  const stageFilter = searchParams.get('stage') || '';
+  const agencyFilter = searchParams.get('agencyId') || '';
+  const search = searchParams.get('search') || '';
+  const page = Number(searchParams.get('page') || '1');
+
   const [showAddCandidate, setShowAddCandidate] = useState(false);
   const [showBulkUpload, setShowBulkUpload] = useState(false);
-  const [selectedJobId, setSelectedJobId] = useState('');
-  const [stageFilter, setStageFilter] = useState('');
-  const [agencyFilter, setAgencyFilter] = useState('');
-  const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
+
+  const setView = (v) => setSearchParams((prev) => {
+    const next = new URLSearchParams(prev);
+    if (v === 'kanban') next.delete('view'); else next.set('view', v);
+    return next;
+  }, { replace: true });
+
+  // Any filter change resets pagination — mirrors the previous setX(); setPage(1) pairs.
+  const setFilter = (key, value) => setSearchParams((prev) => {
+    const next = new URLSearchParams(prev);
+    if (value) next.set(key, value); else next.delete(key);
+    next.delete('page');
+    return next;
+  }, { replace: true });
+
+  const setPage = (updater) => setSearchParams((prev) => {
+    const next = new URLSearchParams(prev);
+    const current = Number(prev.get('page') || '1');
+    const newPage = typeof updater === 'function' ? updater(current) : updater;
+    if (newPage <= 1) next.delete('page'); else next.set('page', String(newPage));
+    return next;
+  }, { replace: true });
 
   const { data: agenciesData } = useQuery({
     queryKey: ['agencies'],
@@ -658,7 +697,7 @@ export default function ApplicantsPage() {
         {/* Job selector */}
         <select
           value={selectedJobId}
-          onChange={(e) => { setSelectedJobId(e.target.value); setPage(1); }}
+          onChange={(e) => setFilter('jobId', e.target.value)}
           className="text-sm border border-surface-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 max-w-full min-w-0 flex-1 sm:flex-none"
         >
           <option value="">All jobs</option>
@@ -671,7 +710,7 @@ export default function ApplicantsPage() {
         {view === 'table' && (
           <select
             value={stageFilter}
-            onChange={(e) => { setStageFilter(e.target.value); setPage(1); }}
+            onChange={(e) => setFilter('stage', e.target.value)}
             className="text-sm border border-surface-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 max-w-full min-w-0 flex-1 sm:flex-none"
           >
             <option value="">All stages</option>
@@ -685,7 +724,7 @@ export default function ApplicantsPage() {
         {agenciesData?.length > 0 && (
           <select
             value={agencyFilter}
-            onChange={(e) => { setAgencyFilter(e.target.value); setPage(1); }}
+            onChange={(e) => setFilter('agencyId', e.target.value)}
             className="text-sm border border-surface-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 max-w-full min-w-0 flex-1 sm:flex-none"
           >
             <option value="">All sources</option>
@@ -702,12 +741,12 @@ export default function ApplicantsPage() {
             type="text"
             placeholder="Search by name…"
             value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            onChange={(e) => setFilter('search', e.target.value)}
             className="pl-9 pr-8 py-2 border border-surface-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent w-full"
           />
           {search && (
             <button
-              onClick={() => { setSearch(''); setPage(1); }}
+              onClick={() => setFilter('search', '')}
               className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
             >
               <X className="w-3.5 h-3.5" />
@@ -720,7 +759,7 @@ export default function ApplicantsPage() {
       {view === 'kanban' ? (
         <KanbanView
           filters={filters}
-          onCardClick={(id) => navigate(`/hr/applicants/${id}`)}
+          onCardClick={(id) => openApplication(id)}
           onToggleHold={toggleHold}
         />
       ) : isLoading ? (
@@ -742,7 +781,7 @@ export default function ApplicantsPage() {
         <>
           <TableView
             applications={applications}
-            onRowClick={(id) => navigate(`/hr/applicants/${id}`)}
+            onRowClick={(id) => openApplication(id)}
             onToggleHold={toggleHold}
           />
           {data && data.pages > 1 && (

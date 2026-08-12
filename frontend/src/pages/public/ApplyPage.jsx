@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useState, useCallback, useEffect } from 'react';
+import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -34,10 +34,25 @@ const schema = z.object({
 export default function ApplyPage() {
   const { slug } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { accessToken, user } = useAuthStore();
   const queryClient = useQueryClient();
   const [resumeFile, setResumeFile] = useState(null);
   const [submitted, setSubmitted] = useState(false);
+
+  // Referral invite emails link straight here (?referral=...) instead of via
+  // JobDetailPage, which is the only other place this capture used to run —
+  // so a candidate opening the email went straight to "Sign in to apply" and
+  // the referral id was never stored anywhere, silently attributing the
+  // eventual application as "direct". Captured into sessionStorage (not just
+  // read from the URL) because the sign-in/register redirect below drops the
+  // query string, and sessionStorage is what survives that round trip.
+  useEffect(() => {
+    const ref = searchParams.get('ref');
+    const referralRef = searchParams.get('referral');
+    if (ref) sessionStorage.setItem('agency_ref', ref);
+    if (referralRef) sessionStorage.setItem('referral_ref', referralRef);
+  }, [searchParams]);
 
   const { data: job, isLoading: jobLoading } = useQuery({
     queryKey: ['job', slug],

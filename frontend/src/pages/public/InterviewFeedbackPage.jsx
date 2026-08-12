@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { ClipboardCheck, Star, Loader2, CheckCircle, AlertTriangle } from 'lucide-react';
+import { ClipboardCheck, Star, Loader2, CheckCircle, AlertTriangle, Paperclip, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { interviewsApi } from '@/api/interviews';
 
@@ -50,6 +50,9 @@ export default function InterviewFeedbackPage() {
   const { token } = useParams();
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const fileInputRef = useRef(null);
+  const [uploading, setUploading] = useState(false);
+  const [attachment, setAttachment] = useState(null); // { url, name }
 
   const [form, setForm] = useState({
     overall_rating: null,
@@ -84,10 +87,27 @@ export default function InterviewFeedbackPage() {
         weaknesses: existing.weaknesses ?? '',
         notes: existing.notes ?? '',
       });
+      if (existing.attachment_url) {
+        setAttachment({ url: existing.attachment_url, name: existing.attachment_name });
+      }
     }
   }, [data]);
 
   const set = (key) => (val) => setForm((f) => ({ ...f, [key]: val }));
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const res = await interviewsApi.uploadFeedbackAttachmentByToken(token, file);
+      setAttachment(res.data);
+    } catch (err) {
+      toast.error(err.response?.data?.detail ?? 'Failed to upload attachment');
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -102,6 +122,8 @@ export default function InterviewFeedbackPage() {
         strengths: form.strengths || null,
         weaknesses: form.weaknesses || null,
         notes: form.notes || null,
+        attachment_url: attachment?.url || null,
+        attachment_name: attachment?.name || null,
       });
       setSubmitted(true);
     } catch (err) {
@@ -261,9 +283,37 @@ export default function InterviewFeedbackPage() {
             </div>
           </div>
 
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Attachment (optional)</label>
+            <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileChange} />
+            {attachment ? (
+              <div className="flex items-center gap-2 px-3 py-2 border border-surface-300 rounded-lg text-sm text-gray-700 bg-surface-50">
+                <Paperclip className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                <span className="truncate flex-1">{attachment.name}</span>
+                <button
+                  type="button"
+                  onClick={() => { setAttachment(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}
+                  className="text-gray-400 hover:text-gray-600 flex-shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="flex items-center gap-2 px-4 py-2.5 border border-dashed border-surface-300 rounded-lg text-sm text-gray-500 hover:border-brand-400 hover:text-brand-600 transition-colors disabled:opacity-60"
+              >
+                {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
+                {uploading ? 'Uploading…' : 'Attach a file'}
+              </button>
+            )}
+          </div>
+
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || uploading}
             className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-brand-500 text-white font-semibold rounded-lg text-sm hover:bg-brand-600 disabled:opacity-60 transition-colors"
           >
             {submitting && <Loader2 className="w-4 h-4 animate-spin" />}

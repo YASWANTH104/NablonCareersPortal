@@ -13,6 +13,7 @@ from app.schemas.application import (
     ApplicationStageUpdate, ApplicationListResponse,
     ApplicationRatingUpdate, ApplicationAssignUpdate, ApplicationHoldUpdate,
     ApplicationUpdate, NoteCreate, StageHistoryEntry, ApplicationResumeResponse,
+    ApplicationMoveJobRequest,
 )
 from app.services import application_service
 
@@ -286,6 +287,16 @@ async def move_stage(
     return await application_service.move_stage(
         db, application_id, data.stage, user.id, data.notes, data.rejection_reason, data.drop_category
     )
+
+
+@router.patch("/{application_id}/move-job", response_model=ApplicationResponse)
+async def move_application_job(
+    application_id: uuid.UUID,
+    data: ApplicationMoveJobRequest,
+    user=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await application_service.move_application_job(db, application_id, data.new_job_id, user.id)
 
 
 @router.patch("/{application_id}/star", response_model=ApplicationResponse)

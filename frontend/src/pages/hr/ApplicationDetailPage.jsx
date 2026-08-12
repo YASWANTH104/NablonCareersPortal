@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
+import { useParams, useNavigate, Link, useSearchParams, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -10,7 +10,7 @@ import {
   ArrowLeft, Star, ExternalLink, FileText, Calendar, MessageSquare,
   Clock, User, Github, Linkedin, Globe, ChevronDown, Plus, Loader2,
   Video, Phone, MapPin, CheckCircle2, AlertCircle, Send, FolderOpen, Download, Eye, X,
-  Pencil, Wallet, Briefcase, GraduationCap, AlertTriangle, Pause, PlayCircle,
+  Pencil, Wallet, Briefcase, GraduationCap, AlertTriangle, Pause, PlayCircle, ArrowRightLeft,
 } from 'lucide-react';
 import { applicationsApi } from '@/api/applications';
 import { interviewsApi } from '@/api/interviews';
@@ -27,7 +27,7 @@ import ScheduleTimeGrid from '@/components/interviews/ScheduleTimeGrid';
 import StageReasonDialog from '@/components/shared/StageReasonDialog';
 import HoldReasonDialog from '@/components/shared/HoldReasonDialog';
 import { useHoldToggle } from '@/hooks/useHoldToggle';
-import { PIPELINE_STAGES, STAGE_MAP, VALID_TRANSITIONS, REASON_REQUIRED_STAGES } from '@/constants/pipelineStages';
+import { PIPELINE_STAGES, STAGE_MAP, VALID_TRANSITIONS, REASON_REQUIRED_STAGES, MOVE_JOB_ALLOWED_STAGES } from '@/constants/pipelineStages';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -1447,13 +1447,90 @@ function EditCandidateDetailsModal({ app, onClose, onSuccess }) {
   );
 }
 
+// ── Move to another job (HR — early stages only) ──────────────────────────────
+
+function MoveJobModal({ app, currentJobTitle, onClose, onSuccess }) {
+  const [selectedJobId, setSelectedJobId] = useState('');
+
+  const { data: jobsData, isLoading, isError } = useQuery({
+    queryKey: ['hr-jobs-move-target'],
+    queryFn: () => jobsApi.list({ status: 'published', limit: 100 }).then((r) => r.data),
+  });
+
+  const jobs = (jobsData?.items ?? []).filter((j) => j.id !== app.job_id);
+
+  const mut = useMutation({
+    mutationFn: () => applicationsApi.moveJob(app.id, selectedJobId),
+    onSuccess: () => { toast.success('Candidate moved to the new job'); onSuccess(); },
+    onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to move candidate'),
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200">
+          <h2 className="font-semibold text-gray-900">Move to another job</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="p-6 space-y-4">
+          <p className="text-sm text-gray-500">
+            Currently applied for <strong>{currentJobTitle ?? 'this role'}</strong>. Their resume, notes and
+            current stage carry over as-is to the job you pick below.
+          </p>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Target job</label>
+            <select
+              value={selectedJobId}
+              onChange={(e) => setSelectedJobId(e.target.value)}
+              className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              <option value="">
+                {isLoading ? 'Loading jobs…' : isError ? 'Failed to load jobs' : jobs.length === 0 ? 'No other published jobs' : 'Select a job'}
+              </option>
+              {jobs.map((j) => (
+                <option key={j.id} value={j.id}>{j.title}</option>
+              ))}
+            </select>
+            {isError && (
+              <p className="text-xs text-red-500 mt-1">
+                Couldn't load the job list. Please close this and try again.
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 px-6 py-4 border-t border-surface-200">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">
+            Cancel
+          </button>
+          <button
+            disabled={!selectedJobId || mut.isPending}
+            onClick={() => mut.mutate()}
+            className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white text-sm font-semibold rounded-lg hover:bg-brand-600 disabled:opacity-50"
+          >
+            {mut.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+            Move candidate
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function ApplicationDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  // ApplicantsPage passes its current URL (filters included) as location.state.from
+  // when navigating here — falling back to a bare list only when arriving some
+  // other way (e.g. a bookmarked/direct link to this application).
+  const backToApplicants = location.state?.from || '/hr/applicants';
 
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') ?? 'overview');
   const [stageMenuOpen, setStageMenuOpen] = useState(false);
@@ -1463,6 +1540,7 @@ export default function ApplicationDetailPage() {
   const [showFeedbackFor, setShowFeedbackFor] = useState(null);
   const [pendingReasonStage, setPendingReasonStage] = useState(null); // stage name awaiting a reason, or null
   const [editingDetails, setEditingDetails] = useState(false);
+  const [showMoveJobModal, setShowMoveJobModal] = useState(false);
   const [noteText, setNoteText] = useState('');
   const [offerPdfUrl, setOfferPdfUrl] = useState(null);
   const [offerPdfLoading, setOfferPdfLoading] = useState(false);
@@ -1614,7 +1692,7 @@ export default function ApplicationDetailPage() {
     return (
       <div className="text-center py-20 text-gray-500">
         <p>Application not found.</p>
-        <Link to="/hr/applicants" className="text-brand-600 text-sm mt-2 block">← Back to applicants</Link>
+        <Link to={backToApplicants} className="text-brand-600 text-sm mt-2 block">← Back to applicants</Link>
       </div>
     );
   }
@@ -1652,7 +1730,7 @@ export default function ApplicationDetailPage() {
     <div>
       {/* Back */}
       <Link
-        to="/hr/applicants"
+        to={backToApplicants}
         className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-5"
       >
         <ArrowLeft className="w-4 h-4" /> All applicants
@@ -1681,11 +1759,21 @@ export default function ApplicationDetailPage() {
             </div>
             <p className="text-sm text-gray-500 mt-0.5">{app.applicant?.email}</p>
             {jobData && (
-              <p className="text-sm text-gray-600 mt-1">
-                Applied for{' '}
-                <Link to={`/jobs/${jobData.slug}`} className="text-brand-600 hover:underline" target="_blank">
-                  {jobData.title}
-                </Link>
+              <p className="text-sm text-gray-600 mt-1 flex items-center gap-2 flex-wrap">
+                <span>
+                  Applied for{' '}
+                  <Link to={`/jobs/${jobData.slug}`} className="text-brand-600 hover:underline" target="_blank">
+                    {jobData.title}
+                  </Link>
+                </span>
+                {MOVE_JOB_ALLOWED_STAGES.has(app.stage) && (
+                  <button
+                    onClick={() => setShowMoveJobModal(true)}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-brand-600 border border-surface-300 hover:border-brand-300 rounded-full px-2 py-0.5 transition-colors"
+                  >
+                    <ArrowRightLeft className="w-3 h-3" /> Move to another job
+                  </button>
+                )}
               </p>
             )}
           </div>
@@ -2649,6 +2737,20 @@ export default function ApplicationDetailPage() {
           onSuccess={() => {
             setEditingDetails(false);
             queryClient.invalidateQueries({ queryKey: ['application-detail', id] });
+          }}
+        />
+      )}
+
+      {/* Move to another job (HR, applied/screening only) */}
+      {showMoveJobModal && (
+        <MoveJobModal
+          app={app}
+          currentJobTitle={jobData?.title}
+          onClose={() => setShowMoveJobModal(false)}
+          onSuccess={() => {
+            setShowMoveJobModal(false);
+            queryClient.invalidateQueries({ queryKey: ['application-detail', id] });
+            queryClient.invalidateQueries({ queryKey: ['hr-applications'] });
           }}
         />
       )}

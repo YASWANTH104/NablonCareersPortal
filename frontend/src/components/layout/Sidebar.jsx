@@ -18,6 +18,8 @@ const NAV_ITEMS = {
     { to: '/hr/interviews',  label: 'Interviews',   icon: Calendar },
     { to: '/hr/availability', label: 'Interviewer Availability', icon: CalendarClock },
     { to: '/hr/referrals',   label: 'Referrals',    icon: UserCheck },
+    { to: '/employee/refer',        label: 'Refer a Candidate', icon: UserCheck },
+    { to: '/employee/my-referrals', label: 'My Referrals',      icon: Award },
     { to: '/hr/offers',      label: 'Offers',       icon: FileText },
     { to: '/hr/agencies',    label: 'Agencies',     icon: Building2 },
     { to: '/hr/reports',     label: 'Reports',      icon: BarChart2 },

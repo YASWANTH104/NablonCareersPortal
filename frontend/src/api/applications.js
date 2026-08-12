@@ -39,6 +39,7 @@ export const applicationsApi = {
   update: (id, data) => client.patch(`/applications/${id}`, data),
   moveStage: (id, stage, notes, rejection_reason, drop_category) =>
     client.patch(`/applications/${id}/stage`, { stage, notes, rejection_reason, drop_category }),
+  moveJob: (id, newJobId) => client.patch(`/applications/${id}/move-job`, { new_job_id: newJobId }),
   assign: (id, assigneeId) => client.patch(`/applications/${id}/assign`, { assignee_id: assigneeId }),
   setHold: (id, onHold, holdReason) => client.patch(`/applications/${id}/hold`, { on_hold: onHold, hold_reason: holdReason }),
   toggleStar: (id) => client.patch(`/applications/${id}/star`),

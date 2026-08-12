@@ -84,6 +84,10 @@ class ApplicationHoldUpdate(BaseModel):
     hold_reason: Optional[str] = None
 
 
+class ApplicationMoveJobRequest(BaseModel):
+    new_job_id: uuid.UUID
+
+
 class NoteCreate(BaseModel):
     note: str
 
