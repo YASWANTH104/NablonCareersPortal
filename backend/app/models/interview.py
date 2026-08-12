@@ -78,6 +78,10 @@ class InterviewFeedback(Base):
     weaknesses: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
 
+    # Optional supporting file (scorecard, marked-up code, written test, etc.)
+    attachment_url: Mapped[str | None] = mapped_column(Text)
+    attachment_name: Mapped[str | None] = mapped_column(String(255))
+
     is_shared_with_candidate: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 

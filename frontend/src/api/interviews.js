@@ -11,10 +11,24 @@ export const interviewsApi = {
   complete: (id, data = {}) => client.patch(`/interviews/${id}/complete`, data),
   cancel: (id) => client.delete(`/interviews/${id}`),
   submitFeedback: (id, data) => client.post(`/interviews/${id}/feedback`, data),
+  uploadFeedbackAttachment: (id, file) => {
+    const form = new FormData();
+    form.append('file', file);
+    return client.post(`/interviews/${id}/feedback/attachment`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
   getFeedback: (id) => client.get(`/interviews/${id}/feedback`),
   submitSelfFeedback: (id, data) => client.post(`/interviews/${id}/self-feedback`, data),
   getSelfFeedback: (id) => client.get(`/interviews/${id}/self-feedback`),
   getCandidateSummary: (id) => client.get(`/interviews/${id}/candidate-summary`),
   getFeedbackByToken: (token) => client.get(`/interviews/feedback-by-token/${token}`),
   submitFeedbackByToken: (token, data) => client.post(`/interviews/feedback-by-token/${token}`, data),
+  uploadFeedbackAttachmentByToken: (token, file) => {
+    const form = new FormData();
+    form.append('file', file);
+    return client.post(`/interviews/feedback-by-token/${token}/attachment`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
 };

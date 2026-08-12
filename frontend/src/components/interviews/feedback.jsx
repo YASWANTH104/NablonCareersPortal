@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Star, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
+import { Star, CheckCircle2, AlertCircle, Loader2, Paperclip, Eye, X } from 'lucide-react';
 import { interviewsApi } from '@/api/interviews';
+import { resolveFileUrl } from '@/components/shared/ResumeVersions';
+import FilePreviewModal from '@/components/shared/FilePreviewModal';
 
 export const RECOMMENDATION_LABELS = {
   strong_yes: { label: 'Strong Yes', color: 'text-green-700 bg-green-50' },
@@ -42,6 +44,7 @@ function ScoreSelector({ value, onChange }) {
 }
 
 export function InterviewFeedbackCard({ fb }) {
+  const [showAttachment, setShowAttachment] = useState(false);
   const rec = RECOMMENDATION_LABELS[fb.recommendation];
   const scores = [
     { label: 'Technical',       val: fb.technical_score },
@@ -100,6 +103,26 @@ export function InterviewFeedbackCard({ fb }) {
       )}
 
       {fb.notes && <p className="text-xs text-gray-600 bg-white rounded-lg p-2.5 border border-surface-100">{fb.notes}</p>}
+
+      {fb.attachment_url && (
+        <>
+          <button
+            type="button"
+            onClick={() => setShowAttachment(true)}
+            className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-brand-600 hover:text-brand-700"
+          >
+            <Eye className="w-3.5 h-3.5" /> View attachment
+            {fb.attachment_name ? `: ${fb.attachment_name}` : ''}
+          </button>
+          {showAttachment && (
+            <FilePreviewModal
+              url={resolveFileUrl(fb.attachment_url)}
+              name={fb.attachment_name}
+              onClose={() => setShowAttachment(false)}
+            />
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -111,6 +134,14 @@ export function InlineFeedbackForm({ interviewId, onSuccess, onCancel }) {
   const [scores, setScores] = useState({
     technical_score: null, communication_score: null,
     cultural_fit_score: null, problem_solving_score: null,
+  });
+  const fileInputRef = useRef(null);
+  const [attachment, setAttachment] = useState(null); // { url, name }
+
+  const uploadMut = useMutation({
+    mutationFn: (file) => interviewsApi.uploadFeedbackAttachment(interviewId, file),
+    onSuccess: (res) => setAttachment(res.data),
+    onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to upload attachment'),
   });
 
   const submitMut = useMutation({
@@ -125,6 +156,10 @@ export function InlineFeedbackForm({ interviewId, onSuccess, onCancel }) {
     if (recommendation) payload.recommendation  = recommendation;
     Object.entries(scores).forEach(([k, v]) => { if (v != null) payload[k] = v; });
     Object.keys(payload).forEach((k) => { if (payload[k] === '' || payload[k] == null) delete payload[k]; });
+    if (attachment) {
+      payload.attachment_url = attachment.url;
+      payload.attachment_name = attachment.name;
+    }
     submitMut.mutate(payload);
   };
 
@@ -203,10 +238,46 @@ export function InlineFeedbackForm({ interviewId, onSuccess, onCancel }) {
         />
       </div>
 
+      <div>
+        <label className="block text-xs font-medium text-gray-600 mb-1">Attachment (optional)</label>
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) uploadMut.mutate(file);
+          }}
+        />
+        {attachment ? (
+          <div className="flex items-center gap-2 px-3 py-1.5 border border-surface-300 rounded-lg text-sm text-gray-700 bg-surface-50">
+            <Paperclip className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+            <span className="truncate flex-1">{attachment.name}</span>
+            <button
+              type="button"
+              onClick={() => { setAttachment(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}
+              className="text-gray-400 hover:text-gray-600 flex-shrink-0"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadMut.isPending}
+            className="flex items-center gap-2 px-3 py-1.5 border border-dashed border-surface-300 rounded-lg text-sm text-gray-500 hover:border-brand-400 hover:text-brand-600 transition-colors disabled:opacity-60"
+          >
+            {uploadMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Paperclip className="w-3.5 h-3.5" />}
+            {uploadMut.isPending ? 'Uploading…' : 'Attach a file'}
+          </button>
+        )}
+      </div>
+
       <div className="flex gap-2">
         <button
           type="submit"
-          disabled={isSubmitting || submitMut.isPending}
+          disabled={isSubmitting || submitMut.isPending || uploadMut.isPending}
           className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white font-semibold rounded-lg text-sm hover:bg-brand-600 disabled:opacity-60"
         >
           {(isSubmitting || submitMut.isPending) && <Loader2 className="w-3.5 h-3.5 animate-spin" />}

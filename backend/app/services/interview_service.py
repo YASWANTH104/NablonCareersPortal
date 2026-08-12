@@ -274,6 +274,8 @@ async def get_panelist_day_schedule(
 
 
 def _feedback_to_dict(f: InterviewFeedback) -> dict:
+    from app.services.storage_service import refresh_url
+
     return {
         "id": f.id,
         "interview_id": f.interview_id,
@@ -287,6 +289,10 @@ def _feedback_to_dict(f: InterviewFeedback) -> dict:
         "strengths": f.strengths,
         "weaknesses": f.weaknesses,
         "notes": f.notes,
+        # Re-signed on every read, same reason as resume_url/file_url elsewhere —
+        # the SAS token baked in at upload time only lasts 7 days.
+        "attachment_url": refresh_url(f.attachment_url) if f.attachment_url else None,
+        "attachment_name": f.attachment_name,
         "is_shared_with_candidate": f.is_shared_with_candidate,
         "created_at": f.created_at,
     }
@@ -1017,6 +1023,31 @@ async def submit_feedback(
     await db.commit()
     await db.refresh(feedback)
     return feedback
+
+
+async def upload_feedback_attachment(db: AsyncSession, interview_id: uuid.UUID, file) -> dict:
+    """Store an optional supporting file for interview feedback (e.g. a written
+    test, marked-up code, a scorecard) and hand back its URL — uploaded first,
+    same "upload then reference the URL" pattern as resume_url, so the feedback
+    submit endpoints stay plain JSON."""
+    from app.services import storage_service
+
+    if not await db.get(Interview, interview_id):
+        raise HTTPException(404, "Interview not found")
+
+    url = await storage_service.upload_document(file, folder=f"feedback/{interview_id}", document_type="attachment")
+    return {"url": url, "name": getattr(file, "filename", None)}
+
+
+async def upload_feedback_attachment_by_token(db: AsyncSession, token: str, file) -> dict:
+    """Same as upload_feedback_attachment, but for the public no-login feedback
+    page — authorized by knowledge of the panelist's feedback_token instead of
+    a logged-in user, matching how the rest of that flow is scoped."""
+    from app.services import storage_service
+
+    _panelist, interview = await _get_panelist_by_token(db, token)
+    url = await storage_service.upload_document(file, folder=f"feedback/{interview.id}", document_type="attachment")
+    return {"url": url, "name": getattr(file, "filename", None)}
 
 
 async def get_feedback(

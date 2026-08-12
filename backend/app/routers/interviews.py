@@ -1,7 +1,7 @@
 import uuid
 from typing import Optional
 from datetime import datetime
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -116,6 +116,15 @@ async def submit_feedback_by_token(
     return await interview_service.submit_feedback_by_token(db, token, data)
 
 
+@router.post("/feedback-by-token/{token}/attachment")
+async def upload_feedback_attachment_by_token(
+    token: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    return await interview_service.upload_feedback_attachment_by_token(db, token, file)
+
+
 @router.get("/{interview_id}", response_model=InterviewResponse)
 async def get_interview(
     interview_id: uuid.UUID,
@@ -162,6 +171,16 @@ async def submit_feedback(
     db: AsyncSession = Depends(get_db),
 ):
     return await interview_service.submit_feedback(db, interview_id, data, submitted_by=user.id)
+
+
+@router.post("/{interview_id}/feedback/attachment")
+async def upload_feedback_attachment(
+    interview_id: uuid.UUID,
+    file: UploadFile = File(...),
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await interview_service.upload_feedback_attachment(db, interview_id, file)
 
 
 @router.get("/{interview_id}/feedback", response_model=list[InterviewFeedbackResponse])

@@ -10,7 +10,7 @@ from app.schemas.application import (
     ApplicationCreate, ApplicationResponse, ApplicationDetailResponse,
     ApplicantBrief, StageHistoryEntry,
 )
-from app.constants.stages import VALID_TRANSITIONS, STAGE_LABELS, REASON_REQUIRED_STAGES
+from app.constants.stages import VALID_TRANSITIONS, STAGE_LABELS, REASON_REQUIRED_STAGES, MOVE_JOB_ALLOWED_STAGES
 
 
 async def _seed_initial_resume_version(db: AsyncSession, application: Application, applicant_id: uuid.UUID) -> None:
@@ -879,6 +879,76 @@ async def move_stage(
         except Exception:
             pass
 
+    return app
+
+
+async def move_application_job(
+    db: AsyncSession,
+    application_id: uuid.UUID,
+    new_job_id: uuid.UUID,
+    moved_by: uuid.UUID,
+) -> Application:
+    """Reassign an application to a different job req — same application row,
+    same resume/history/stage, just pointed at the correct opening (e.g. HR
+    finds a screening candidate is a better fit for a sibling role). Kept to
+    early stages only: UniqueConstraint(job_id, applicant_id) means the
+    candidate can't already have a separate application for the target job,
+    and once real interviews are underway they're tied to the original role."""
+    from app.models.job import Job as JobModel
+
+    app = await db.get(Application, application_id)
+    if not app:
+        raise HTTPException(404, "Application not found")
+
+    if app.stage not in MOVE_JOB_ALLOWED_STAGES:
+        allowed_labels = " / ".join(STAGE_LABELS.get(s, s) for s in MOVE_JOB_ALLOWED_STAGES)
+        raise HTTPException(
+            400,
+            f"Can only move a candidate to another job while in the {allowed_labels} stage.",
+        )
+
+    if new_job_id == app.job_id:
+        raise HTTPException(400, "Candidate is already applied to this job")
+
+    new_job = await db.get(JobModel, new_job_id)
+    if not new_job:
+        raise HTTPException(404, "Target job not found")
+
+    conflict = (await db.execute(
+        select(Application).where(
+            Application.job_id == new_job_id,
+            Application.applicant_id == app.applicant_id,
+        )
+    )).scalar_one_or_none()
+    if conflict:
+        raise HTTPException(409, "This candidate already has a separate application for that job")
+
+    old_job = await db.get(JobModel, app.job_id)
+
+    db.add(ApplicationStageHistory(
+        application_id=application_id,
+        from_stage=app.stage,
+        to_stage=app.stage,
+        changed_by=moved_by,
+        notes=f'Moved from "{old_job.title if old_job else "a previous role"}" to "{new_job.title}"',
+    ))
+
+    app.job_id = new_job_id
+
+    try:
+        from app.models.notification import Notification
+        db.add(Notification(
+            user_id=app.applicant_id,
+            type="job_moved",
+            title="Your application was moved to a different role",
+            body=f"Your application has been moved to {new_job.title}.",
+            link="/portal/applications",
+        ))
+    except Exception:
+        pass
+
+    await db.commit()
+    await db.refresh(app)
     return app
 
 

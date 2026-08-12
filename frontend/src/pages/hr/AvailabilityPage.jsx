@@ -244,6 +244,11 @@ export default function AvailabilityPage() {
   const [publishDuration, setPublishDuration] = useState(30);
   const [selectedInterviewerId, setSelectedInterviewerId] = useState('');
   const [bookingSlot, setBookingSlot] = useState(null);
+  // HR/Admin/Super Admin often conduct interviews themselves — the backend
+  // already lets them call publish/mine/unpublish (see _HR_AND_INTERVIEWER in
+  // interview_slots.py), this mode toggle is what actually exposes it in the UI
+  // instead of always defaulting them into "book for someone else".
+  const [hrMode, setHrMode] = useState('manage'); // 'manage' = book for an interviewer | 'own' = publish my own slots
 
   const { data: jobsData } = useQuery({
     queryKey: ['availability-publishable-jobs'],
@@ -256,15 +261,16 @@ export default function AvailabilityPage() {
     enabled: isHR,
   });
 
-  const viewingInterviewerId = isHR ? selectedInterviewerId : user?.id;
-  const editable = !isHR; // interviewers edit their own; HR only books
+  const manageOwnSlots = !isHR || hrMode === 'own';
+  const viewingInterviewerId = manageOwnSlots ? user?.id : selectedInterviewerId;
+  const editable = manageOwnSlots; // publishing own slots vs. HR just booking someone else's
 
   const { data: slots, isLoading } = useQuery({
-    queryKey: ['interview-slots', viewingInterviewerId],
+    queryKey: ['interview-slots', manageOwnSlots ? 'mine' : viewingInterviewerId],
     queryFn: () =>
-      isHR
-        ? interviewSlotsApi.forInterviewer(viewingInterviewerId).then((r) => r.data)
-        : interviewSlotsApi.mine().then((r) => r.data),
+      manageOwnSlots
+        ? interviewSlotsApi.mine().then((r) => r.data)
+        : interviewSlotsApi.forInterviewer(viewingInterviewerId).then((r) => r.data),
     enabled: !!viewingInterviewerId,
   });
 
@@ -277,7 +283,8 @@ export default function AvailabilityPage() {
     return map;
   }, [slots]);
 
-  const invalidateSlots = () => queryClient.invalidateQueries({ queryKey: ['interview-slots', viewingInterviewerId] });
+  const invalidateSlots = () =>
+    queryClient.invalidateQueries({ queryKey: ['interview-slots', manageOwnSlots ? 'mine' : viewingInterviewerId] });
 
   const publishMutation = useMutation({
     mutationFn: (startTime) =>
@@ -339,12 +346,12 @@ export default function AvailabilityPage() {
         <div>
           <h1 className="font-display text-xl font-bold text-gray-900 flex items-center gap-2">
             <CalendarClock className="w-5 h-5 text-brand-500" />
-            {isHR ? 'Interviewer Availability' : 'My Availability'}
+            {manageOwnSlots ? 'My Availability' : 'Interviewer Availability'}
           </h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            {isHR
-              ? 'Pick an interviewer to see their published slots and book directly.'
-              : 'Publish free time — agencies and HR can book it for candidates.'}
+            {manageOwnSlots
+              ? 'Publish free time — agencies and HR can book it for candidates.'
+              : 'Pick an interviewer to see their published slots and book directly.'}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -364,6 +371,23 @@ export default function AvailabilityPage() {
       </div>
 
       {isHR && (
+        <div className="flex items-center gap-2 mb-4">
+          <button
+            onClick={() => setHrMode('own')}
+            className={`px-3 py-1.5 text-sm rounded-lg font-medium ${hrMode === 'own' ? 'bg-brand-500 text-white' : 'bg-white border border-surface-200 text-gray-600'}`}
+          >
+            My availability
+          </button>
+          <button
+            onClick={() => setHrMode('manage')}
+            className={`px-3 py-1.5 text-sm rounded-lg font-medium ${hrMode === 'manage' ? 'bg-brand-500 text-white' : 'bg-white border border-surface-200 text-gray-600'}`}
+          >
+            Book for an interviewer
+          </button>
+        </div>
+      )}
+
+      {isHR && hrMode === 'manage' && (
         <div className="mb-4">
           <select
             value={selectedInterviewerId}

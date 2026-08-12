@@ -35,6 +35,12 @@ STAGE_LABELS = {
 # Stages that require a reason (category + optional free-text note) on transition.
 REASON_REQUIRED_STAGES = {"rejected", "interview_drop", "offer_drop"}
 
+# HR can reassign a candidate's application to a different job req while it's
+# still this early — once real interview rounds have started, the interviews
+# already scheduled are tied to the original role, so a move stops being a
+# clean "wrong req, same candidate" fix.
+MOVE_JOB_ALLOWED_STAGES = {"applied", "screening"}
+
 DROP_REASON_CATEGORIES = [
     {"value": "got_another_offer", "label": "Got another offer"},
     {"value": "not_aligned_with_expectations", "label": "Not aligned with expectations"},
