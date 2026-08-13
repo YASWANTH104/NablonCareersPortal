@@ -10,6 +10,7 @@ import { jobsApi } from '@/api/jobs';
 import { usersApi } from '@/api/users';
 import client from '@/api/client';
 import { useAuthStore } from '@/store/authStore';
+import { PageHeader } from '@/components/ui';
 
 const TABS = [
   { key: 'departments', label: 'Departments', icon: Building2 },
@@ -469,6 +470,11 @@ export default function SettingsPage() {
 
   return (
     <div>
+      <PageHeader
+        title="Settings"
+        description="Departments and team access for the hiring console."
+      />
+
       <div className="flex gap-1 flex-wrap bg-surface-100 rounded-xl p-1 mb-6 w-full sm:w-fit">
         {TABS.map(({ key, label, icon: Icon }) => (
           <button

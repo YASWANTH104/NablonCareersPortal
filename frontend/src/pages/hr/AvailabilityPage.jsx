@@ -13,8 +13,8 @@ import { useAuthStore } from '@/store/authStore';
 import { HR_ROLES } from '@/utils/permissions';
 import { ROUND_TYPES, ROUND_MAP } from '@/constants/interviewRounds';
 
-const START_HOUR = 9;
-const END_HOUR = 19; // exclusive
+const START_HOUR = 0;
+const END_HOUR = 24; // exclusive
 const SLOT_MINUTES = 30;
 const ROWS = ((END_HOUR - START_HOUR) * 60) / SLOT_MINUTES;
 
@@ -101,7 +101,7 @@ function buildDayLayout(day, slots) {
       const minutesFromStart = (st.getHours() - START_HOUR) * 60 + st.getMinutes();
       const rowIdx = Math.round(minutesFromStart / SLOT_MINUTES);
       const span = Math.max(1, Math.round(s.duration_mins / SLOT_MINUTES));
-      if (rowIdx < 0 || rowIdx >= ROWS) return; // outside the visible 9am-7pm window
+      if (rowIdx < 0 || rowIdx >= ROWS) return; // outside the visible window
       startRowMap.set(rowIdx, { slot: s, span });
       for (let r = rowIdx; r < rowIdx + span && r < ROWS; r++) covered.add(r);
     });

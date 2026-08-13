@@ -4,6 +4,7 @@ import { UserCheck, ChevronDown, RefreshCw, DollarSign, FileText } from 'lucide-
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import { referralsApi } from '@/api/referrals';
+import { PageHeader } from '@/components/ui';
 
 const STATUS_CONFIG = {
   pending:     { label: 'Pending',     dot: 'bg-gray-400',   text: 'text-gray-600',   bg: 'bg-gray-100' },
@@ -101,6 +102,11 @@ export default function ReferralsPage() {
 
   return (
     <div>
+      <PageHeader
+        title="Referrals"
+        description="Candidates referred by the team, and the bonus status for each."
+      />
+
       {/* Tabs */}
       <div className="flex gap-1 flex-wrap bg-surface-100 rounded-xl p-1 mb-5 w-fit">
         {STATUS_TABS.map((tab) => (
