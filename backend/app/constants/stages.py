@@ -46,5 +46,22 @@ DROP_REASON_CATEGORIES = [
     {"value": "not_aligned_with_expectations", "label": "Not aligned with expectations"},
     {"value": "assessment_too_long", "label": "Assessment takes too long"},
     {"value": "compensation_mismatch", "label": "Compensation mismatch"},
+    {"value": "communication_gap", "label": "Communication gap"},
+    {"value": "profile_mismatch", "label": "Profile mismatch"},
     {"value": "other", "label": "Other"},
 ]
+
+# Candidate-facing feedback (AI-summarized interview feedback, and the raw
+# free-text rejection note as a fallback) is only ever sent for a rejection
+# from an actual interview round. Rejections from applied/screening/assessment
+# get a generic email with no feedback content, regardless of category.
+FEEDBACK_ELIGIBLE_STAGES = {"tr1", "tr2", "hr"}
+
+# Stages a single Interview row can be attributed to (via ApplicationStageHistory
+# timestamps — Interview has no stage field of its own) that must NEVER contribute
+# feedback to a rejection summary, even when the rejection itself is from tr1/tr2/hr.
+# Deliberately a denylist rather than an allowlist of {"tr1","tr2","hr"}: some
+# ApplicationStageHistory rows predate the interview_1/interview_2/interview_3/
+# final_interview -> tr1/tr2/hr rename and still carry the old names, which a
+# tr1/tr2/hr allowlist would misclassify as non-interview and wrongly strip.
+FEEDBACK_EXCLUDED_INTERVIEW_STAGES = {"applied", "screening", "assessment"}

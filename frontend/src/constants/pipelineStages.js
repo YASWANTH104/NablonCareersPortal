@@ -34,11 +34,8 @@ export const VALID_TRANSITIONS = {
   offer_drop:      [],
 };
 
-// Stages that require a reason (category + optional free-text note) on transition.
 export const REASON_REQUIRED_STAGES = new Set(['rejected', 'interview_drop', 'offer_drop']);
 
-// HR can reassign a candidate to a different job req while it's still this
-// early — mirrors MOVE_JOB_ALLOWED_STAGES in backend/app/constants/stages.py.
 export const MOVE_JOB_ALLOWED_STAGES = new Set(['applied', 'screening']);
 
 export const DROP_REASON_CATEGORIES = [
@@ -46,5 +43,7 @@ export const DROP_REASON_CATEGORIES = [
   { value: 'not_aligned_with_expectations', label: 'Not aligned with expectations' },
   { value: 'assessment_too_long', label: 'Assessment takes too long' },
   { value: 'compensation_mismatch', label: 'Compensation mismatch' },
+  { value: 'communication_gap', label: 'Communication gap' },
+  { value: 'profile_mismatch', label: 'Profile mismatch' },
   { value: 'other', label: 'Other' },
 ];
