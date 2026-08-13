@@ -104,16 +104,24 @@ async def _send_stage_update_email_async(application_id: str, new_stage: str, fr
         logger.info(f"Stage update email skipped (non-rejection): app={application_id}, stage={new_stage}")
         return
 
-    from app.models.application import Application
+    from app.models.application import Application, ApplicationStageHistory
     from app.models.user import User
     from app.models.job import Job
     from app.models.interview import Interview, InterviewFeedback, CandidateInterviewSelfFeedback
     from app.services.email_service import send_email
     from app.services.ai_rejection_service import generate_rejection_content
     from app.config import settings
+    from app.constants.stages import FEEDBACK_ELIGIBLE_STAGES, FEEDBACK_EXCLUDED_INTERVIEW_STAGES
     from sqlalchemy import select
 
     app_uuid = uuid.UUID(application_id)
+
+    # Candidate-facing feedback (AI summary, or the raw HR note as a fallback)
+    # is only ever shown for a rejection out of an actual interview round
+    # (tr1/tr2/hr) — always sent then, regardless of which reason category HR
+    # picked. Applied/screening/assessment/offer rejections always get the
+    # generic version, with no feedback content.
+    show_feedback = from_stage in FEEDBACK_ELIGIBLE_STAGES
 
     _ROUND_LABELS = {
         "screening": "Screening",
@@ -136,7 +144,28 @@ async def _send_stage_update_email_async(application_id: str, new_stage: str, fr
             return
 
         app, full_name, candidate_email, job_title = row
-        rejection_reason = app.rejection_reason if hasattr(app, "rejection_reason") else None
+        rejection_reason = (app.rejection_reason if hasattr(app, "rejection_reason") else None) if show_feedback else None
+
+        # An Interview row has no stage field of its own — HR schedules interviews
+        # against round_number/title, not against "screening" vs "tr1". To know
+        # which pipeline stage a given interview actually happened in (so screening
+        # round feedback never bleeds into a TR1/TR2/HR rejection's summary), infer
+        # it from ApplicationStageHistory: whichever stage was current as of the
+        # interview's creation time.
+        stage_history_rows = (await db.execute(
+            select(ApplicationStageHistory.to_stage, ApplicationStageHistory.created_at)
+            .where(ApplicationStageHistory.application_id == app_uuid)
+            .order_by(ApplicationStageHistory.created_at.asc())
+        )).all()
+
+        def _stage_at(ts):
+            effective = "applied"
+            for to_stage, changed_at in stage_history_rows:
+                if changed_at <= ts:
+                    effective = to_stage
+                else:
+                    break
+            return effective
 
         # Collect all interviews + all feedback across every round
         all_interviews = (await db.execute(
@@ -150,25 +179,30 @@ async def _send_stage_update_email_async(application_id: str, new_stage: str, fr
         last_interview = None
 
         for interview in all_interviews:
+            interview_stage = _stage_at(interview.created_at)
+
             feedback_rows = (await db.execute(
                 select(InterviewFeedback)
                 .where(InterviewFeedback.interview_id == interview.id)
                 .order_by(InterviewFeedback.created_at.asc())
             )).scalars().all()
 
-            for fb in feedback_rows:
-                raw_feedbacks.append({
-                    "round_label": interview.title or _ROUND_LABELS.get(from_stage, f"Round {interview.round_number}"),
-                    "overall_rating": fb.overall_rating,
-                    "technical_score": fb.technical_score,
-                    "communication_score": fb.communication_score,
-                    "cultural_fit_score": fb.cultural_fit_score,
-                    "problem_solving_score": fb.problem_solving_score,
-                    "strengths": fb.strengths,
-                    "weaknesses": fb.weaknesses,
-                    "notes": fb.notes,
-                    "recommendation": fb.recommendation,
-                })
+            # Only actual interview-round feedback ever goes into the candidate-facing
+            # summary — screening/applied/assessment round feedback is internal only.
+            if interview_stage not in FEEDBACK_EXCLUDED_INTERVIEW_STAGES:
+                for fb in feedback_rows:
+                    raw_feedbacks.append({
+                        "round_label": interview.title or _ROUND_LABELS.get(interview_stage, f"Round {interview.round_number}"),
+                        "overall_rating": fb.overall_rating,
+                        "technical_score": fb.technical_score,
+                        "communication_score": fb.communication_score,
+                        "cultural_fit_score": fb.cultural_fit_score,
+                        "problem_solving_score": fb.problem_solving_score,
+                        "strengths": fb.strengths,
+                        "weaknesses": fb.weaknesses,
+                        "notes": fb.notes,
+                        "recommendation": fb.recommendation,
+                    })
             last_interview = interview
 
         # Self-feedback URL — only if last interview and candidate hasn't submitted yet
@@ -180,9 +214,10 @@ async def _send_stage_update_email_async(application_id: str, new_stage: str, fr
             if not already_submitted:
                 feedback_url = f"{settings.FRONTEND_URL}/portal/applications?feedback={last_interview.id}"
 
-        # Generate AI-personalised content if feedbacks exist
+        # Generate AI-personalised content only for an eligible round rejection
+        # with a non-suppressed reason, and only if feedback rows exist.
         ai_content = None
-        if raw_feedbacks:
+        if show_feedback and raw_feedbacks:
             ai_content = await generate_rejection_content(
                 candidate_name=full_name,
                 job_title=job_title,
