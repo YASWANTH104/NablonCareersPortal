@@ -90,6 +90,13 @@ export default function ScheduleTimeGrid({
     return out;
   }, [windowStart, windowEnd]);
 
+  // Gridlines stay hourly regardless of span — they're thin dividers, cheap to
+  // pack in. Text labels aren't: cramming 24 of them into the same width just
+  // overlaps into unreadable mush, so thin those out to roughly a dozen labels
+  // no matter how wide the window is (2hr steps for a full day, hourly for a
+  // half day, etc).
+  const labelStep = Math.max(1, Math.ceil(hours.length / 12));
+
   /* Everyone's bookings folded together: the busy union drives both the
      "all free" lane and the suggested slots, so they can never disagree. */
   const { freeWindows, busyUnion } = useMemo(() => {
@@ -174,14 +181,16 @@ export default function ScheduleTimeGrid({
         <div className="flex-1 min-w-0">
           {/* Hour ruler */}
           <div className="relative" style={{ height: HEADER_H }}>
-            {hours.map((t) => (
-              <span
-                key={t}
-                style={{ left: `${pct(t)}%` }}
-                className="absolute top-0 -translate-x-1/2 text-[10px] text-gray-400 tabular-nums whitespace-nowrap"
-              >
-                {format(new Date(t), 'h a')}
-              </span>
+            {hours.map((t, i) => (
+              i % labelStep === 0 && (
+                <span
+                  key={t}
+                  style={{ left: `${pct(t)}%` }}
+                  className="absolute top-0 -translate-x-1/2 text-[10px] text-gray-400 tabular-nums whitespace-nowrap"
+                >
+                  {format(new Date(t), 'h a')}
+                </span>
+              )
             ))}
           </div>
 

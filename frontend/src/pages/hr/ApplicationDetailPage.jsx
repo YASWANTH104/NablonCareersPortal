@@ -41,10 +41,10 @@ const DURATION_OPTIONS = [
   { value: 120, label: '2 hr' },
 ];
 
-// The availability grid covers a working day; interviews outside it are rare
-// enough that the start-time field can still be typed in directly.
-const WORKDAY_START = '08:00';
-const WORKDAY_END = '20:00';
+// Full 24-hour window — interviews are also scheduled against US-timezone
+// panelists/candidates, so the grid can't assume an India-hours-only workday.
+const WORKDAY_START = '00:00';
+const WORKDAY_END = '24:00';
 
 const QUICK_DAYS = [
   { label: 'Today', offset: 0 },
