@@ -113,7 +113,6 @@ const router = createBrowserRouter([
           { path: '/hr/jobs/new', element: <JobEditPage /> },
           { path: '/hr/jobs/:id/edit', element: <JobEditPage /> },
           { path: '/hr/applicants', element: <ApplicantsPage /> },
-          { path: '/hr/applicants/:id', element: <ApplicationDetailPage /> },
           { path: '/hr/referrals', element: <ReferralsPage /> },
           { path: '/hr/offers', element: <OffersPage /> },
           { path: '/hr/offers/new/:applicationId', element: <OfferBuilderPage /> },
@@ -127,6 +126,8 @@ const router = createBrowserRouter([
   },
 
   // ── INTERVIEWER ─────────────────────────────────────────────
+  // Applicant detail is shared with HR here — ApplicationDetailPage renders a
+  // read-only view internally when the signed-in user is an interviewer.
   {
     element: <ProtectedRoute roles={['interviewer', 'hr_manager', 'admin', 'super_admin']} />,
     children: [
@@ -135,6 +136,7 @@ const router = createBrowserRouter([
         children: [
           { path: '/hr/interviews', element: <InterviewsPage /> },
           { path: '/hr/availability', element: <AvailabilityPage /> },
+          { path: '/hr/applicants/:id', element: <ApplicationDetailPage /> },
         ],
       },
     ],

@@ -26,10 +26,10 @@ function ScoreRow({ label, value, onChange }) {
     <div>
       <div className="flex items-center justify-between mb-1.5">
         <span className="text-sm font-medium text-gray-700">{label}</span>
-        <span className="text-sm font-semibold text-brand-600 w-10 text-right">{value ?? '—'}/10</span>
+        <span className="text-sm font-semibold text-brand-600 w-10 text-right">{value ?? '—'}/5</span>
       </div>
       <div className="flex gap-1">
-        {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+        {Array.from({ length: 5 }, (_, i) => i + 1).map((n) => (
           <button
             key={n}
             type="button"

@@ -326,6 +326,7 @@ def _interview_to_response(
     candidate_name: Optional[str] = None,
     candidate_email: Optional[str] = None,
     job_id: Optional[uuid.UUID] = None,
+    job_title: Optional[str] = None,
     self_feedback: Optional[CandidateInterviewSelfFeedback] = None,
     previous_rounds_feedback: Optional[list] = None,
 ) -> InterviewResponse:
@@ -349,6 +350,7 @@ def _interview_to_response(
         "candidate_name": candidate_name,
         "candidate_email": candidate_email,
         "job_id": job_id,
+        "job_title": job_title,
         "candidate_self_feedback": _self_feedback_to_dict(self_feedback) if self_feedback else None,
         "previous_rounds_feedback": previous_rounds_feedback or [],
     }
@@ -458,11 +460,13 @@ async def list_my_interviews(
 ) -> dict:
     from app.models.application import Application
     from app.models.user import User
+    from app.models.job import Job
 
     base = (
-        select(Interview, User.full_name, User.email, Application.job_id)
+        select(Interview, User.full_name, User.email, Application.job_id, Job.title)
         .join(Application, Application.id == Interview.application_id)
         .join(User, User.id == Application.applicant_id)
+        .join(Job, Job.id == Application.job_id)
         .join(InterviewPanelist, and_(
             InterviewPanelist.interview_id == Interview.id,
             InterviewPanelist.user_id == user_id,
@@ -520,7 +524,7 @@ async def list_my_interviews(
     prev_rounds_by = await _batch_previous_rounds(db, rows)
 
     items = []
-    for interview, full_name, email, job_id in rows:
+    for interview, full_name, email, job_id, job_title in rows:
         items.append(_interview_to_response(
             interview,
             panelists_by.get(interview.id, []),
@@ -528,6 +532,7 @@ async def list_my_interviews(
             candidate_name=full_name,
             candidate_email=email,
             job_id=job_id,
+            job_title=job_title,
             previous_rounds_feedback=prev_rounds_by.get(interview.id, []),
         ))
 
@@ -546,11 +551,13 @@ async def list_interviews(
 ) -> dict:
     from app.models.application import Application
     from app.models.user import User
+    from app.models.job import Job
 
     base = (
-        select(Interview, User.full_name, User.email, Application.job_id)
+        select(Interview, User.full_name, User.email, Application.job_id, Job.title)
         .join(Application, Application.id == Interview.application_id)
         .join(User, User.id == Application.applicant_id)
+        .join(Job, Job.id == Application.job_id)
     )
 
     filters = []
@@ -609,7 +616,7 @@ async def list_interviews(
     prev_rounds_by = await _batch_previous_rounds(db, rows)
 
     items = []
-    for interview, full_name, email, job_id in rows:
+    for interview, full_name, email, job_id, job_title in rows:
         items.append(_interview_to_response(
             interview,
             panelists_by.get(interview.id, []),
@@ -617,6 +624,7 @@ async def list_interviews(
             candidate_name=full_name,
             candidate_email=email,
             job_id=job_id,
+            job_title=job_title,
             self_feedback=self_feedback_by.get(interview.id),
             previous_rounds_feedback=prev_rounds_by.get(interview.id, []),
         ))
@@ -627,18 +635,20 @@ async def list_interviews(
 async def get_interview(db: AsyncSession, interview_id: uuid.UUID) -> InterviewResponse:
     from app.models.application import Application
     from app.models.user import User
+    from app.models.job import Job
 
     row = (await db.execute(
-        select(Interview, User.full_name, User.email, Application.job_id)
+        select(Interview, User.full_name, User.email, Application.job_id, Job.title)
         .join(Application, Application.id == Interview.application_id)
         .join(User, User.id == Application.applicant_id)
+        .join(Job, Job.id == Application.job_id)
         .where(Interview.id == interview_id)
     )).first()
 
     if not row:
         raise HTTPException(404, "Interview not found")
 
-    interview, full_name, email, job_id = row
+    interview, full_name, email, job_id, job_title = row
 
     panelists = (await db.execute(
         select(InterviewPanelist).where(InterviewPanelist.interview_id == interview_id)
@@ -650,6 +660,7 @@ async def get_interview(db: AsyncSession, interview_id: uuid.UUID) -> InterviewR
     prev_rounds = await _get_previous_rounds(db, interview.application_id, interview.round_number)
     return _interview_to_response(
         interview, list(panelists), list(feedback), full_name, email, job_id,
+        job_title=job_title,
         previous_rounds_feedback=prev_rounds,
     )
 
