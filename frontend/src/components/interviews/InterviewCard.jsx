@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { format } from 'date-fns';
 import {
   Clock, Users, ExternalLink, CheckCircle2, RefreshCw, History,
-  MapPin, ChevronDown, ChevronUp,
+  MapPin, ChevronDown, ChevronUp, Briefcase,
 } from 'lucide-react';
 import { statusStyle, typeIcon, isActive, interviewRange } from './calendarUtils';
 import { InterviewFeedbackCard, InlineFeedbackForm } from './feedback';
@@ -65,6 +65,12 @@ export default function InterviewCard({
             >
               {interview.candidate_name}
             </button>
+          )}
+          {interview.job_title && (
+            <p className="flex items-center gap-1 text-xs text-gray-500 mt-0.5">
+              <Briefcase className="w-3 h-3 text-gray-400 flex-shrink-0" />
+              {interview.job_title}
+            </p>
           )}
 
           <div className="flex items-center gap-4 mt-2 text-xs text-gray-500 flex-wrap">

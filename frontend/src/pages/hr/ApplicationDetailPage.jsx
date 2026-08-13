@@ -22,12 +22,15 @@ import { documentsApi } from '@/api/documents';
 import { interviewSlotsApi } from '@/api/interviewSlots';
 import { ROUND_MAP } from '@/constants/interviewRounds';
 import ResumeVersions from '@/components/shared/ResumeVersions';
+import { InlineFeedbackForm, InterviewFeedbackCard } from '@/components/interviews/feedback';
 import { FREE_TEXT_MAX } from '@/constants/fieldLimits';
 import ScheduleTimeGrid from '@/components/interviews/ScheduleTimeGrid';
 import StageReasonDialog from '@/components/shared/StageReasonDialog';
 import HoldReasonDialog from '@/components/shared/HoldReasonDialog';
 import { useHoldToggle } from '@/hooks/useHoldToggle';
 import { PIPELINE_STAGES, STAGE_MAP, VALID_TRANSITIONS, REASON_REQUIRED_STAGES, MOVE_JOB_ALLOWED_STAGES } from '@/constants/pipelineStages';
+import { useAuthStore } from '@/store/authStore';
+import { HR_ROLES } from '@/utils/permissions';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -93,13 +96,6 @@ function AvailabilityChip({ status, label, loading }) {
   );
 }
 
-const RECOMMENDATION_LABELS = {
-  strong_yes: { label: 'Strong Yes', color: 'text-green-700 bg-green-50' },
-  yes:        { label: 'Yes', color: 'text-emerald-700 bg-emerald-50' },
-  neutral:    { label: 'Neutral', color: 'text-gray-700 bg-gray-100' },
-  no:         { label: 'No', color: 'text-orange-700 bg-orange-50' },
-  strong_no:  { label: 'Strong No', color: 'text-red-700 bg-red-50' },
-};
 
 // ── Schedule Interview Dialog ─────────────────────────────────────────────────
 
@@ -1028,156 +1024,6 @@ function RescheduleInterviewDialog({ interview, onClose, onSuccess }) {
   );
 }
 
-// ── Feedback Form ─────────────────────────────────────────────────────────────
-
-const SCORE_DIMENSIONS = [
-  { key: 'technical_score',       label: 'Technical' },
-  { key: 'communication_score',   label: 'Communication' },
-  { key: 'cultural_fit_score',    label: 'Culture Fit' },
-  { key: 'problem_solving_score', label: 'Problem Solving' },
-];
-
-function ScoreSelector({ value, onChange }) {
-  return (
-    <div className="flex gap-1.5">
-      {[1, 2, 3, 4, 5].map((n) => (
-        <button
-          key={n}
-          type="button"
-          onClick={() => onChange(value === n ? null : n)}
-          className={`w-7 h-7 rounded-full border-2 text-xs font-bold transition-all ${
-            value != null && n <= value
-              ? 'bg-brand-500 border-brand-500 text-white'
-              : 'border-surface-300 text-gray-400 hover:border-brand-400 hover:text-brand-500'
-          }`}
-        >
-          {n}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function FeedbackForm({ interviewId, onSuccess }) {
-  const { register, handleSubmit, formState: { isSubmitting } } = useForm();
-
-  const [overallRating,      setOverallRating]      = useState(null);
-  const [recommendation,     setRecommendation]     = useState('');
-  const [scores, setScores] = useState({
-    technical_score: null, communication_score: null,
-    cultural_fit_score: null, problem_solving_score: null,
-  });
-
-  const submitMutation = useMutation({
-    mutationFn: (data) => interviewsApi.submitFeedback(interviewId, data),
-    onSuccess: () => { toast.success('Feedback submitted'); onSuccess(); },
-    onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to submit'),
-  });
-
-  const onSubmit = (textValues) => {
-    const payload = { ...textValues };
-    if (overallRating)  payload.overall_rating  = overallRating;
-    if (recommendation) payload.recommendation  = recommendation;
-    Object.entries(scores).forEach(([k, v]) => { if (v != null) payload[k] = v; });
-    Object.keys(payload).forEach((k) => { if (payload[k] === '' || payload[k] == null) delete payload[k]; });
-    submitMutation.mutate(payload);
-  };
-
-  return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-5 p-4 bg-surface-50 rounded-xl border border-surface-200">
-      <h4 className="text-sm font-semibold text-gray-900">Submit Feedback</h4>
-
-      {/* Overall rating */}
-      <div>
-        <p className="text-xs font-medium text-gray-600 mb-2">Overall Rating</p>
-        <div className="flex gap-1">
-          {[1, 2, 3, 4, 5].map((n) => (
-            <button
-              key={n}
-              type="button"
-              onClick={() => setOverallRating(overallRating === n ? null : n)}
-              className="p-0.5"
-            >
-              <Star className={`w-5 h-5 ${n <= (overallRating ?? 0) ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300'}`} />
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Recommendation — pill buttons */}
-      <div>
-        <p className="text-xs font-medium text-gray-600 mb-2">Recommendation</p>
-        <div className="flex flex-wrap gap-2">
-          {Object.entries(RECOMMENDATION_LABELS).map(([k, v]) => (
-            <button
-              key={k}
-              type="button"
-              onClick={() => setRecommendation(recommendation === k ? '' : k)}
-              className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
-                recommendation === k
-                  ? v.color + ' border-transparent'
-                  : 'bg-white text-gray-500 border-surface-300 hover:border-gray-400'
-              }`}
-            >
-              {v.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Scores — dot selectors matching the display grid */}
-      <div className="grid grid-cols-2 gap-x-6 gap-y-3">
-        {SCORE_DIMENSIONS.map(({ key, label }) => (
-          <div key={key}>
-            <p className="text-xs font-medium text-gray-600 mb-1.5">{label}</p>
-            <ScoreSelector
-              value={scores[key]}
-              onChange={(v) => setScores((s) => ({ ...s, [key]: v }))}
-            />
-          </div>
-        ))}
-      </div>
-
-      {/* Text fields */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Strengths</label>
-          <textarea
-            {...register('strengths')}
-            rows={2}
-            className="w-full px-3 py-1.5 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Areas to improve</label>
-          <textarea
-            {...register('weaknesses')}
-            rows={2}
-            className="w-full px-3 py-1.5 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
-          />
-        </div>
-      </div>
-
-      <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">Additional notes</label>
-        <textarea
-          {...register('notes')}
-          rows={2}
-          className="w-full px-3 py-1.5 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
-        />
-      </div>
-
-      <button
-        type="submit"
-        disabled={isSubmitting || submitMutation.isPending}
-        className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white font-semibold rounded-lg text-sm hover:bg-brand-600 disabled:opacity-60"
-      >
-        {(isSubmitting || submitMutation.isPending) && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-        Submit feedback
-      </button>
-    </form>
-  );
-}
 
 // ── Candidate Self-Assessment Card ───────────────────────────────────────────
 
@@ -1252,87 +1098,6 @@ function CandidateSelfAssessment({ sf }) {
   );
 }
 
-// ── Shared Interview Feedback Card ────────────────────────────────────────────
-
-function InterviewFeedbackCard({ fb, interview }) {
-  const rec = RECOMMENDATION_LABELS[fb.recommendation];
-  const scores = [
-    { label: 'Technical',       val: fb.technical_score },
-    { label: 'Communication',   val: fb.communication_score },
-    { label: 'Culture Fit',     val: fb.cultural_fit_score },
-    { label: 'Problem Solving', val: fb.problem_solving_score },
-  ].filter((s) => s.val != null);
-
-  return (
-    <div className="bg-white rounded-xl border border-surface-200 p-5">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          {interview && (
-            <>
-              <p className="text-sm font-semibold text-gray-900">
-                {interview.title || `Round ${interview.round_number}`}
-              </p>
-              <p className="text-xs text-gray-400">{format(new Date(interview.scheduled_at), 'PPP')}</p>
-            </>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          {fb.overall_rating && (
-            <div className="flex gap-0.5">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <Star key={i} className={`w-4 h-4 ${i < fb.overall_rating ? 'text-yellow-400 fill-yellow-400' : 'text-gray-200'}`} />
-              ))}
-            </div>
-          )}
-          {rec && (
-            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${rec.color}`}>
-              {rec.label}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Scores grid */}
-      {scores.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-          {scores.map(({ label, val }) => (
-            <div key={label} className="bg-surface-50 rounded-lg p-3 text-center">
-              <p className="text-lg font-bold text-gray-900">{val}<span className="text-xs text-gray-400 font-normal">/5</span></p>
-              <p className="text-xs text-gray-500 mt-0.5">{label}</p>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Strengths / Weaknesses */}
-      {(fb.strengths || fb.weaknesses) && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-          {fb.strengths && (
-            <div>
-              <p className="text-xs font-semibold text-green-700 mb-1 flex items-center gap-1">
-                <CheckCircle2 className="w-3 h-3" /> Strengths
-              </p>
-              <p className="text-gray-700 text-xs">{fb.strengths}</p>
-            </div>
-          )}
-          {fb.weaknesses && (
-            <div>
-              <p className="text-xs font-semibold text-orange-700 mb-1 flex items-center gap-1">
-                <AlertCircle className="w-3 h-3" /> Areas to improve
-              </p>
-              <p className="text-gray-700 text-xs">{fb.weaknesses}</p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {fb.notes && (
-        <p className="mt-3 text-xs text-gray-600 bg-surface-50 rounded-lg p-3">{fb.notes}</p>
-      )}
-    </div>
-  );
-}
 
 // ── Reject Dialog ─────────────────────────────────────────────────────────────
 
@@ -1527,12 +1292,25 @@ export default function ApplicationDetailPage() {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
 
+  // Interviewers land on this same page for full candidate context, but get a
+  // read-only view — no scheduling, no offers/documents (HR/finance territory).
+  const { user } = useAuthStore();
+  const canManage = HR_ROLES.includes(user?.role);
+
   // ApplicantsPage passes its current URL (filters included) as location.state.from
   // when navigating here — falling back to a bare list only when arriving some
   // other way (e.g. a bookmarked/direct link to this application).
-  const backToApplicants = location.state?.from || '/hr/applicants';
+  const backToApplicants = location.state?.from || (canManage ? '/hr/applicants' : '/hr/interviews');
 
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') ?? 'overview');
+
+  useEffect(() => {
+    if (!canManage && ['documents', 'offer'].includes(activeTab)) {
+      setActiveTab('overview');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canManage]);
+
   const [stageMenuOpen, setStageMenuOpen] = useState(false);
   const [showScheduleDialog, setShowScheduleDialog] = useState(false);
   const [showScheduleAssessment, setShowScheduleAssessment] = useState(false);
@@ -1566,7 +1344,7 @@ export default function ApplicationDetailPage() {
   const { data: offerData, refetch: refetchOffer, isLoading: offerLoading } = useQuery({
     queryKey: ['application-offer', id],
     queryFn: () => offersApi.getByApplication(id).then((r) => r.data),
-    enabled: !!id,
+    enabled: !!id && canManage,
     retry: false,
     staleTime: 30_000,
     refetchOnWindowFocus: false,
@@ -1575,7 +1353,7 @@ export default function ApplicationDetailPage() {
   const { data: docsData, refetch: refetchDocs } = useQuery({
     queryKey: ['application-documents', id],
     queryFn: () => documentsApi.getByApplication(id).then((r) => r.data),
-    enabled: !!id,
+    enabled: !!id && canManage,
     retry: false,
   });
 
@@ -1722,8 +1500,11 @@ export default function ApplicationDetailPage() {
     { key: 'feedback', label: 'Feedback' },
     { key: 'timeline', label: 'Timeline' },
     { key: 'notes', label: `Notes${notes.length ? ` (${notes.length})` : ''}` },
-    { key: 'documents', label: `Documents${docsData?.documents?.length ? ` (${docsData.documents.length})` : ''}${docsData?.status === 'complete' ? ' ✓' : ''}` },
-    { key: 'offer', label: `Offer${offerData ? ' ●' : ''}` },
+    // Offers/documents are HR & finance territory — kept out of the interviewer's read-only view.
+    ...(canManage ? [
+      { key: 'documents', label: `Documents${docsData?.documents?.length ? ` (${docsData.documents.length})` : ''}${docsData?.status === 'complete' ? ' ✓' : ''}` },
+      { key: 'offer', label: `Offer${offerData ? ' ●' : ''}` },
+    ] : []),
   ];
 
   return (
@@ -1733,7 +1514,7 @@ export default function ApplicationDetailPage() {
         to={backToApplicants}
         className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-5"
       >
-        <ArrowLeft className="w-4 h-4" /> All applicants
+        <ArrowLeft className="w-4 h-4" /> {canManage ? 'All applicants' : 'Interviews'}
       </Link>
 
       {/* Header card */}
@@ -1750,12 +1531,17 @@ export default function ApplicationDetailPage() {
               <h1 className="font-display text-xl sm:text-2xl font-bold text-gray-900 break-words">
                 {app.applicant?.full_name ?? 'Unknown'}
               </h1>
-              <button
-                onClick={() => starMutation.mutate()}
-                className="text-gray-400 hover:text-yellow-400 transition-colors"
-              >
-                <Star className={`w-5 h-5 ${app.is_starred ? 'fill-yellow-400 text-yellow-400' : ''}`} />
-              </button>
+              {canManage && (
+                <button
+                  onClick={() => starMutation.mutate()}
+                  className="text-gray-400 hover:text-yellow-400 transition-colors"
+                >
+                  <Star className={`w-5 h-5 ${app.is_starred ? 'fill-yellow-400 text-yellow-400' : ''}`} />
+                </button>
+              )}
+              {!canManage && app.is_starred && (
+                <Star className="w-5 h-5 fill-yellow-400 text-yellow-400" />
+              )}
             </div>
             <p className="text-sm text-gray-500 mt-0.5">{app.applicant?.email}</p>
             {jobData && (
@@ -1766,7 +1552,7 @@ export default function ApplicationDetailPage() {
                     {jobData.title}
                   </Link>
                 </span>
-                {MOVE_JOB_ALLOWED_STAGES.has(app.stage) && (
+                {canManage && MOVE_JOB_ALLOWED_STAGES.has(app.stage) && (
                   <button
                     onClick={() => setShowMoveJobModal(true)}
                     className="inline-flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-brand-600 border border-surface-300 hover:border-brand-300 rounded-full px-2 py-0.5 transition-colors"
@@ -1785,21 +1571,21 @@ export default function ApplicationDetailPage() {
             </div>
             <div className="relative">
               <button
-                onClick={() => setStageMenuOpen((o) => !o)}
-                disabled={validNext.length === 0 || app.on_hold}
+                onClick={() => canManage && setStageMenuOpen((o) => !o)}
+                disabled={!canManage || validNext.length === 0 || app.on_hold}
                 title={app.on_hold ? 'Resume from hold to change stage' : undefined}
                 className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold ${
                   currentStage?.color ?? 'bg-gray-100 text-gray-700'
                 } ${
-                  validNext.length > 0 && !app.on_hold ? 'hover:opacity-80 cursor-pointer' : 'cursor-default opacity-60'
+                  canManage && validNext.length > 0 && !app.on_hold ? 'hover:opacity-80 cursor-pointer' : 'cursor-default opacity-60'
                 }`}
               >
                 {stageMutation.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                 {currentStage?.label ?? app.stage}
-                {validNext.length > 0 && !app.on_hold && <ChevronDown className="w-3.5 h-3.5" />}
+                {canManage && validNext.length > 0 && !app.on_hold && <ChevronDown className="w-3.5 h-3.5" />}
               </button>
 
-              {stageMenuOpen && (
+              {canManage && stageMenuOpen && (
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setStageMenuOpen(false)} />
                   <div className="absolute right-0 z-20 mt-1 w-44 bg-white rounded-xl border border-surface-200 shadow-modal py-1">
@@ -1844,19 +1630,21 @@ export default function ApplicationDetailPage() {
                 </>
               )}
             </div>
-            <button
-              onClick={() => toggleHold(app)}
-              className={`p-1.5 rounded-lg transition-colors ${
-                app.on_hold ? 'text-amber-500 hover:text-amber-600 bg-amber-50' : 'text-gray-400 hover:text-gray-600 hover:bg-surface-100'
-              }`}
-              title={
-                app.on_hold
-                  ? `On hold${app.hold_reason ? `: ${app.hold_reason}` : ''} — click to resume`
-                  : 'Put on hold'
-              }
-            >
-              <Pause className="w-4 h-4" />
-            </button>
+            {canManage && (
+              <button
+                onClick={() => toggleHold(app)}
+                className={`p-1.5 rounded-lg transition-colors ${
+                  app.on_hold ? 'text-amber-500 hover:text-amber-600 bg-amber-50' : 'text-gray-400 hover:text-gray-600 hover:bg-surface-100'
+                }`}
+                title={
+                  app.on_hold
+                    ? `On hold${app.hold_reason ? `: ${app.hold_reason}` : ''} — click to resume`
+                    : 'Put on hold'
+                }
+              >
+                <Pause className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -1867,8 +1655,9 @@ export default function ApplicationDetailPage() {
             {[1, 2, 3, 4, 5].map((n) => (
               <button
                 key={n}
-                onClick={() => applicationsApi.setRating(id, n).then(() => queryClient.invalidateQueries({ queryKey: ['application-detail', id] }))}
-                className="p-0.5"
+                onClick={() => canManage && applicationsApi.setRating(id, n).then(() => queryClient.invalidateQueries({ queryKey: ['application-detail', id] }))}
+                disabled={!canManage}
+                className={`p-0.5 ${!canManage ? 'cursor-default' : ''}`}
               >
                 <Star className={`w-4 h-4 ${n <= (app.rating ?? 0) ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300 hover:text-yellow-300'}`} />
               </button>
@@ -1888,14 +1677,16 @@ export default function ApplicationDetailPage() {
               stage changes are blocked while on hold.
             </p>
           </div>
-          <button
-            onClick={() => toggleHold(app)}
-            disabled={holdMutation.isPending}
-            className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-800 bg-white border border-amber-300 rounded-lg hover:bg-amber-100 disabled:opacity-50"
-          >
-            <PlayCircle className="w-3.5 h-3.5" />
-            Resume
-          </button>
+          {canManage && (
+            <button
+              onClick={() => toggleHold(app)}
+              disabled={holdMutation.isPending}
+              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-800 bg-white border border-amber-300 rounded-lg hover:bg-amber-100 disabled:opacity-50"
+            >
+              <PlayCircle className="w-3.5 h-3.5" />
+              Resume
+            </button>
+          )}
         </div>
       )}
 
@@ -1907,13 +1698,15 @@ export default function ApplicationDetailPage() {
             <p className="text-sm font-semibold text-amber-800">Possible duplicate candidate</p>
             <p className="text-sm text-amber-700 mt-0.5">{app.duplicate_reason}</p>
           </div>
-          <button
-            onClick={() => dismissDuplicateMutation.mutate()}
-            disabled={dismissDuplicateMutation.isPending}
-            className="flex-shrink-0 px-3 py-1.5 text-xs font-medium text-amber-800 bg-white border border-amber-300 rounded-lg hover:bg-amber-100 disabled:opacity-50"
-          >
-            Not a duplicate
-          </button>
+          {canManage && (
+            <button
+              onClick={() => dismissDuplicateMutation.mutate()}
+              disabled={dismissDuplicateMutation.isPending}
+              className="flex-shrink-0 px-3 py-1.5 text-xs font-medium text-amber-800 bg-white border border-amber-300 rounded-lg hover:bg-amber-100 disabled:opacity-50"
+            >
+              Not a duplicate
+            </button>
+          )}
         </div>
       )}
       {app.duplicate_flag && app.duplicate_reviewed_at && (
@@ -1950,8 +1743,11 @@ export default function ApplicationDetailPage() {
               { icon: User, label: 'Current designation', value: prof.current_designation },
               { icon: Clock, label: 'Total experience', value: prof.total_experience },
               { icon: MapPin, label: 'Current location', value: prof.current_location },
-              { icon: Wallet, label: 'Current CTC', value: app.current_ctc },
-              { icon: Wallet, label: 'Expected CTC', value: app.expected_ctc },
+              // Compensation is HR/finance territory — kept out of the interviewer's view.
+              ...(canManage ? [
+                { icon: Wallet, label: 'Current CTC', value: app.current_ctc },
+                { icon: Wallet, label: 'Expected CTC', value: app.expected_ctc },
+              ] : []),
               { icon: Clock, label: 'Notice period', value: app.notice_period },
               { icon: GraduationCap, label: 'Education', value: prof.education },
             ];
@@ -1959,12 +1755,14 @@ export default function ApplicationDetailPage() {
               <div className="bg-white rounded-xl border border-surface-200 p-5">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-sm font-semibold text-gray-900">Candidate details</h3>
-                  <button
-                    onClick={() => setEditingDetails(true)}
-                    className="flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:text-brand-700 bg-brand-50 border border-brand-100 px-2.5 py-1.5 rounded-lg transition-colors"
-                  >
-                    <Pencil className="w-3.5 h-3.5" /> Edit
-                  </button>
+                  {canManage && (
+                    <button
+                      onClick={() => setEditingDetails(true)}
+                      className="flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:text-brand-700 bg-brand-50 border border-brand-100 px-2.5 py-1.5 rounded-lg transition-colors"
+                    >
+                      <Pencil className="w-3.5 h-3.5" /> Edit
+                    </button>
+                  )}
                 </div>
                 <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
                   {rows.map(({ icon: Icon, label, value }) => (
@@ -2068,21 +1866,23 @@ export default function ApplicationDetailPage() {
           </h3>
           {/* Every revision stays reachable — selecting one previews it below,
               so a panel's feedback can be read against the version they saw. */}
-          <ResumeVersions applicationId={id} canUpload />
+          <ResumeVersions applicationId={id} canUpload={canManage} showHistory={canManage} />
         </div>
       )}
 
       {/* ── Interviews Tab ── */}
       {activeTab === 'interviews' && (
         <div className="space-y-4">
-          <div className="flex justify-end">
-            <button
-              onClick={() => setShowScheduleDialog(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white font-semibold rounded-lg text-sm hover:bg-brand-600 transition-colors"
-            >
-              <Plus className="w-4 h-4" /> Schedule interview
-            </button>
-          </div>
+          {canManage && (
+            <div className="flex justify-end">
+              <button
+                onClick={() => setShowScheduleDialog(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white font-semibold rounded-lg text-sm hover:bg-brand-600 transition-colors"
+              >
+                <Plus className="w-4 h-4" /> Schedule interview
+              </button>
+            </div>
+          )}
 
           {interviews.length === 0 ? (
             <div className="bg-surface-50 rounded-xl border border-dashed border-surface-300 py-16 text-center">
@@ -2122,7 +1922,7 @@ export default function ApplicationDetailPage() {
                       }`}>
                         {interview.status}
                       </span>
-                      {['scheduled', 'rescheduled'].includes(interview.status) && (
+                      {canManage && ['scheduled', 'rescheduled'].includes(interview.status) && (
                         <>
                           <button
                             onClick={() => setConfirmCompleteId(interview.id)}
@@ -2156,7 +1956,7 @@ export default function ApplicationDetailPage() {
                       <Clock className="w-3.5 h-3.5 text-gray-400" />
                       {interview.duration_mins} min
                     </div>
-                    {interview.meeting_link ? (
+                    {interview.meeting_link && interview.status !== 'completed' ? (
                       <a
                         href={interview.meeting_link}
                         target="_blank"
@@ -2191,7 +1991,7 @@ export default function ApplicationDetailPage() {
                         Feedback ({interview.feedback.length})
                       </p>
                       {interview.feedback.map((fb) => (
-                        <InterviewFeedbackCard key={fb.id} fb={fb} interview={null} />
+                        <InterviewFeedbackCard key={fb.id} fb={fb} />
                       ))}
                     </div>
                   )}
@@ -2201,16 +2001,17 @@ export default function ApplicationDetailPage() {
                     <CandidateSelfAssessment sf={interview.candidate_self_feedback} />
                   )}
 
-                  {/* Submit feedback button */}
+                  {/* Submit feedback button — interviewers are the ones who actually give feedback */}
                   {['scheduled', 'rescheduled', 'completed'].includes(interview.status) && (
                     <div className="mt-3">
                       {showFeedbackFor === interview.id ? (
-                        <FeedbackForm
+                        <InlineFeedbackForm
                           interviewId={interview.id}
                           onSuccess={() => {
                             setShowFeedbackFor(null);
                             refetchInterviews();
                           }}
+                          onCancel={() => setShowFeedbackFor(null)}
                         />
                       ) : (
                         <button
@@ -2232,14 +2033,16 @@ export default function ApplicationDetailPage() {
       {/* ── Assessments Tab ── */}
       {activeTab === 'assessments' && (
         <div className="space-y-4">
-          <div className="flex justify-end">
-            <button
-              onClick={() => setShowScheduleAssessment(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white font-semibold rounded-lg text-sm hover:bg-brand-600 transition-colors"
-            >
-              <Plus className="w-4 h-4" /> Schedule assessment
-            </button>
-          </div>
+          {canManage && (
+            <div className="flex justify-end">
+              <button
+                onClick={() => setShowScheduleAssessment(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white font-semibold rounded-lg text-sm hover:bg-brand-600 transition-colors"
+              >
+                <Plus className="w-4 h-4" /> Schedule assessment
+              </button>
+            </div>
+          )}
 
           {assessments.length === 0 ? (
             <div className="bg-surface-50 rounded-xl border border-dashed border-surface-300 py-16 text-center">
@@ -2264,7 +2067,7 @@ export default function ApplicationDetailPage() {
                     }`}>
                       {a.status}
                     </span>
-                    {a.status === 'pending' && (
+                    {canManage && a.status === 'pending' && (
                       <button
                         onClick={() => cancelAssessmentMutation.mutate(a.id)}
                         className="text-xs text-gray-400 hover:text-red-500"
@@ -2346,7 +2149,7 @@ export default function ApplicationDetailPage() {
                     {interview.title || `Round ${interview.round_number}`}
                   </p>
                   {interview.feedback?.map((fb) => (
-                    <InterviewFeedbackCard key={fb.id} fb={fb} interview={interview} />
+                    <InterviewFeedbackCard key={fb.id} fb={fb} />
                   ))}
                   {hasSelf && (
                     <CandidateSelfAssessment sf={interview.candidate_self_feedback} />
@@ -2401,7 +2204,7 @@ export default function ApplicationDetailPage() {
       {/* ── Notes Tab ── */}
       {activeTab === 'notes' && (
         <div className="space-y-4">
-          {/* Add note */}
+          {/* Add note — HR and interviewers can both leave notes on a candidate */}
           <div className="bg-white rounded-xl border border-surface-200 p-4">
             <textarea
               value={noteText}
@@ -2444,8 +2247,8 @@ export default function ApplicationDetailPage() {
         </div>
       )}
 
-      {/* ── Documents Tab ── */}
-      {activeTab === 'documents' && (
+      {/* ── Documents Tab (HR/admin only) ── */}
+      {activeTab === 'documents' && canManage && (
         <div className="space-y-4">
           {/* Status bar */}
           {docsData ? (
@@ -2547,8 +2350,8 @@ export default function ApplicationDetailPage() {
         </div>
       )}
 
-      {/* ── Offer Tab ── */}
-      {activeTab === 'offer' && (
+      {/* ── Offer Tab (HR/admin only) ── */}
+      {activeTab === 'offer' && canManage && (
         <div className="space-y-4">
           {offerLoading ? (
             <div className="flex items-center justify-center py-20">

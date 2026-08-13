@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   format, parseISO, isToday, isTomorrow, isThisWeek, isSameDay,
@@ -96,14 +97,19 @@ function SegmentedControl({ options, value, onChange }) {
 
 export default function InterviewsPage() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const { user } = useAuthStore();
+  const isInterviewer = user?.role === ROLES.INTERVIEWER;
+  const isHR = HR_ROLES.includes(user?.role);
 
-  const [view, setView] = useState(() => localStorage.getItem(VIEW_KEY) ?? 'month');
+  // Interviewers land on the list view scoped to upcoming interviews by default —
+  // the calendar views are HR's scheduling tool, not what an interviewer needs first.
+  const [view, setView] = useState(() => localStorage.getItem(VIEW_KEY) ?? (isInterviewer ? 'list' : 'month'));
   const [fullDay, setFullDay] = useState(() => localStorage.getItem(FULL_DAY_KEY) === '1');
   const [cursor, setCursor] = useState(() => new Date());
   const [selectedDay, setSelectedDay] = useState(() => startOfDay(new Date()));
   const [scope, setScope] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState(() => (isInterviewer ? 'scheduled' : ''));
   const [page, setPage] = useState(1);
 
   const [activeInterviewId, setActiveInterviewId] = useState(null);
@@ -111,8 +117,6 @@ export default function InterviewsPage() {
   const [confirmCompleteId, setConfirmCompleteId] = useState(null);
   const [candidateDrawerAppId, setCandidateDrawerAppId] = useState(null);
 
-  const isInterviewer = user?.role === ROLES.INTERVIEWER;
-  const isHR = HR_ROLES.includes(user?.role);
   const canComplete = isHR || isInterviewer;
   const canCancel = isHR;
   const effectiveScope = isInterviewer ? 'mine' : scope;
@@ -221,8 +225,24 @@ export default function InterviewsPage() {
   }, [view, cursor]);
 
   const openCandidate = (applicationId) => {
+    // Interviewers get the full read-only application page directly — the
+    // sidebar drawer only shows a stripped-down summary and is HR-only now.
+    if (isInterviewer) {
+      navigate(`/hr/applicants/${applicationId}`);
+      return;
+    }
     setActiveInterviewId(null);
     setCandidateDrawerAppId(applicationId);
+  };
+
+  // Month/week grids select an interview (opening InterviewDetailDrawer for HR)
+  // — interviewers skip that hop and go straight to the application page.
+  const selectInterview = (iv) => {
+    if (isInterviewer) {
+      navigate(`/hr/applicants/${iv.application_id}`);
+      return;
+    }
+    setActiveInterviewId(iv.id);
   };
 
   const grouped = groupByDate(interviews);
@@ -334,7 +354,7 @@ export default function InterviewsPage() {
             selectedDay={selectedDay}
             onSelectDay={setSelectedDay}
             onExpandDay={setSelectedDay}
-            onSelectInterview={(iv) => setActiveInterviewId(iv.id)}
+            onSelectInterview={selectInterview}
           />
 
           {/* Selected day detail — full cards with actions, without leaving the grid */}
@@ -357,7 +377,7 @@ export default function InterviewsPage() {
                   <InterviewCard
                     key={interview.id}
                     interview={interview}
-                    onCandidateClick={setCandidateDrawerAppId}
+                    onCandidateClick={openCandidate}
                     canComplete={canComplete}
                     canCancel={canCancel}
                     onComplete={setConfirmCompleteId}
@@ -374,7 +394,7 @@ export default function InterviewsPage() {
           weekStart={startOfWeek(cursor, { weekStartsOn: WEEK_STARTS_ON })}
           interviews={interviews}
           selectedInterviewId={activeInterviewId}
-          onSelectInterview={(iv) => setActiveInterviewId(iv.id)}
+          onSelectInterview={selectInterview}
           fullDay={fullDay}
         />
       ) : grouped.length === 0 ? (
@@ -403,7 +423,7 @@ export default function InterviewsPage() {
                   <InterviewCard
                     key={interview.id}
                     interview={interview}
-                    onCandidateClick={setCandidateDrawerAppId}
+                    onCandidateClick={openCandidate}
                     canComplete={canComplete}
                     canCancel={canCancel}
                     onComplete={setConfirmCompleteId}

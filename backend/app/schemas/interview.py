@@ -138,6 +138,7 @@ class InterviewResponse(BaseModel):
     candidate_name: Optional[str] = None
     candidate_email: Optional[str] = None
     job_id: Optional[uuid.UUID] = None
+    job_title: Optional[str] = None
     candidate_self_feedback: Optional["CandidateSelfFeedbackResponse"] = None
     previous_rounds_feedback: list[PreviousRoundFeedbackEntry] = []
 

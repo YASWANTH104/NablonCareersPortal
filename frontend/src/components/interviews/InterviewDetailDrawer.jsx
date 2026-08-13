@@ -75,7 +75,9 @@ export default function InterviewDetailDrawer({
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-semibold text-gray-900 truncate">{interview.candidate_name}</span>
-                  <span className="block text-xs text-gray-500">View candidate profile</span>
+                  <span className="block text-xs text-gray-500 truncate">
+                    {interview.job_title || 'View candidate profile'}
+                  </span>
                 </span>
                 <ExternalLink className="w-4 h-4 text-gray-400 flex-shrink-0" />
               </button>
