@@ -118,8 +118,13 @@ export default function JobDetailPage() {
   useEffect(() => {
     const ref = searchParams.get('ref');
     const referralRef = searchParams.get('referral');
-    if (ref) sessionStorage.setItem('agency_ref', ref);
-    if (referralRef) sessionStorage.setItem('referral_ref', referralRef);
+    // localStorage, not sessionStorage: registering sends candidates to check
+    // their email and click a "verify" link, which typically opens in a new
+    // tab/window with its own blank sessionStorage — losing the referral id
+    // right before they come back to actually submit. localStorage is shared
+    // across tabs for the same origin, so it survives that detour.
+    if (ref) localStorage.setItem('agency_ref', ref);
+    if (referralRef) localStorage.setItem('referral_ref', referralRef);
     if ((ref || referralRef) && !isAgencyMode) {
       // Redirect to the focused apply layout — used for any external invite
       // link (agency or referral), not agency-exclusive despite the route name.
@@ -135,7 +140,7 @@ export default function JobDetailPage() {
   const handleApply = () => {
     const applyPath = isAgencyMode ? `/agency-apply/${slug}/apply` : `/jobs/${slug}/apply`;
     if (!accessToken) {
-      sessionStorage.setItem('agency_return_to', applyPath);
+      localStorage.setItem('agency_return_to', applyPath);
       navigate('/register', { state: { from: { pathname: applyPath } } });
     } else {
       navigate(applyPath);

@@ -165,7 +165,13 @@ async def submit_application(
             now = datetime.now(_tz.utc)
             expired = candidate.status == "expired" or (candidate.expires_at and candidate.expires_at < now)
             email_matches = user and candidate.candidate_email.lower() == (user.email or "").lower()
-            if not expired and email_matches:
+            # A referral is scoped to the one job it was created for — without
+            # this, a valid (unexpired, matching-email) referral id could be
+            # replayed on a *different* job's apply form and still get
+            # attributed as a referral there, letting one invite link silently
+            # earn referral credit across jobs it was never actually raised for.
+            job_matches = str(candidate.job_id) == str(data.job_id)
+            if not expired and email_matches and job_matches:
                 referral = candidate
 
     profile = await db.get(CandidateProfile, applicant_id)
@@ -721,22 +727,31 @@ async def get_all_applications(
 
 
 async def get_application_by_id(db: AsyncSession, application_id: uuid.UUID) -> ApplicationDetailResponse:
+    from sqlalchemy.orm import aliased
     from app.models.user import User
     from app.models.interview import Interview
     from app.models.candidate_profile import CandidateProfile
     from app.models.agency import Agency
+    from app.models.referral import Referral
+
+    Referrer = aliased(User)
 
     row = (await db.execute(
-        select(Application, User.full_name, User.email, User.avatar_url, User.date_of_birth, Agency.name.label("agency_name"))
+        select(
+            Application, User.full_name, User.email, User.avatar_url, User.date_of_birth,
+            Agency.name.label("agency_name"), Referrer.full_name.label("referrer_name"),
+        )
         .join(User, User.id == Application.applicant_id)
         .join(Agency, Agency.id == Application.agency_id, isouter=True)
+        .join(Referral, Referral.id == Application.referral_id, isouter=True)
+        .join(Referrer, Referrer.id == Referral.referred_by, isouter=True)
         .where(Application.id == application_id)
     )).first()
 
     if not row:
         raise HTTPException(404, "Application not found")
 
-    app, full_name, email, avatar_url, date_of_birth, agency_name = row
+    app, full_name, email, avatar_url, date_of_birth, agency_name, referrer_name = row
     profile = await db.get(CandidateProfile, app.applicant_id)
 
     history = (await db.execute(
@@ -751,6 +766,7 @@ async def get_application_by_id(db: AsyncSession, application_id: uuid.UUID) -> 
 
     d = _app_to_dict(app)
     d["agency_name"] = agency_name
+    d["referrer_name"] = referrer_name
     d["applicant"] = {
         "id": app.applicant_id,
         "full_name": full_name,

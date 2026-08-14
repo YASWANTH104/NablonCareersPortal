@@ -44,14 +44,17 @@ export default function ApplyPage() {
   // JobDetailPage, which is the only other place this capture used to run —
   // so a candidate opening the email went straight to "Sign in to apply" and
   // the referral id was never stored anywhere, silently attributing the
-  // eventual application as "direct". Captured into sessionStorage (not just
+  // eventual application as "direct". Captured into localStorage (not just
   // read from the URL) because the sign-in/register redirect below drops the
-  // query string, and sessionStorage is what survives that round trip.
+  // query string, and localStorage is what survives that round trip — a new
+  // account also has to detour through "check your email, click the verify
+  // link" first, which commonly opens in a brand new tab with its own blank
+  // sessionStorage, so localStorage (shared across tabs) is required here.
   useEffect(() => {
     const ref = searchParams.get('ref');
     const referralRef = searchParams.get('referral');
-    if (ref) sessionStorage.setItem('agency_ref', ref);
-    if (referralRef) sessionStorage.setItem('referral_ref', referralRef);
+    if (ref) localStorage.setItem('agency_ref', ref);
+    if (referralRef) localStorage.setItem('referral_ref', referralRef);
   }, [searchParams]);
 
   const { data: job, isLoading: jobLoading } = useQuery({
@@ -200,11 +203,12 @@ export default function ApplyPage() {
       const uploadRes = await uploadsApi.resume(resumeFile);
       const resumeUrl = uploadRes.data.url;
 
-      // Picked up from JobDetailPage, which captures ?ref=/?referral= off an
-      // agency or referral invite link into sessionStorage before redirecting
-      // here — this is the only place either value is ever read back out.
-      const agencyRef = sessionStorage.getItem('agency_ref') || undefined;
-      const referralRef = sessionStorage.getItem('referral_ref') || undefined;
+      // Picked up from JobDetailPage (or this page's own mount effect above),
+      // which capture ?ref=/?referral= off an agency or referral invite link
+      // into localStorage before the sign-in/register detour — this is the
+      // only place either value is ever read back out.
+      const agencyRef = localStorage.getItem('agency_ref') || undefined;
+      const referralRef = localStorage.getItem('referral_ref') || undefined;
 
       await applicationsApi.submit({
         job_id: job.id,
@@ -227,8 +231,8 @@ export default function ApplyPage() {
         referral_id: referralRef,
       });
 
-      sessionStorage.removeItem('agency_ref');
-      sessionStorage.removeItem('referral_ref');
+      localStorage.removeItem('agency_ref');
+      localStorage.removeItem('referral_ref');
 
       queryClient.invalidateQueries({ queryKey: ['my-applications'] });
       setSubmitted(true);

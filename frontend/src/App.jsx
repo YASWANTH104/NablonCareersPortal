@@ -13,6 +13,7 @@ import ProtectedRoute from '@/components/shared/ProtectedRoute';
 import LoginPage from '@/pages/auth/LoginPage';
 import RegisterPage from '@/pages/auth/RegisterPage';
 import ResetPasswordPage from '@/pages/auth/ResetPasswordPage';
+import VerifyEmailPage from '@/pages/auth/VerifyEmailPage';
 import MicrosoftCallbackPage from '@/pages/auth/MicrosoftCallbackPage';
 
 // Public pages
@@ -69,6 +70,7 @@ const router = createBrowserRouter([
   { path: '/register', element: <RegisterPage /> },
   { path: '/forgot-password', element: <ResetPasswordPage /> },
   { path: '/reset-password', element: <ResetPasswordPage /> },
+  { path: '/verify-email', element: <VerifyEmailPage /> },
   { path: '/auth/microsoft/callback', element: <MicrosoftCallbackPage /> },
 
   // ── APPLICANT PORTAL ────────────────────────────────────────

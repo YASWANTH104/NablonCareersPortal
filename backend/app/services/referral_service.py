@@ -98,7 +98,7 @@ async def create_referral(db: AsyncSession, data: ReferralCreate, referrer_id: u
         note=data.note,
         resume_url=data.resume_url,
         status="pending",
-        expires_at=datetime.now(timezone.utc) + timedelta(days=14),
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
     )
     db.add(referral)
     await db.flush()
@@ -116,6 +116,34 @@ async def create_referral(db: AsyncSession, data: ReferralCreate, referrer_id: u
         pass
 
     return result
+
+
+async def auto_expire_referrals(db: AsyncSession) -> int:
+    """Flip stale pending/invited referrals to 'expired' once their 24h window passes.
+
+    The application-submit path already rejects an expired referral_id on its own
+    (checks expires_at live, doesn't depend on this), so a candidate can never
+    apply against a dead token even if this job hasn't run yet — this exists so
+    the status HR/employees actually SEE (ReferralsPage, MyReferralsPage) reflects
+    reality instead of showing "Pending"/"Invited" forever on a token that already
+    silently stopped working.
+    """
+    now = datetime.now(timezone.utc)
+    stale = (await db.execute(
+        select(Referral).where(
+            Referral.status.in_(["pending", "invited"]),
+            Referral.expires_at.is_not(None),
+            Referral.expires_at < now,
+        )
+    )).scalars().all()
+
+    for referral in stale:
+        referral.status = "expired"
+        referral.updated_at = now
+
+    if stale:
+        await db.commit()
+    return len(stale)
 
 
 async def list_referrals(
@@ -195,7 +223,7 @@ async def resend_invite(db: AsyncSession, referral_id: uuid.UUID) -> dict:
 
     referral.status = "invited"
     referral.invited_at = datetime.now(timezone.utc)
-    referral.expires_at = datetime.now(timezone.utc) + timedelta(days=14)
+    referral.expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
     referral.updated_at = datetime.now(timezone.utc)
     await db.commit()
     result = await get_referral(db, referral_id)
