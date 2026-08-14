@@ -140,17 +140,41 @@ const scheduleSchema = z.object({
   refineMeetingDetails(values, ctx);
 });
 
-function PublishedSlotPicker({ jobId, applicationId, onClose, onSuccess }) {
-  const { data: slots, isLoading } = useQuery({
+// A slot's round_type (tr1/tr2/hr) is what book_slot() turns into the new
+// interview's round_number — mirrors backend/app/services/interview_slot_service.py's
+// ROUND_TO_NUMBER exactly, so filtering here lines up with what actually gets created.
+const ROUND_TYPE_TO_NUMBER = { tr1: 1, tr2: 2, hr: 3 };
+
+function PublishedSlotPicker({ jobId, applicationId, bookedRoundNumbers, onClose, onSuccess }) {
+  const queryClient = useQueryClient();
+
+  const { data: allSlots, isLoading } = useQuery({
     queryKey: ['interview-slots-for-job', jobId],
     queryFn: () => interviewSlotsApi.forJob(jobId).then((r) => r.data),
     enabled: !!jobId,
+    // A slot open in this list can get booked from elsewhere (HR's
+    // Availability page, or an agency) while this dialog sits open —
+    // without polling, a just-taken slot would keep showing as bookable
+    // here until the dialog is closed and reopened.
+    refetchInterval: 20000,
   });
+
+  // Once this candidate already has a scheduled (or completed/rescheduled —
+  // anything but cancelled) interview for a round, that round's published
+  // slots shouldn't keep showing up as bookable here: booking a second
+  // interviewer's tr1 slot after tr1 is already locked in would just create
+  // a duplicate round, not a real next step.
+  const slots = (allSlots ?? []).filter((s) => !bookedRoundNumbers.has(ROUND_TYPE_TO_NUMBER[s.round_type]));
 
   const bookMutation = useMutation({
     mutationFn: (slotId) => interviewSlotsApi.book({ slot_id: slotId, application_id: applicationId }),
     onSuccess: () => {
       toast.success('Interview scheduled');
+      // Booking here also affects HR's Availability page (the slot moves to
+      // "booked" there too) — invalidate those caches so it's not stale if
+      // that page happens to be open elsewhere.
+      queryClient.invalidateQueries({ queryKey: ['interview-slots'] });
+      queryClient.invalidateQueries({ queryKey: ['interview-slots-publishable'] });
       onSuccess();
       onClose();
     },
@@ -161,10 +185,18 @@ function PublishedSlotPicker({ jobId, applicationId, onClose, onSuccess }) {
     return <div className="flex justify-center py-10"><Loader2 className="w-5 h-5 animate-spin text-gray-400" /></div>;
   }
 
-  if (!slots || slots.length === 0) {
+  if (!allSlots || allSlots.length === 0) {
     return (
       <p className="text-sm text-gray-400 text-center py-10">
         No interviewers have published availability for this job yet.
+      </p>
+    );
+  }
+
+  if (slots.length === 0) {
+    return (
+      <p className="text-sm text-gray-400 text-center py-10">
+        Every round with published availability already has an interview scheduled for this candidate.
       </p>
     );
   }
@@ -194,7 +226,7 @@ function PublishedSlotPicker({ jobId, applicationId, onClose, onSuccess }) {
   );
 }
 
-function ScheduleInterviewDialog({ applicationId, jobId, defaultRoundNumber = 1, onClose, onSuccess }) {
+function ScheduleInterviewDialog({ applicationId, jobId, defaultRoundNumber = 1, bookedRoundNumbers, onClose, onSuccess }) {
   const [mode, setMode] = useState('manual'); // 'manual' | 'published'
   const [panelists, setPanelists] = useState([]);
   const [panelistSearch, setPanelistSearch] = useState('');
@@ -392,7 +424,13 @@ function ScheduleInterviewDialog({ applicationId, jobId, defaultRoundNumber = 1,
 
         {mode === 'published' ? (
           <div className="p-4 sm:p-6">
-            <PublishedSlotPicker jobId={jobId} applicationId={applicationId} onClose={onClose} onSuccess={onSuccess} />
+            <PublishedSlotPicker
+              jobId={jobId}
+              applicationId={applicationId}
+              bookedRoundNumbers={bookedRoundNumbers}
+              onClose={onClose}
+              onSuccess={onSuccess}
+            />
           </div>
         ) : (
         <form onSubmit={handleSubmit(onSubmit)} className="p-4 sm:p-6 space-y-6">
@@ -2519,6 +2557,13 @@ export default function ApplicationDetailPage() {
           jobId={app?.job_id}
           defaultRoundNumber={
             (interviewsData?.items ?? []).reduce((max, iv) => Math.max(max, iv.round_number), 0) + 1
+          }
+          bookedRoundNumbers={
+            new Set(
+              (interviewsData?.items ?? [])
+                .filter((iv) => iv.status !== 'cancelled')
+                .map((iv) => iv.round_number)
+            )
           }
           onClose={() => setShowScheduleDialog(false)}
           onSuccess={() => refetchInterviews()}

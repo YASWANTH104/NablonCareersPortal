@@ -19,6 +19,7 @@ async def send_email(
     template_name: str,
     context: dict,
     db=None,
+    cc_email: str | list[str] | None = None,
 ) -> bool:
     try:
         template = jinja_env.get_template(f"{template_name}.html")
@@ -27,9 +28,9 @@ async def send_email(
         from app.services import ms_graph_service
 
         if ms_graph_service.is_configured():
-            return await _send_via_graph(to_email, subject, html_content)
+            return await _send_via_graph(to_email, subject, html_content, cc_email=cc_email)
         else:
-            logger.info(f"[DEV] Email to {to_email}: {subject}")
+            logger.info(f"[DEV] Email to {to_email} (cc={cc_email}): {subject}")
             logger.debug(html_content[:200])
             return True
     except Exception as exc:
@@ -42,6 +43,7 @@ async def _send_via_graph(
     subject: str,
     html_content: str,
     attachments: list[dict] | None = None,
+    cc_email: str | list[str] | None = None,
 ) -> bool:
     """Sends via Microsoft Graph's sendMail, as the noreply@nablon.ai shared
     mailbox — the sole email transport now; ACS has been fully retired.
@@ -63,6 +65,9 @@ async def _send_via_graph(
         "body": {"contentType": "HTML", "content": html_content},
         "toRecipients": [{"emailAddress": {"address": addr}} for addr in recipients],
     }
+    if cc_email:
+        cc_list = [cc_email] if isinstance(cc_email, str) else cc_email
+        message["ccRecipients"] = [{"emailAddress": {"address": addr}} for addr in cc_list]
     if attachments:
         message["attachments"] = [
             {

@@ -22,18 +22,18 @@ def _task_session():
 
 
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=30)
-def create_teams_meeting_task(self, interview_id: str):
+def create_teams_meeting_task(self, interview_id: str, cc_emails: list[str] | None = None):
     try:
-        asyncio.run(_create_teams_meeting_async(interview_id))
+        asyncio.run(_create_teams_meeting_async(interview_id, cc_emails=cc_emails))
     except Exception as exc:
         logger.error(f"Teams meeting creation failed: interview={interview_id}: {exc}")
         # Notifications must still go out even if this retries/exhausts.
         from app.tasks.email_tasks import send_interview_scheduled_notifications
-        send_interview_scheduled_notifications.delay(interview_id)
+        send_interview_scheduled_notifications.delay(interview_id, cc_emails=cc_emails)
         raise self.retry(exc=exc)
 
 
-async def _create_teams_meeting_async(interview_id: str):
+async def _create_teams_meeting_async(interview_id: str, cc_emails: list[str] | None = None):
     from sqlalchemy import select
     from app.models.interview import Interview, InterviewPanelist
     from app.models.application import Application
@@ -57,13 +57,13 @@ async def _create_teams_meeting_async(interview_id: str):
         )).scalars().all()
 
         if not panelists or not candidate:
-            send_interview_scheduled_notifications.delay(interview_id)
+            send_interview_scheduled_notifications.delay(interview_id, cc_emails=cc_emails)
             return
 
         organizer_panelist = next((p for p in panelists if p.role == "interviewer"), panelists[0])
         organizer = await db.get(User, organizer_panelist.user_id)
         if not organizer:
-            send_interview_scheduled_notifications.delay(interview_id)
+            send_interview_scheduled_notifications.delay(interview_id, cc_emails=cc_emails)
             return
 
         attendee_emails = [candidate.email] + [
@@ -96,7 +96,7 @@ async def _create_teams_meeting_async(interview_id: str):
             await db.commit()
             logger.info(f"Teams meeting created: interview={interview_id}, organizer={organizer.email}")
 
-        send_interview_scheduled_notifications.delay(interview_id)
+        send_interview_scheduled_notifications.delay(interview_id, cc_emails=cc_emails)
 
 
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=30)

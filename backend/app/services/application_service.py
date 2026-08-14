@@ -41,6 +41,22 @@ async def _seed_initial_resume_version(db: AsyncSession, application: Applicatio
         await db.rollback()
 
 
+def _normalize_url(url: Optional[str]) -> Optional[str]:
+    """Candidate-supplied LinkedIn/GitHub/portfolio links come in through
+    several paths (AI resume parsing, manual HR/agency intake, bulk Excel
+    import) and not all of them guarantee a scheme — a bare "linkedin.com/in/x"
+    renders as a valid-looking <a href> that the browser then resolves
+    *relative to this site's own origin*, so clicking it just reloads the
+    careers portal instead of navigating to LinkedIn. Normalizing once here,
+    at the single read path every application response goes through, fixes
+    it regardless of which ingestion path let the bare value through —
+    including rows already stored that way before this fix existed."""
+    if not url:
+        return url
+    url = url.strip()
+    return url if url.startswith(("http://", "https://")) else f"https://{url}"
+
+
 def _app_to_dict(app: Application) -> dict:
     from app.services.storage_service import refresh_url
 
@@ -55,9 +71,9 @@ def _app_to_dict(app: Application) -> dict:
         # error from Azure.
         "resume_url": refresh_url(app.resume_url),
         "cover_letter": app.cover_letter,
-        "linkedin_url": app.linkedin_url,
-        "portfolio_url": app.portfolio_url,
-        "github_url": app.github_url,
+        "linkedin_url": _normalize_url(app.linkedin_url),
+        "portfolio_url": _normalize_url(app.portfolio_url),
+        "github_url": _normalize_url(app.github_url),
         "current_ctc": app.current_ctc,
         "expected_ctc": app.expected_ctc,
         "notice_period": app.notice_period,

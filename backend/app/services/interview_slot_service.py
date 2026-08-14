@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,9 +9,22 @@ from app.models.interview_slot import InterviewSlot
 from app.schemas.interview import InterviewCreate, PanelistCreate
 from app.schemas.interview_slot import SlotResponse, AvailableSlotGroup
 
+# CC'd on every candidate/interviewer email that results from booking a
+# published slot (HR direct-book or agency self-book) — a standing ask to
+# keep visibility into slot-driven scheduling specifically, not interviews
+# scheduled the regular manual way.
+SLOT_BOOKING_CC = ["sneha.vangada@nablon.ai"]
+
 ROUND_TO_NUMBER = {"tr1": 1, "tr2": 2, "hr": 3}
 ROUND_TO_INTERVIEW_TYPE = {"tr1": "technical", "tr2": "technical", "hr": "hr"}
 SLOT_CONFLICT_MESSAGE = "This slot is no longer available — please pick another."
+# On-demand, HR-triggered nudge ("please go publish your free slots"), not an
+# automated sweep — so the cooldown is enforced synchronously against the
+# requesting HR user instead of silently skipping, the way the feedback-
+# reminder Celery job does. Short enough that a genuinely urgent re-nudge
+# later the same day isn't blocked, long enough that several HR staff
+# clicking the same interviewer in a row doesn't turn into spam.
+AVAILABILITY_REQUEST_COOLDOWN = timedelta(hours=6)
 
 
 def _is_hr(user) -> bool:
@@ -75,9 +88,12 @@ async def publish_slots(
         created.append(slot)
         existing_intervals.append((st, new_end))  # guards overlaps within this same batch too
 
+    # No per-slot refresh — id/status/duration/timestamps are all Python-side
+    # defaults already set on these objects before the INSERT, not values
+    # only the server knows. A refresh loop here would be one extra network
+    # round trip per slot for data we already have, which is what made a
+    # multi-slot drag-publish feel slow against a remote Postgres instance.
     await db.commit()
-    for slot in created:
-        await db.refresh(slot)
     return [_to_response(s) for s in created]
 
 
@@ -93,15 +109,75 @@ async def unpublish_slot(db: AsyncSession, slot_id: uuid.UUID, requesting_user) 
     await db.commit()
 
 
+async def unassign_slot(db: AsyncSession, slot_id: uuid.UUID) -> SlotResponse:
+    """HR pulling a published-but-never-booked slot back to raw availability —
+    clears job_id/round_type but keeps the underlying time slot intact (status
+    stays "open") so it can be re-published against a different job instead of
+    the interviewer having to publish a brand new slot for the same time.
+    HR-only, enforced at the router. A booked slot can't be reused this way —
+    unbooking is a separate, deliberate action (interview cancellation), not
+    something this "free it up again" flow should silently trigger."""
+    slot = await db.get(InterviewSlot, slot_id)
+    if not slot:
+        raise HTTPException(404, "Slot not found")
+    if slot.status != "open":
+        raise HTTPException(400, "Only open (unbooked) slots can be reused")
+
+    slot.job_id = None
+    slot.round_type = None
+    # No refresh needed — every field on this row is either a value we just
+    # set in Python or a Python-side default/onupdate (uuid4, "open",
+    # datetime.utcnow, ...), never something computed server-side. Refreshing
+    # would just be an extra network round trip to re-fetch data we already
+    # have, which is real latency against a remote Postgres instance.
+    await db.commit()
+    return _to_response(slot)
+
+
+async def assign_slots_batch(
+    db: AsyncSession, slot_ids: list[uuid.UUID], *, job_id: uuid.UUID, round_type: str
+) -> list[SlotResponse]:
+    """HR attaching a job+round to several raw, interviewer-published slots at
+    once — this is the "pick a job, tick several slots, publish them all"
+    flow, and it's what makes a slot eligible to show up for that job's
+    agencies to book (agency queries filter by job_id, so an unassigned NULL
+    job_id never matches). Rows that
+    are no longer open (booked/removed since the HR page loaded them) are
+    silently skipped rather than failing the whole batch, since a stale
+    selection shouldn't block publishing the ones that are still valid."""
+    from app.models.job import Job
+    job = await db.get(Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    if not slot_ids:
+        return []
+
+    rows = (await db.execute(
+        select(InterviewSlot).where(InterviewSlot.id.in_(slot_ids))
+    )).scalars().all()
+
+    updated = [s for s in rows if s.status == "open"]
+    for slot in updated:
+        slot.job_id = job_id
+        slot.round_type = round_type
+
+    await db.commit()  # see unassign_slot above — no per-row refresh needed
+    return [_to_response(s, job_title=job.title) for s in updated]
+
+
 async def _slots_for_interviewer(db: AsyncSession, interviewer_id: uuid.UUID) -> list[SlotResponse]:
     from app.models.job import Job
     from app.models.interview import Interview
     from app.models.application import Application
     from app.models.user import User
 
+    # outerjoin, not join: an interviewer's own calendar must still show
+    # slots they've published that HR hasn't assigned a job to yet — an
+    # inner join would silently drop every unassigned (job_id IS NULL) slot.
     rows = (await db.execute(
         select(InterviewSlot, Job.title)
-        .join(Job, Job.id == InterviewSlot.job_id)
+        .outerjoin(Job, Job.id == InterviewSlot.job_id)
         .where(InterviewSlot.interviewer_id == interviewer_id)
         .order_by(InterviewSlot.start_time)
     )).all()
@@ -131,6 +207,91 @@ async def get_my_slots(db: AsyncSession, interviewer_id: uuid.UUID) -> list[Slot
 
 async def get_interviewer_slots_for_hr(db: AsyncSession, interviewer_id: uuid.UUID) -> list[SlotResponse]:
     return await _slots_for_interviewer(db, interviewer_id)
+
+
+async def request_publish_reminder(
+    db: AsyncSession, interviewer_id: uuid.UUID, requested_by
+) -> dict:
+    """HR asking an interviewer (who hasn't published much/any free time) to
+    go do it — fires an in-app notification plus an email, same as every
+    other "someone should look at this" moment in the app (interview
+    scheduling, feedback reminders). Rate-limited per interviewer, not per
+    HR user, since the goal is protecting the interviewer's inbox regardless
+    of how many different HR staff try to nudge them."""
+    from app.models.user import User
+
+    interviewer = await db.get(User, interviewer_id)
+    if not interviewer or interviewer.role != "interviewer":
+        raise HTTPException(404, "Interviewer not found")
+
+    now = datetime.now(timezone.utc)
+    last_sent = interviewer.last_availability_request_sent_at
+    if last_sent is not None:
+        # Older DBs may still have naive timestamps from before this column
+        # was timezone-aware end to end — treat them as UTC rather than
+        # crashing on a naive/aware comparison.
+        if last_sent.tzinfo is None:
+            last_sent = last_sent.replace(tzinfo=timezone.utc)
+        retry_at = last_sent + AVAILABILITY_REQUEST_COOLDOWN
+        if retry_at > now:
+            minutes_left = int((retry_at - now).total_seconds() // 60) + 1
+            raise HTTPException(
+                429,
+                f"{interviewer.full_name} was already reminded recently — try again in "
+                f"{minutes_left} minute{'s' if minutes_left != 1 else ''}.",
+            )
+
+    interviewer.last_availability_request_sent_at = now
+
+    try:
+        from app.models.notification import Notification
+        db.add(Notification(
+            user_id=interviewer.id,
+            type="availability_request",
+            title="HR needs your interview availability",
+            body=f"{requested_by.full_name} asked you to publish your free slots for upcoming interviews.",
+            link="/hr/availability",
+        ))
+    except Exception:
+        pass
+
+    await db.commit()
+
+    try:
+        from app.tasks.email_tasks import send_availability_request_email_task
+        send_availability_request_email_task.delay(str(interviewer.id), requested_by.full_name)
+    except Exception:
+        pass
+
+    return {"message": f"Reminder sent to {interviewer.full_name}."}
+
+
+async def get_publishable_slots(db: AsyncSession) -> list[SlotResponse]:
+    """Every open, upcoming slot across ALL interviewers that isn't booked yet —
+    both raw unassigned availability (job_id IS NULL, needs a job picked) and
+    already-published-but-not-yet-booked slots (job_id set, still status="open").
+    This is what the "Publish slots to agencies" panel shows by default, so HR
+    doesn't have to pick one interviewer at a time to see either what's waiting
+    to be published or what's published but going stale without a booking —
+    the latter is what makes reuse (unassign_slot) discoverable at all."""
+    from app.models.job import Job
+    from app.models.user import User
+
+    now = datetime.now(timezone.utc)
+    rows = (await db.execute(
+        select(InterviewSlot, User.full_name, Job.title)
+        .join(User, User.id == InterviewSlot.interviewer_id)
+        .outerjoin(Job, Job.id == InterviewSlot.job_id)
+        .where(
+            InterviewSlot.status == "open",
+            InterviewSlot.start_time >= now,
+        )
+        .order_by(InterviewSlot.start_time)
+    )).all()
+    return [
+        _to_response(slot, job_title=job_title, interviewer_name=interviewer_name)
+        for slot, interviewer_name, job_title in rows
+    ]
 
 
 async def get_available_slots_for_job(
@@ -218,6 +379,82 @@ async def book_slot(
     if not slot:
         raise HTTPException(409, SLOT_CONFLICT_MESSAGE)
 
+    # The slot_id path (HR booking directly) has no job/round in its match
+    # criteria, so a still-unassigned slot could otherwise be claimed here —
+    # raising propagates uncaught, which is what rolls the "booked" claim
+    # above back via get_db()'s rollback (see docstring above). Unassigned
+    # slots have their own dedicated booking path, book_unassigned_slot below.
+    if not slot.job_id or not slot.round_type:
+        raise HTTPException(400, "This slot hasn't been assigned to a job yet")
+
+    return await _finalize_booking(
+        db, slot, application_id=application_id,
+        booked_by_agency_id=booked_by_agency_id, booked_by_user_id=booked_by_user_id,
+    )
+
+
+async def book_unassigned_slot(
+    db: AsyncSession,
+    *,
+    slot_id: uuid.UUID,
+    job_id: uuid.UUID,
+    round_type: str,
+    application_id: uuid.UUID,
+    booked_by_user_id: uuid.UUID,
+) -> SlotResponse:
+    """HR's "Book for an interviewer" direct-booking path for a slot the
+    interviewer published but nobody has assigned a job to yet — picking the
+    job/round and picking the candidate happen as one action here, not two.
+
+    Deliberately NOT assign_slots_batch() followed by book_slot(): doing it in two
+    separate calls would leave the slot sitting in the open+assigned state
+    (exactly what makes a slot visible to agencies) for however long it takes
+    HR to then pick a candidate — a real window where an agency could book
+    the same slot out from under the interview HR is in the middle of
+    scheduling. Setting job_id/round_type/status="booked" in a single atomic
+    UPDATE means the slot never passes through that agency-visible state at
+    all when booked this way.
+    """
+    from app.models.job import Job
+    job = await db.get(Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    claim_stmt = (
+        update(InterviewSlot)
+        .where(InterviewSlot.id.in_(
+            select(InterviewSlot.id)
+            .where(
+                InterviewSlot.id == slot_id,
+                InterviewSlot.job_id.is_(None),
+                InterviewSlot.status == "open",
+            )
+            .with_for_update(skip_locked=True).limit(1)
+        ))
+        .values(job_id=job_id, round_type=round_type, status="booked")
+        .returning(InterviewSlot)
+    )
+    slot = (await db.execute(claim_stmt)).scalar_one_or_none()
+    if not slot:
+        raise HTTPException(409, SLOT_CONFLICT_MESSAGE)
+
+    return await _finalize_booking(
+        db, slot, application_id=application_id, booked_by_user_id=booked_by_user_id, job_title=job.title,
+    )
+
+
+async def _finalize_booking(
+    db: AsyncSession,
+    slot: InterviewSlot,
+    *,
+    application_id: uuid.UUID,
+    booked_by_user_id: Optional[uuid.UUID] = None,
+    booked_by_agency_id: Optional[uuid.UUID] = None,
+    job_title: Optional[str] = None,
+) -> SlotResponse:
+    """Shared tail of both booking paths above: the slot row is already
+    claimed (status="booked", job_id/round_type set) — this just creates the
+    real Interview for it and records who booked it."""
     from app.services import interview_service
 
     interview_data = InterviewCreate(
@@ -228,15 +465,16 @@ async def book_slot(
         duration_mins=slot.duration_mins,
         panelists=[PanelistCreate(user_id=slot.interviewer_id, role="interviewer")],
     )
-    interview = await interview_service.create_interview(db, interview_data, created_by=booked_by_user_id)
+    interview = await interview_service.create_interview(
+        db, interview_data, created_by=booked_by_user_id, cc_emails=SLOT_BOOKING_CC,
+    )
 
     slot.interview_id = interview.id
     slot.booked_by_agency_id = booked_by_agency_id
     slot.booked_by_user_id = booked_by_user_id
-    await db.commit()
-    await db.refresh(slot)
+    await db.commit()  # see unassign_slot above — no refresh needed
 
-    return _to_response(slot)
+    return _to_response(slot, job_title=job_title)
 
 
 def _to_response(slot: InterviewSlot, job_title=None, interviewer_name=None, candidate_name=None) -> SlotResponse:

@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}Availability Needed – Nablon AI Careers{% endblock %}
+
+{% block content %}
+<h2>Hi {{ full_name }}, HR needs your availability</h2>
+<p>
+  <strong>{{ requested_by_name }}</strong> noticed you don't have much upcoming free time published for
+  interviews and asked us to check in with you.
+</p>
+<p>
+  Whenever you get a chance, mark yourself free on your interview calendar — HR will take care of
+  assigning each slot to a role once it's published.
+</p>
+
+<a href="{{ availability_url }}" class="cta">Publish My Availability</a>
+
+<p style="margin-top: 24px; color: #6B7280; font-size: 14px;">
+  If you've already published your slots recently, feel free to ignore this reminder.
+</p>
+{% endblock %}

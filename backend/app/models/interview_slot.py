@@ -16,11 +16,19 @@ class InterviewSlot(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     interviewer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("jobs.id"), nullable=False)
-    round_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    # Nullable: an interviewer publishes raw free time with no job/round
+    # attached at all. HR later "assigns" a job+round to an open slot (see
+    # assign_slots_batch in interview_slot_service.py), which is what makes it
+    # show up for that job's agencies to book. NULL here means "not yet
+    # assigned". Booking an unassigned slot directly for an internal
+    # candidate (book_unassigned_slot) sets job_id/round_type and status to
+    # "booked" in the same atomic step instead, so it never passes through
+    # this agency-visible "assigned but open" state at all.
+    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("jobs.id"))
+    round_type: Mapped[str | None] = mapped_column(String(20))
     # tr1 | tr2 | hr — mirrors the pipeline stage vocabulary in app/constants/stages.py
     start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    duration_mins: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    duration_mins: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
     # open | booked
     interview_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("interviews.id"))

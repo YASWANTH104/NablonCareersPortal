@@ -626,15 +626,15 @@ def _interview_scheduled_str(interview) -> str:
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
-def send_interview_scheduled_notifications(self, interview_id: str):
+def send_interview_scheduled_notifications(self, interview_id: str, cc_emails: list[str] | None = None):
     try:
-        asyncio.run(_send_interview_scheduled_async(interview_id))
+        asyncio.run(_send_interview_scheduled_async(interview_id, cc_emails=cc_emails))
     except Exception as exc:
         logger.error(f"Interview scheduled email failed: interview={interview_id}: {exc}")
         raise self.retry(exc=exc)
 
 
-async def _send_interview_scheduled_async(interview_id: str):
+async def _send_interview_scheduled_async(interview_id: str, cc_emails: list[str] | None = None):
     from sqlalchemy import select
     from app.models.interview import Interview, InterviewPanelist
     from app.models.application import Application
@@ -672,6 +672,7 @@ async def _send_interview_scheduled_async(interview_id: str):
                 subject=f"Interview Scheduled – {job_title}",
                 template_name="interview_scheduled",
                 context={"full_name": candidate.full_name, "role": "candidate", **email_ctx},
+                cc_email=cc_emails,
             )
 
         panelists = (await db.execute(
@@ -690,6 +691,7 @@ async def _send_interview_scheduled_async(interview_id: str):
                         "candidate_name": candidate.full_name if candidate else "",
                         **email_ctx,
                     },
+                    cc_email=cc_emails,
                 )
 
         logger.info(f"Interview scheduled notifications sent: interview={interview_id}")
@@ -1123,3 +1125,36 @@ async def _send_new_job_posted_async(job_id: str):
             )
 
         logger.info(f"New job posted announcement sent: job={job_id}, recipients={len(recipients)}")
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def send_availability_request_email_task(self, interviewer_id: str, requested_by_name: str):
+    try:
+        asyncio.run(_send_availability_request_email_async(interviewer_id, requested_by_name))
+    except Exception as exc:
+        logger.error(f"Availability request email failed: interviewer={interviewer_id}: {exc}")
+        raise self.retry(exc=exc)
+
+
+async def _send_availability_request_email_async(interviewer_id: str, requested_by_name: str):
+    from app.models.user import User
+    from app.services.email_service import send_email
+    from app.config import settings
+
+    async with _task_session() as db:
+        interviewer = await db.get(User, uuid.UUID(interviewer_id))
+        if not interviewer:
+            return
+
+        await send_email(
+            to_email=interviewer.email,
+            subject="HR needs your interview availability",
+            template_name="availability_request",
+            context={
+                "full_name": interviewer.full_name,
+                "requested_by_name": requested_by_name,
+                "availability_url": f"{settings.FRONTEND_URL}/hr/availability",
+            },
+        )
+
+        logger.info(f"Availability request email sent: interviewer={interviewer_id}, to={interviewer.email}")
