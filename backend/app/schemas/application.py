@@ -150,6 +150,7 @@ class ApplicationResponse(BaseModel):
     source: str
     agency_id: Optional[uuid.UUID] = None
     agency_name: Optional[str] = None
+    referrer_name: Optional[str] = None
     rating: Optional[int] = None
     is_starred: bool
     assigned_to: Optional[uuid.UUID] = None

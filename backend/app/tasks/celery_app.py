@@ -7,7 +7,7 @@ celery_app = Celery(
     "nablon_careers",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=["app.tasks.email_tasks", "app.tasks.pdf_tasks", "app.tasks.interview_tasks", "app.tasks.calendar_tasks"],
+    include=["app.tasks.email_tasks", "app.tasks.pdf_tasks", "app.tasks.interview_tasks", "app.tasks.calendar_tasks", "app.tasks.referral_tasks"],
 )
 
 conf = dict(
@@ -24,6 +24,10 @@ conf = dict(
         },
         "send-feedback-reminders": {
             "task": "send_feedback_reminders",
+            "schedule": 900,  # every 15 minutes
+        },
+        "auto-expire-referrals": {
+            "task": "auto_expire_referrals",
             "schedule": 900,  # every 15 minutes
         },
     },
