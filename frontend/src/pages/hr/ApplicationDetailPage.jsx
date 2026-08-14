@@ -1838,6 +1838,8 @@ export default function ApplicationDetailPage() {
                 <dd className="text-gray-700 mt-0.5">
                   {app.source === 'agency'
                     ? (app.agency_name || 'Agency')
+                    : app.source === 'referral'
+                    ? `Referral${app.referrer_name ? ` - ${app.referrer_name}` : ''}`
                     : <span className="capitalize">{app.source}</span>}
                 </dd>
               </div>
