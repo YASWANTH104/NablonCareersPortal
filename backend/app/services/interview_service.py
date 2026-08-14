@@ -361,6 +361,7 @@ async def create_interview(
     db: AsyncSession,
     data: InterviewCreate,
     created_by: Optional[uuid.UUID] = None,
+    cc_emails: Optional[list[str]] = None,
 ) -> InterviewResponse:
     if data.panelists:
         conflicts = await _check_panelist_conflicts(
@@ -438,10 +439,10 @@ async def create_interview(
     try:
         if not interview.meeting_link and panelists:
             from app.tasks.calendar_tasks import create_teams_meeting_task
-            create_teams_meeting_task.delay(str(interview.id))
+            create_teams_meeting_task.delay(str(interview.id), cc_emails=cc_emails)
         else:
             from app.tasks.email_tasks import send_interview_scheduled_notifications
-            send_interview_scheduled_notifications.delay(str(interview.id))
+            send_interview_scheduled_notifications.delay(str(interview.id), cc_emails=cc_emails)
     except Exception:
         pass
 

@@ -29,5 +29,10 @@ class User(Base):
     password_reset_token: Mapped[str | None] = mapped_column(Text)
     password_reset_expires: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When HR last nudged this user (an interviewer) to publish their free
+    # interview slots — gates the cooldown in request_publish_reminder() so
+    # several HR staff clicking the same interviewer doesn't spam them with
+    # duplicate reminders within a few hours of each other.
+    last_availability_request_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)

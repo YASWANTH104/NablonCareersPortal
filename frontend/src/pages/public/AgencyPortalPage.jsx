@@ -235,6 +235,10 @@ function SlotsSection({ portalToken, assignmentId, candidates }) {
   const { data: slots, isLoading } = useQuery({
     queryKey: ['agency-portal-slots', portalToken, assignmentId],
     queryFn: () => agenciesApi.portalAvailableSlots(portalToken, assignmentId).then((r) => r.data),
+    // HR can book one of these slots directly (e.g. for an internal
+    // candidate) at any time — polling keeps an already-taken slot from
+    // sitting here looking bookable until the agency happens to reload.
+    refetchInterval: 20000,
   });
 
   const bookMutation = useMutation({

@@ -14,6 +14,16 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 MAX_TEXT_CHARS = 15000  # plenty for a resume, keeps the prompt bounded
+URL_FIELDS = ("linkedin_url", "github_url", "portfolio_url")
+
+
+def _with_scheme(url: str) -> str:
+    """A resume's visible text often just prints "linkedin.com/in/x" with no
+    scheme — stored as-is, that renders as a working-looking link that the
+    browser resolves relative to the careers portal's own origin instead of
+    navigating to LinkedIn. The real-hyperlink path (_classify_links) doesn't
+    need this since a PDF/DOCX anchor target already carries a full URL."""
+    return url if url.startswith(("http://", "https://")) else f"https://{url}"
 
 PARSED_FIELDS = [
     "full_name", "email", "phone", "current_location", "total_experience",
@@ -128,13 +138,11 @@ def _regex_fallback(text: str, links: list[str] | None = None) -> dict[str, Any]
 
     linkedin = re.search(r"(?:https?://)?(?:www\.)?linkedin\.com/in/[\w\-./]+", text, re.I)
     if linkedin:
-        url = linkedin.group(0)
-        result["linkedin_url"] = url if url.startswith("http") else f"https://{url}"
+        result["linkedin_url"] = _with_scheme(linkedin.group(0))
 
     github = re.search(r"(?:https?://)?(?:www\.)?github\.com/[\w\-./]+", text, re.I)
     if github:
-        url = github.group(0)
-        result["github_url"] = url if url.startswith("http") else f"https://{url}"
+        result["github_url"] = _with_scheme(github.group(0))
 
     # Real hyperlink targets (if any were extracted) are authoritative over text
     # regex matches — a resume can hyperlink a friendly label to the real URL,
@@ -227,7 +235,10 @@ async def parse_resume(content: bytes, content_type: str, filename: str = "") ->
             result = {}
             for key in PARSED_FIELDS:
                 val = parsed.get(key)
-                result[key] = val.strip() if isinstance(val, str) and val.strip() else None
+                val = val.strip() if isinstance(val, str) and val.strip() else None
+                if val and key in URL_FIELDS:
+                    val = _with_scheme(val)
+                result[key] = val
 
             # Override with the real hyperlink targets when we found any — more
             # reliable than anything the model read off of visible anchor text.
