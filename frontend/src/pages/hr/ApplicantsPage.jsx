@@ -20,6 +20,18 @@ import HoldReasonDialog from '@/components/shared/HoldReasonDialog';
 import { useHoldToggle } from '@/hooks/useHoldToggle';
 import { PIPELINE_STAGES, STAGE_MAP, REASON_REQUIRED_STAGES } from '@/constants/pipelineStages';
 
+// Same 4 values as Application.source on the backend — kept here rather than a
+// shared constants file since only this page's filter dropdown needs the list
+// (ReportsPage keeps its own copy for chart labels/colors, ApplicantsPage's
+// add-candidate modal keeps its own narrower copy for submission — see
+// SOURCE_OPTIONS below, which deliberately excludes "agency").
+const SOURCE_FILTER_OPTIONS = [
+  { value: 'direct', label: 'Direct' },
+  { value: 'referral', label: 'Referral' },
+  { value: 'agency', label: 'Agency' },
+  { value: 'talent_acquisition', label: 'Talent Acquisition' },
+];
+
 function initials(name) {
   return (name ?? '?')
     .split(' ')
@@ -91,6 +103,20 @@ function KanbanCard({ application, onClick, onToggleHold }) {
       {application.on_hold && (
         <span className="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 mb-1.5">
           On Hold
+        </span>
+      )}
+      {application.screening_score != null && (
+        <span className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-full mb-1.5 ${
+          application.screening_score >= 75 ? 'bg-green-100 text-green-700' :
+          application.screening_score >= 55 ? 'bg-amber-100 text-amber-700' :
+          'bg-red-100 text-red-700'
+        }`} title="Screening score">
+          Screening {Math.round(application.screening_score)}
+        </span>
+      )}
+      {application.screening_auto_reject && (
+        <span className="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 mb-1.5 ml-1">
+          Auto-rejected
         </span>
       )}
       <div className="flex items-center justify-between mt-2">
@@ -390,6 +416,15 @@ function TableView({ applications, onRowClick, onToggleHold }) {
                         {app.is_starred && (
                           <Star className="w-3 h-3 text-yellow-400 fill-yellow-400" />
                         )}
+                        {app.screening_score != null && (
+                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                            app.screening_score >= 75 ? 'bg-green-100 text-green-700' :
+                            app.screening_score >= 55 ? 'bg-amber-100 text-amber-700' :
+                            'bg-red-100 text-red-700'
+                          }`} title="Screening score">
+                            {Math.round(app.screening_score)}
+                          </span>
+                        )}
                       </p>
                       <p className="text-xs text-gray-400">{app.applicant?.email}</p>
                     </div>
@@ -564,6 +599,7 @@ export default function ApplicantsPage() {
   const selectedJobId = searchParams.get('jobId') || '';
   const stageFilter = searchParams.get('stage') || '';
   const agencyFilter = searchParams.get('agencyId') || '';
+  const sourceFilter = searchParams.get('source') || '';
   const search = searchParams.get('search') || '';
   const page = Number(searchParams.get('page') || '1');
 
@@ -607,10 +643,11 @@ export default function ApplicantsPage() {
   const filters = {
     job_id: selectedJobId || undefined,
     agency_id: agencyFilter || undefined,
+    source: sourceFilter || undefined,
     search: search || undefined,
   };
 
-  const queryParams = { jobId: selectedJobId, stage: stageFilter, agencyId: agencyFilter, search, page };
+  const queryParams = { jobId: selectedJobId, stage: stageFilter, agencyId: agencyFilter, source: sourceFilter, search, page };
   const queryKey = ['hr-applications', queryParams];
 
   const { data, isLoading } = useQuery({
@@ -720,6 +757,18 @@ export default function ApplicantsPage() {
           </select>
         )}
 
+        {/* Source filter */}
+        <select
+          value={sourceFilter}
+          onChange={(e) => setFilter('source', e.target.value)}
+          className="text-sm border border-surface-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 max-w-full min-w-0 flex-1 sm:flex-none"
+        >
+          <option value="">All sources</option>
+          {SOURCE_FILTER_OPTIONS.map((s) => (
+            <option key={s.value} value={s.value}>{s.label}</option>
+          ))}
+        </select>
+
         {/* Agency filter */}
         {agenciesData?.length > 0 && (
           <select
@@ -727,7 +776,7 @@ export default function ApplicantsPage() {
             onChange={(e) => setFilter('agencyId', e.target.value)}
             className="text-sm border border-surface-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 max-w-full min-w-0 flex-1 sm:flex-none"
           >
-            <option value="">All sources</option>
+            <option value="">All agencies</option>
             {agenciesData.map((a) => (
               <option key={a.id} value={a.id}>{a.name}</option>
             ))}

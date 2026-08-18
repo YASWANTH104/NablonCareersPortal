@@ -304,6 +304,70 @@ async def _send_application_received_async(application_id: str):
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def send_screening_request_email_task(self, application_id: str):
+    """Sent when an application enters the `screening` stage on a job with
+    Job.screening_enabled=True (see application_service.move_stage ->
+    screening_service.create_and_queue_email). Async/Celery-only, same as
+    every other candidate-facing email in this app — a real send takes
+    several seconds and must never block the HR stage-move request."""
+    try:
+        asyncio.run(_send_screening_request_email_async(application_id))
+    except Exception as exc:
+        logger.error(f"Screening request email failed: app={application_id}: {exc}")
+        raise self.retry(exc=exc)
+
+
+async def _send_screening_request_email_async(application_id: str):
+    from app.models.application import Application
+    from app.models.user import User
+    from app.models.job import Job
+    from app.models.screening import ScreeningResponse
+    from app.services.email_service import send_email
+    from app.services.screening_service import REQUEST_EXPIRY_DAYS
+    from app.config import settings
+    from sqlalchemy import select
+
+    app_uuid = uuid.UUID(application_id)
+
+    async with _task_session() as db:
+        row = (await db.execute(
+            select(Application, User.full_name, User.email, Job.title.label("job_title"))
+            .join(User, User.id == Application.applicant_id)
+            .join(Job, Job.id == Application.job_id)
+            .where(Application.id == app_uuid)
+        )).first()
+
+        if not row:
+            logger.warning(f"Application {application_id} not found for screening email")
+            return
+
+        app, full_name, candidate_email, job_title = row
+
+        req = (await db.execute(
+            select(ScreeningResponse).where(ScreeningResponse.application_id == app_uuid)
+        )).scalar_one_or_none()
+        if not req:
+            logger.warning(f"No screening request found for application {application_id}")
+            return
+
+        screening_url = f"{settings.FRONTEND_URL}/screening/{req.token}"
+
+        await send_email(
+            to_email=candidate_email,
+            subject=f"Next step: screening questionnaire – {job_title} at Nablon AI",
+            template_name="screening_request",
+            context={
+                "full_name": full_name,
+                "job_title": job_title,
+                "screening_url": screening_url,
+                "expires_days": REQUEST_EXPIRY_DAYS,
+            },
+        )
+
+        logger.info(f"Screening request email sent: app={application_id}, to={candidate_email}")
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def send_sourced_application_welcome_email(self, application_id: str):
     """Sent instead of send_application_received_email when an agency or HR/TA
     submission creates a brand-new candidate account. The candidate has no

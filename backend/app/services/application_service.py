@@ -252,6 +252,13 @@ async def submit_application(
     except Exception:
         pass
 
+    if job.screening_enabled:
+        try:
+            from app.services import screening_service
+            await screening_service.create_and_queue_email(db, application.id)
+        except Exception:
+            pass
+
     return application
 
 
@@ -397,6 +404,13 @@ async def submit_sourced_application(
             send_application_received_email.delay(str(application.id))
     except Exception:
         pass
+
+    if job.screening_enabled:
+        try:
+            from app.services import screening_service
+            await screening_service.create_and_queue_email(db, application.id)
+        except Exception:
+            pass
 
     return application
 
@@ -689,16 +703,22 @@ async def get_all_applications(
     stage: Optional[str] = None,
     search: Optional[str] = None,
     agency_id: Optional[uuid.UUID] = None,
+    source: Optional[str] = None,
     page: int = 1,
     limit: int = 20,
 ) -> dict:
     from app.models.user import User
     from app.models.agency import Agency
+    from app.models.screening import ScreeningResponse
 
     base = (
-        select(Application, User.full_name, User.email, User.avatar_url, Agency.name.label("agency_name"))
+        select(
+            Application, User.full_name, User.email, User.avatar_url, Agency.name.label("agency_name"),
+            ScreeningResponse.overall_score, ScreeningResponse.auto_reject,
+        )
         .join(User, User.id == Application.applicant_id)
         .join(Agency, Agency.id == Application.agency_id, isouter=True)
+        .join(ScreeningResponse, ScreeningResponse.application_id == Application.id, isouter=True)
     )
 
     filters = []
@@ -710,6 +730,8 @@ async def get_all_applications(
         filters.append(User.full_name.ilike(f"%{search}%"))
     if agency_id:
         filters.append(Application.agency_id == agency_id)
+    if source:
+        filters.append(Application.source == source)
 
     if filters:
         base = base.where(and_(*filters))
@@ -728,9 +750,11 @@ async def get_all_applications(
     )).all()
 
     items = []
-    for app, full_name, email, avatar_url, agency_name in rows:
+    for app, full_name, email, avatar_url, agency_name, screening_score, screening_auto_reject in rows:
         d = _app_to_dict(app)
         d["agency_name"] = agency_name
+        d["screening_score"] = float(screening_score) if screening_score is not None else None
+        d["screening_auto_reject"] = screening_auto_reject
         d["applicant"] = {
             "id": app.applicant_id,
             "full_name": full_name,

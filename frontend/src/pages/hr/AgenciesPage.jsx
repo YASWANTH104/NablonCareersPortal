@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Building2, Plus, Copy, ChevronDown, ChevronRight, Trash2, Users,
-  X, Mail, TrendingUp, Link2, Power,
+  X, Mail, TrendingUp, Link2, Power, Pencil, Check, Loader2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
@@ -75,17 +75,55 @@ function PerformanceStats({ perf }) {
   );
 }
 
-function AssignmentCard({ assignment, onRemove, removing }) {
+function AssignmentCard({ assignment, onRemove, removing, onUpdateMaxSubs, updating }) {
   const jobLink = `${window.location.origin}/jobs/${assignment.job_id}?ref=${assignment.ref_token}`;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+
+  const startEditing = () => {
+    setDraft(assignment.max_submissions ? String(assignment.max_submissions) : '');
+    setEditing(true);
+  };
+
+  const save = () => {
+    const value = draft.trim() ? parseInt(draft, 10) : null;
+    onUpdateMaxSubs(assignment.id, value);
+    setEditing(false);
+  };
+
   return (
     <div className="bg-white border border-surface-200 rounded-lg px-4 py-3">
       <div className="flex items-center justify-between gap-3">
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-gray-800 truncate">{assignment.job_title}</p>
           <div className="flex items-center gap-2 mt-1.5">
-            <span className="text-xs px-2 py-0.5 rounded-full bg-surface-100 text-gray-500">
-              {assignment.max_submissions ? `Max ${assignment.max_submissions}` : 'Unlimited'}
-            </span>
+            {editing ? (
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="number"
+                  min="1"
+                  autoFocus
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }}
+                  placeholder="Unlimited"
+                  className="w-24 text-xs border border-surface-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+                <button onClick={save} disabled={updating} className="text-green-600 hover:text-green-700 disabled:opacity-40" title="Save">
+                  {updating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                </button>
+                <button onClick={() => setEditing(false)} className="text-gray-400 hover:text-gray-600" title="Cancel">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-surface-100 text-gray-500 group">
+                {assignment.max_submissions ? `Max ${assignment.max_submissions}` : 'Unlimited'}
+                <button onClick={startEditing} className="text-gray-400 hover:text-brand-600" title="Edit max submissions">
+                  <Pencil className="w-3 h-3" />
+                </button>
+              </span>
+            )}
             {assignment.expires_at && (
               <span className="text-xs px-2 py-0.5 rounded-full bg-surface-100 text-gray-500">
                 Expires {format(new Date(assignment.expires_at), 'MMM d, yyyy')}
@@ -146,6 +184,15 @@ function AgencyCard({ agency, perf, jobs }) {
       refetchAssignments();
     },
     onError: () => toast.error('Failed to remove assignment'),
+  });
+
+  const updateMaxSubsMutation = useMutation({
+    mutationFn: ({ assignmentId, maxSubmissions }) => agenciesApi.updateAssignment(assignmentId, maxSubmissions),
+    onSuccess: () => {
+      toast.success('Max submissions updated');
+      refetchAssignments();
+    },
+    onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to update max submissions'),
   });
 
   const deactivateMutation = useMutation({
@@ -304,6 +351,8 @@ function AgencyCard({ agency, perf, jobs }) {
                 assignment={a}
                 onRemove={setPendingRemove}
                 removing={removeMutation.isPending}
+                onUpdateMaxSubs={(assignmentId, maxSubmissions) => updateMaxSubsMutation.mutate({ assignmentId, maxSubmissions })}
+                updating={updateMaxSubsMutation.isPending}
               />
             ))}
           </div>

@@ -223,13 +223,14 @@ async def list_applications(
     stage: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     agency_id: Optional[uuid.UUID] = Query(None),
+    source: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=500),
     user=Depends(require_roles(*_HR_AND_INTERVIEWER)),
     db: AsyncSession = Depends(get_db),
 ):
     return await application_service.get_all_applications(
-        db, job_id=job_id, stage=stage, search=search, agency_id=agency_id, page=page, limit=limit
+        db, job_id=job_id, stage=stage, search=search, agency_id=agency_id, source=source, page=page, limit=limit
     )
 
 

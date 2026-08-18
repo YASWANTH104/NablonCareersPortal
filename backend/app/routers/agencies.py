@@ -7,7 +7,7 @@ from app.database import get_db
 from app.dependencies import require_roles, Role
 from app.schemas.agency import (
     AgencyCreate, AgencyUpdate, AgencyResponse,
-    JobAgencyAssignmentCreate, JobAgencyAssignmentResponse,
+    JobAgencyAssignmentCreate, JobAgencyAssignmentUpdate, JobAgencyAssignmentResponse,
     AgencyPortalResponse,
 )
 from app.schemas.interview_slot import AvailableSlotGroup, SlotResponse, AgencySlotBookRequest
@@ -66,6 +66,16 @@ async def list_job_agencies(
     db: AsyncSession = Depends(get_db),
 ):
     return await agency_service.list_assignments_for_job(db, job_id)
+
+
+@router.patch("/agencies/assignments/{assignment_id}", response_model=JobAgencyAssignmentResponse)
+async def update_assignment(
+    assignment_id: uuid.UUID,
+    data: JobAgencyAssignmentUpdate,
+    _=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await agency_service.update_assignment(db, assignment_id, data)
 
 
 @router.delete("/agencies/assignments/{assignment_id}", status_code=204)

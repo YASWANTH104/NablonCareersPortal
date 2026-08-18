@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}Screening Questionnaire – Nablon AI Careers{% endblock %}
+
+{% block content %}
+<h2>Hi {{ full_name }},</h2>
+
+<p>
+  Thanks for applying for the <strong>{{ job_title }}</strong> role at Nablon AI! As the next step
+  in our process, we'd like to learn a bit more about your academic background, projects, and
+  technical skills.
+</p>
+
+<p>
+  This should take about <strong>10 minutes</strong>. We'll ask about your college, CGPA, relevant
+  experience, projects (including GitHub links, if you have them), skills, and any notable
+  achievements.
+</p>
+
+<a href="{{ screening_url }}" class="cta">Complete Screening Questionnaire</a>
+
+<p style="margin-top:28px; color:#6B7280; font-size:13px;">
+  Please complete this within <strong>{{ expires_days }} days</strong>. If you have any trouble
+  with the link, reach out to our HR team and we'll be happy to help.
+</p>
+{% endblock %}

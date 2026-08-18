@@ -52,6 +52,10 @@ class Job(Base):
     allow_outsiders: Mapped[bool] = mapped_column(Boolean, default=True)
     # critical | high | medium | low — internal-only signal shown on HR/employee job cards
     criticality: Mapped[str] = mapped_column(String(10), default="medium")
+    # When on, every application entering the "screening" stage automatically gets a
+    # screening-questionnaire email (college/CGPA/projects/skills) and an AI-assisted
+    # score — see app/services/screening_service.py.
+    screening_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     posted_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     # Engineering/hiring manager this req is assigned to — any internal user,
     # not a dedicated role. Distinct from posted_by (who created the listing).

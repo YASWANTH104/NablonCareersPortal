@@ -7,6 +7,8 @@ export const agenciesApi = {
   assignToJob: (jobId, data) => client.post(`/jobs/${jobId}/agencies`, data),
   listJobAgencies: (jobId) => client.get(`/jobs/${jobId}/agencies`),
   listAgencyAssignments: (agencyId) => client.get(`/agencies/${agencyId}/assignments`),
+  updateAssignment: (assignmentId, maxSubmissions) =>
+    client.patch(`/agencies/assignments/${assignmentId}`, { max_submissions: maxSubmissions }),
   removeAssignment: (assignmentId) => client.delete(`/agencies/assignments/${assignmentId}`),
   portal: (portalToken) => client.get(`/agency-portal/${portalToken}`),
   portalAssignment: (portalToken, assignmentId) =>

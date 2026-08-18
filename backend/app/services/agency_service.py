@@ -7,7 +7,7 @@ from sqlalchemy import select, func
 from app.models.agency import Agency, JobAgencyAssignment
 from app.schemas.agency import (
     AgencyCreate, AgencyUpdate, AgencyResponse,
-    JobAgencyAssignmentCreate, JobAgencyAssignmentResponse,
+    JobAgencyAssignmentCreate, JobAgencyAssignmentUpdate, JobAgencyAssignmentResponse,
     AgencyPortalResponse, AgencyPortalCandidate,
 )
 
@@ -150,6 +150,40 @@ async def remove_assignment(db: AsyncSession, assignment_id: uuid.UUID) -> None:
         raise HTTPException(404, "Assignment not found")
     await db.delete(assignment)
     await db.commit()
+
+
+async def update_assignment(
+    db: AsyncSession,
+    assignment_id: uuid.UUID,
+    data: JobAgencyAssignmentUpdate,
+) -> JobAgencyAssignmentResponse:
+    """Edits an existing assignment in place — previously the only way to change
+    max_submissions was delete-and-recreate, which would also rotate ref_token
+    and break any link the agency already has bookmarked."""
+    from app.models.job import Job
+
+    assignment = await db.get(JobAgencyAssignment, assignment_id)
+    if not assignment:
+        raise HTTPException(404, "Assignment not found")
+
+    assignment.max_submissions = data.max_submissions
+    await db.commit()
+    await db.refresh(assignment)
+
+    agency = await db.get(Agency, assignment.agency_id)
+    job = await db.get(Job, assignment.job_id)
+
+    return JobAgencyAssignmentResponse(
+        id=assignment.id,
+        job_id=assignment.job_id,
+        agency_id=assignment.agency_id,
+        ref_token=assignment.ref_token,
+        max_submissions=assignment.max_submissions,
+        expires_at=assignment.expires_at,
+        created_at=assignment.created_at,
+        agency_name=agency.name if agency else None,
+        job_title=job.title if job else None,
+    )
 
 
 async def get_assignment_by_ref_token(

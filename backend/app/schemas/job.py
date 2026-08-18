@@ -96,6 +96,7 @@ class JobCreate(BaseModel):
     allow_referrals: bool = True
     allow_outsiders: bool = True
     criticality: Criticality = "medium"
+    screening_enabled: bool = False
     closes_at: Optional[datetime] = None
     hiring_manager_id: Optional[uuid.UUID] = None
 
@@ -123,6 +124,7 @@ class JobUpdate(BaseModel):
     allow_referrals: Optional[bool] = None
     allow_outsiders: Optional[bool] = None
     criticality: Optional[Criticality] = None
+    screening_enabled: Optional[bool] = None
     closes_at: Optional[datetime] = None
     hiring_manager_id: Optional[uuid.UUID] = None
 
@@ -159,6 +161,7 @@ class JobResponse(BaseModel):
     allow_referrals: bool
     allow_outsiders: bool
     criticality: Criticality
+    screening_enabled: bool = False
     posted_by: Optional[uuid.UUID] = None
     posted_by_name: Optional[str] = None
     hiring_manager_id: Optional[uuid.UUID] = None

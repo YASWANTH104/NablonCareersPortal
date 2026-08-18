@@ -166,6 +166,8 @@ class ApplicationResponse(BaseModel):
     updated_at: datetime
     applicant: Optional[ApplicantBrief] = None
     job_title: Optional[str] = None
+    screening_score: Optional[float] = None
+    screening_auto_reject: Optional[bool] = None
 
 
 class CandidateProfileBrief(BaseModel):
