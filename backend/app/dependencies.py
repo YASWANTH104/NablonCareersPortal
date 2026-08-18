@@ -52,19 +52,33 @@ async def get_optional_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_bearer_scheme),
     db: AsyncSession = Depends(get_db),
 ):
-    """Returns the current user if a valid token is provided, otherwise None."""
+    """Returns the current user if no token is present (anonymous) or a valid
+    token is provided. A token that IS present but expired/invalid raises 401
+    rather than silently downgrading to anonymous — otherwise an authenticated
+    caller (e.g. HR) whose access token expires mid-session gets silently
+    re-scoped to the public/unauthenticated result set on routes like
+    GET /jobs, which for HR means internal-only or unpublished jobs vanish
+    from view with no error and no token refresh triggered."""
     if not credentials:
         return None
     from app.models.user import User
 
     payload = decode_access_token(credentials.credentials)
     if payload is None:
-        return None
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
 
     user_id = payload.get("sub")
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
-    return user if user and user.is_active else None
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or inactive",
+        )
+    return user
 
 
 def require_roles(*roles: Role):
