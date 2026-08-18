@@ -323,7 +323,7 @@ async def _send_screening_request_email_async(application_id: str):
     from app.models.job import Job
     from app.models.screening import ScreeningResponse
     from app.services.email_service import send_email
-    from app.services.screening_service import REQUEST_EXPIRY_DAYS
+    from app.services.screening_service import REQUEST_EXPIRY_HOURS
     from app.config import settings
     from sqlalchemy import select
 
@@ -360,7 +360,7 @@ async def _send_screening_request_email_async(application_id: str):
                 "full_name": full_name,
                 "job_title": job_title,
                 "screening_url": screening_url,
-                "expires_days": REQUEST_EXPIRY_DAYS,
+                "expires_hours": REQUEST_EXPIRY_HOURS,
             },
         )
 

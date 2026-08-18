@@ -506,12 +506,15 @@ export default function JobEditPage() {
               <p className="font-semibold mb-1">Scoring rules (applied automatically):</p>
               <ul className="list-disc list-inside space-y-0.5">
                 <li>College Tier 1/2 scores highest, Tier 3 scores lower — <strong>Tier 4/5 is an automatic rejection</strong>.</li>
-                <li>CGPA <strong>below 8.0 is an automatic rejection</strong>; 8.0–10.0 scales the CGPA score.</li>
+                <li>CGPA <strong>below 7.5 is an automatic rejection</strong>; 7.5–10.0 scales the CGPA score.</li>
                 <li>Skills and projects are weighted toward Python / ML / AI relevance, with extra credit for
                   well-explained projects backed by a real GitHub link.</li>
                 <li>Passing both gates automatically moves the candidate to <strong>Screening</strong> with their
                   score attached, ready for you to review; failing either gate automatically rejects them with
                   a courteous email — you can still act manually before or after either happens.</li>
+                <li>Referral-sourced applications are never sent the questionnaire — this only applies to
+                  direct / agency / talent-acquisition-sourced candidates.</li>
+                <li>The questionnaire link expires <strong>48 hours</strong> after being sent.</li>
               </ul>
             </div>
           )}
