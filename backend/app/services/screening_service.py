@@ -4,8 +4,10 @@ stage on a job with `Job.screening_enabled = True`.
 
 Two hard gates are deterministic and never depend on Azure OpenAI being
 configured, per the explicit scoring brief this module implements:
-  - College tier 4/5              -> auto-reject
-  - CGPA below CGPA_HARD_MIN (8)  -> auto-reject
+  - College tier 4/5                    -> auto-reject
+  - CGPA below CGPA_HARD_MIN            -> auto-reject
+  - Referral-sourced applications skip the questionnaire entirely (see
+    create_and_queue_email)
 
 Everything else (college tier for names outside the static list, and the
 skills/project judgement) is AI-assisted where available and degrades to a
@@ -31,8 +33,8 @@ from app.models.screening import ScreeningResponse
 
 logger = logging.getLogger(__name__)
 
-REQUEST_EXPIRY_DAYS = 14
-CGPA_HARD_MIN = 8.0
+REQUEST_EXPIRY_HOURS = 48
+CGPA_HARD_MIN = 7.5
 
 # Composite weights — must sum to 1.0. Matches the brief: college pedigree and
 # skills/project substance matter most; CGPA is a real but smaller signal once
@@ -296,9 +298,11 @@ Respond with JSON only, exactly these keys:
 
 
 def _cgpa_score(cgpa: float) -> float:
-    # 8.0 -> 50 (just cleared the hard floor), 10.0 -> 100. Never negative
-    # since callers only reach this after the cgpa >= CGPA_HARD_MIN gate.
-    return round(min(100.0, 50 + ((cgpa - CGPA_HARD_MIN) / 2.0) * 50), 2)
+    # CGPA_HARD_MIN -> 50 (just cleared the hard floor), 10.0 -> 100. Never
+    # negative since callers only reach this after the cgpa >= CGPA_HARD_MIN
+    # gate. Divisor is derived from CGPA_HARD_MIN (not hardcoded) so the
+    # 10.0 -> 100 endpoint stays correct if the floor is ever tuned again.
+    return round(min(100.0, 50 + ((cgpa - CGPA_HARD_MIN) / (10.0 - CGPA_HARD_MIN)) * 50), 2)
 
 
 def _college_score(tier: int) -> float:
@@ -442,7 +446,7 @@ async def get_or_create_request(db: AsyncSession, application_id: uuid.UUID) -> 
         application_id=application_id,
         token=secrets.token_urlsafe(32),
         status="pending",
-        expires_at=datetime.now(timezone.utc) + timedelta(days=REQUEST_EXPIRY_DAYS),
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=REQUEST_EXPIRY_HOURS),
     )
     db.add(req)
     await db.commit()
@@ -464,11 +468,17 @@ async def create_and_queue_email(db: AsyncSession, application_id: uuid.UUID) ->
     left to the call sites, so it holds regardless of what calls this in the
     future — there is deliberately no move_stage-triggered fallback anymore,
     since that would fire only after the stage had already flipped past
-    `applied`."""
+    `applied`.
+
+    Also skips referral-sourced applications entirely — referrals don't go
+    through the questionnaire/scoring gate, same "checked here, not left to
+    call sites" reasoning as the stage gate above."""
     from app.models.application import Application
 
     application = await db.get(Application, application_id)
     if not application or application.stage != "applied":
+        return
+    if application.source == "referral":
         return
 
     req = await get_or_create_request(db, application_id)
