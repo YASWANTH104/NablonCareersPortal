@@ -297,7 +297,14 @@ async def get_publishable_slots(db: AsyncSession) -> list[SlotResponse]:
 async def get_available_slots_for_job(
     db: AsyncSession, job_id: uuid.UUID, round_type: Optional[str] = None
 ) -> list[AvailableSlotGroup]:
-    filters = [InterviewSlot.job_id == job_id, InterviewSlot.status == "open"]
+    # Agency self-book flow (routers/agencies.py) reads this directly — an
+    # open-but-unbooked slot whose start_time has already passed must not be
+    # offered as bookable, same "upcoming only" rule as get_publishable_slots.
+    filters = [
+        InterviewSlot.job_id == job_id,
+        InterviewSlot.status == "open",
+        InterviewSlot.start_time >= datetime.now(timezone.utc),
+    ]
     if round_type:
         filters.append(InterviewSlot.round_type == round_type)
 
@@ -322,7 +329,11 @@ async def get_job_slots_for_hr(db: AsyncSession, job_id: uuid.UUID) -> list[Slot
         select(InterviewSlot, Job.title, User.full_name)
         .join(Job, Job.id == InterviewSlot.job_id)
         .join(User, User.id == InterviewSlot.interviewer_id)
-        .where(InterviewSlot.job_id == job_id, InterviewSlot.status == "open")
+        .where(
+            InterviewSlot.job_id == job_id,
+            InterviewSlot.status == "open",
+            InterviewSlot.start_time >= datetime.now(timezone.utc),
+        )
         .order_by(InterviewSlot.start_time)
     )).all()
     return [
@@ -355,14 +366,22 @@ async def book_slot(
     rollback undoes the slot claim too — never wrap this call in a try/except
     that swallows it.
     """
+    # Hard floor, not just a list-filtering concern: even if the caller's
+    # slot list was fetched a moment ago while still upcoming, the clock may
+    # have passed start_time by the time this claim actually runs — never let
+    # a slot be booked once its time is in the past, regardless of what the
+    # client had cached.
+    now = datetime.now(timezone.utc)
+
     if slot_id:
-        criteria = [InterviewSlot.id == slot_id, InterviewSlot.status == "open"]
+        criteria = [InterviewSlot.id == slot_id, InterviewSlot.status == "open", InterviewSlot.start_time >= now]
     else:
         criteria = [
             InterviewSlot.job_id == job_id,
             InterviewSlot.round_type == round_type,
             InterviewSlot.start_time == start_time,
             InterviewSlot.status == "open",
+            InterviewSlot.start_time >= now,
         ]
         if duration_mins is not None:
             criteria.append(InterviewSlot.duration_mins == duration_mins)
@@ -428,6 +447,7 @@ async def book_unassigned_slot(
                 InterviewSlot.id == slot_id,
                 InterviewSlot.job_id.is_(None),
                 InterviewSlot.status == "open",
+                InterviewSlot.start_time >= datetime.now(timezone.utc),
             )
             .with_for_update(skip_locked=True).limit(1)
         ))
