@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, case
 
 from app.models.referral import Referral
 from app.models.job import Job
@@ -13,12 +13,63 @@ from app.schemas.referral import ReferralCreate, ReferralBonusUpdate
 
 VALID_STATUSES = {"pending", "invited", "applied", "in_progress", "hired", "rejected", "expired"}
 
+# Once a referral has a real linked application, that application's stage is
+# ground truth — Referral.status is a separately-writable column (HR can set
+# it freely via PATCH /referrals/{id}/status, and move_stage only ever pushes
+# INTO it for hired/rejected, never re-syncs it back), so a manual edit or a
+# missed sync can leave it stuck showing e.g. "rejected" forever while the
+# application has actually moved on to "applied"/further. Rather than trust
+# the stored column once ground truth exists elsewhere, every read derives
+# the displayed status from the application's current stage. The stored
+# column still matters for referrals with no application yet (pending /
+# invited / expired), where there's nothing to derive from.
+_STAGE_TO_REFERRAL_STATUS = {
+    "applied": "applied",
+    "screening": "in_progress",
+    "assessment": "in_progress",
+    "tr1": "in_progress",
+    "tr2": "in_progress",
+    "hr": "in_progress",
+    "offer": "in_progress",
+    "hired": "hired",
+    "rejected": "rejected",
+    "interview_drop": "rejected",
+    "offer_drop": "rejected",
+    "withdrawn": "rejected",
+}
+
+
+def _derived_status_expr():
+    """SQL mirror of _STAGE_TO_REFERRAL_STATUS, for filtering/counting on the
+    same derived status _to_dict() displays — keeps the status tabs on
+    ReferralsPage/MyReferralsPage consistent with what each row's badge
+    actually shows instead of filtering on the raw (possibly stale) column."""
+    from app.models.application import Application
+
+    return case(
+        (Application.stage == "applied", "applied"),
+        (Application.stage.in_(["screening", "assessment", "tr1", "tr2", "hr", "offer"]), "in_progress"),
+        (Application.stage == "hired", "hired"),
+        (Application.stage.in_(["rejected", "interview_drop", "offer_drop", "withdrawn"]), "rejected"),
+        else_=Referral.status,
+    )
+
 
 def _build_join_query(condition=None):
+    from app.models.application import Application
+
     q = (
-        select(Referral, Job.title.label("job_title"), Job.slug.label("job_slug"), User.full_name.label("referrer_name"))
+        select(
+            Referral,
+            Job.title.label("job_title"),
+            Job.slug.label("job_slug"),
+            User.full_name.label("referrer_name"),
+            Application.stage.label("application_stage"),
+            Application.id.label("application_id"),
+        )
         .join(Job, Referral.job_id == Job.id)
         .join(User, Referral.referred_by == User.id)
+        .outerjoin(Application, Application.referral_id == Referral.id)
     )
     if condition is not None:
         q = q.where(condition)
@@ -39,6 +90,11 @@ def _to_dict(row) -> dict:
     # stored at upload time only carries a 7-day token, so re-sign on every read.
     if d.get("resume_url"):
         d["resume_url"] = refresh_url(d["resume_url"])
+
+    application_stage = getattr(row, "application_stage", None)
+    if application_stage is not None:
+        d["status"] = _STAGE_TO_REFERRAL_STATUS.get(application_stage, d["status"])
+    d["application_id"] = getattr(row, "application_id", None)
     return d
 
 
@@ -154,15 +210,19 @@ async def list_referrals(
     page: int = 1,
     limit: int = 20,
 ) -> dict:
+    from app.models.application import Application
+
     filters = []
     if referred_by:
         filters.append(Referral.referred_by == referred_by)
     if status:
-        filters.append(Referral.status == status)
+        filters.append(_derived_status_expr() == status)
 
     condition = and_(*filters) if filters else None
 
-    count_q = select(func.count()).select_from(Referral)
+    count_q = select(func.count()).select_from(Referral).outerjoin(
+        Application, Application.referral_id == Referral.id
+    )
     if condition is not None:
         count_q = count_q.where(condition)
     total = (await db.execute(count_q)).scalar_one()
@@ -183,12 +243,33 @@ async def get_referral(db: AsyncSession, referral_id: uuid.UUID) -> dict:
 
 
 async def update_status(db: AsyncSession, referral_id: uuid.UUID, status: str) -> dict:
+    from app.models.application import Application
+
     if status not in VALID_STATUSES:
         raise HTTPException(status_code=422, detail=f"Invalid status: {status}")
 
     referral = (await db.execute(select(Referral).where(Referral.id == referral_id))).scalar_one_or_none()
     if not referral:
         raise HTTPException(status_code=404, detail="Referral not found")
+
+    # Once the candidate has a real application, its stage is what get_referral/
+    # list_referrals actually display (see _STAGE_TO_REFERRAL_STATUS) — manually
+    # overriding the raw column here would just get silently overwritten on the
+    # next read, which is exactly the bug this guard closes (a stale manual
+    # "rejected" surviving forever while the real pipeline moved on to
+    # "applied"). Point HR at the actual pipeline instead of letting them set a
+    # value that can never stick.
+    linked_application = (await db.execute(
+        select(Application.id).where(Application.referral_id == referral_id)
+    )).scalar_one_or_none()
+    if linked_application:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This referral already has an application — its status now follows the "
+                "application's stage automatically. Update the stage on the Applicants page instead."
+            ),
+        )
 
     referral.status = status
     if status == "invited" and not referral.invited_at:

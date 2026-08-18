@@ -1,6 +1,7 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { UserCheck, ChevronDown, RefreshCw, DollarSign, FileText } from 'lucide-react';
+import { UserCheck, RefreshCw, DollarSign, FileText } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import { referralsApi } from '@/api/referrals';
@@ -36,35 +37,8 @@ function StatusBadge({ status }) {
   );
 }
 
-function StatusDropdown({ current, onSelect, isPending }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        disabled={isPending}
-        className="flex items-center gap-1 text-xs text-brand-600 hover:text-brand-800 font-medium disabled:opacity-50"
-      >
-        Change <ChevronDown className="w-3 h-3" />
-      </button>
-      {open && (
-        <div className="absolute left-0 top-6 z-20 bg-white border border-surface-200 rounded-lg shadow-lg w-36 py-1">
-          {STATUS_OPTIONS.filter((s) => s !== current).map((s) => (
-            <button
-              key={s}
-              onClick={() => { onSelect(s); setOpen(false); }}
-              className="w-full text-left px-3 py-1.5 text-xs hover:bg-surface-50 capitalize"
-            >
-              {s.replace('_', ' ')}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function ReferralsPage() {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('all');
   const [page, setPage] = useState(1);
   const qc = useQueryClient();
@@ -81,12 +55,6 @@ export default function ReferralsPage() {
   const pages = data?.pages ?? 1;
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['referrals'] });
-
-  const statusMut = useMutation({
-    mutationFn: ({ id, status }) => referralsApi.updateStatus(id, status),
-    onSuccess: () => { toast.success('Status updated'); invalidate(); },
-    onError: () => toast.error('Failed to update status'),
-  });
 
   const resendMut = useMutation({
     mutationFn: (id) => referralsApi.resend(id),
@@ -146,7 +114,12 @@ export default function ReferralsPage() {
             </thead>
             <tbody className="divide-y divide-surface-100">
               {referrals.map((r) => (
-                <tr key={r.id} className="hover:bg-surface-50 transition-colors">
+                <tr
+                  key={r.id}
+                  onClick={() => r.application_id && navigate(`/hr/applicants/${r.application_id}`)}
+                  className={`hover:bg-surface-50 transition-colors ${r.application_id ? 'cursor-pointer' : ''}`}
+                  title={r.application_id ? 'Open this application' : undefined}
+                >
                   <td className="px-4 py-3">
                     <p className="font-medium text-gray-900">{r.candidate_name}</p>
                     <p className="text-xs text-gray-400">{r.candidate_email}</p>
@@ -156,6 +129,7 @@ export default function ReferralsPage() {
                           href={r.resume_url}
                           target="_blank"
                           rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
                           className="flex items-center gap-1 text-xs text-brand-600 hover:text-brand-700"
                         >
                           <FileText className="w-3 h-3" /> Resume
@@ -174,14 +148,7 @@ export default function ReferralsPage() {
                   <td className="px-4 py-3 text-gray-600 text-xs">{r.job_title}</td>
                   <td className="px-4 py-3 text-gray-600 text-xs">{r.referrer_name}</td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <StatusBadge status={r.status} />
-                      <StatusDropdown
-                        current={r.status}
-                        onSelect={(status) => statusMut.mutate({ id: r.id, status })}
-                        isPending={statusMut.isPending}
-                      />
-                    </div>
+                    <StatusBadge status={r.status} />
                   </td>
                   <td className="px-4 py-3 text-gray-400 text-xs">
                     {format(new Date(r.created_at), 'dd MMM yy')}
@@ -194,7 +161,7 @@ export default function ReferralsPage() {
                         </span>
                         {!r.bonus_paid && (
                           <button
-                            onClick={() => bonusMut.mutate({ id: r.id, data: { bonus_paid: true } })}
+                            onClick={(e) => { e.stopPropagation(); bonusMut.mutate({ id: r.id, data: { bonus_paid: true } }); }}
                             disabled={bonusMut.isPending}
                             className="p-1 text-gray-400 hover:text-green-600 transition-colors"
                             title="Mark bonus paid"
@@ -209,7 +176,7 @@ export default function ReferralsPage() {
                   </td>
                   <td className="px-4 py-3">
                     <button
-                      onClick={() => resendMut.mutate(r.id)}
+                      onClick={(e) => { e.stopPropagation(); resendMut.mutate(r.id); }}
                       disabled={resendMut.isPending}
                       className="flex items-center gap-1 text-xs text-gray-400 hover:text-brand-600 transition-colors disabled:opacity-40"
                       title="Resend invite"

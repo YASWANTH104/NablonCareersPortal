@@ -50,6 +50,9 @@ class ReferralResponse(BaseModel):
     updated_at: datetime
     job_title: Optional[str] = None
     referrer_name: Optional[str] = None
+    # Set once the candidate has a real application — lets HR jump straight to
+    # the actual pipeline entry instead of managing status from this page.
+    application_id: Optional[uuid.UUID] = None
 
 
 class ReferralListResponse(BaseModel):
