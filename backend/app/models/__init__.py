@@ -11,6 +11,7 @@ from app.models.notification import Notification, EmailLog, AuditLog
 from app.models.document import DocumentRequest, ApplicationDocument
 from app.models.agency import Agency, JobAgencyAssignment
 from app.models.interview_slot import InterviewSlot
+from app.models.screening import ScreeningResponse
 
 __all__ = [
     "User",
@@ -25,4 +26,5 @@ __all__ = [
     "DocumentRequest", "ApplicationDocument",
     "Agency", "JobAgencyAssignment",
     "InterviewSlot",
+    "ScreeningResponse",
 ]

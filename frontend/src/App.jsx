@@ -45,6 +45,7 @@ import OfferBuilderPage from '@/pages/hr/OfferBuilderPage';
 import OfferRespondPage from '@/pages/public/OfferRespondPage';
 import DirectorReviewPage from '@/pages/public/DirectorReviewPage';
 import DocumentUploadPage from '@/pages/public/DocumentUploadPage';
+import ScreeningFormPage from '@/pages/public/ScreeningFormPage';
 import ReportsPage from '@/pages/hr/ReportsPage';
 import SettingsPage from '@/pages/hr/SettingsPage';
 import AgenciesPage from '@/pages/hr/AgenciesPage';
@@ -152,6 +153,9 @@ const router = createBrowserRouter([
 
   // ── PUBLIC DOCUMENT SUBMISSION ──────────────────────────────
   { path: '/docs/submit/:token', element: <DocumentUploadPage /> },
+
+  // ── PUBLIC SCREENING QUESTIONNAIRE ──────────────────────────
+  { path: '/screening/:token', element: <ScreeningFormPage /> },
 
   // ── PUBLIC INTERVIEWER FEEDBACK (from email link) ───────────
   { path: '/interviews/feedback/:token', element: <InterviewFeedbackPage /> },

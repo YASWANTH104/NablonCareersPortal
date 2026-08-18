@@ -5,7 +5,7 @@ import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import toast from 'react-hot-toast';
-import { ArrowLeft, Loader2, Plus, X, Wand2, FileText, Upload, ExternalLink } from 'lucide-react';
+import { ArrowLeft, Loader2, Plus, X, Wand2, FileText, Upload, ExternalLink, Sparkles } from 'lucide-react';
 import { jobsApi } from '@/api/jobs';
 import { usersApi } from '@/api/users';
 import RichTextEditor from '@/components/shared/RichTextEditor';
@@ -35,6 +35,7 @@ const schema = z.object({
   allow_referrals: z.boolean().default(true),
   allow_outsiders: z.boolean().default(true),
   criticality: z.enum(['critical', 'high', 'medium', 'low']).default('medium'),
+  screening_enabled: z.boolean().default(false),
   closes_at: z.string().optional(),
   hiring_manager_id: z.string().optional(),
 });
@@ -147,6 +148,7 @@ export default function JobEditPage() {
       allow_referrals: true,
       allow_outsiders: true,
       criticality: 'medium',
+      screening_enabled: false,
       closes_at: '',
       hiring_manager_id: '',
     },
@@ -181,6 +183,7 @@ export default function JobEditPage() {
         allow_referrals: existing.allow_referrals ?? true,
         allow_outsiders: existing.allow_outsiders ?? true,
         criticality: existing.criticality ?? 'medium',
+        screening_enabled: existing.screening_enabled ?? false,
         closes_at: closesAt,
         hiring_manager_id: existing.hiring_manager_id ?? '',
       });
@@ -475,6 +478,43 @@ export default function JobEditPage() {
             <input {...register('show_salary')} type="checkbox" className="rounded border-surface-300 text-brand-500 focus:ring-brand-500" />
             <span className="text-sm text-gray-700">Show salary range publicly</span>
           </label>
+        </section>
+
+        {/* AI Screening */}
+        <section className="bg-white rounded-xl border border-surface-200 p-4 sm:p-6 space-y-3">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-lg bg-brand-50 border border-brand-100 flex items-center justify-center flex-shrink-0">
+              <Sparkles className="w-4.5 h-4.5 text-brand-600" />
+            </div>
+            <div className="flex-1">
+              <h2 className="font-display font-semibold text-gray-900 text-base">AI screening questionnaire</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Right after a candidate applies, automatically email them a questionnaire (college, CGPA,
+                relevant experience, projects with GitHub links, skills, achievements). Their score then
+                decides the outcome — advance to <strong>Screening</strong>, or an automatic rejection.
+              </p>
+            </div>
+          </div>
+
+          <label className="flex items-center gap-2 cursor-pointer pl-12">
+            <input {...register('screening_enabled')} type="checkbox" className="rounded border-surface-300 text-brand-500 focus:ring-brand-500" />
+            <span className="text-sm text-gray-700">Enable screening questionnaire for this job</span>
+          </label>
+
+          {watch('screening_enabled') && (
+            <div className="ml-12 bg-amber-50 border border-amber-100 rounded-lg px-3.5 py-3 text-xs text-amber-800 leading-relaxed">
+              <p className="font-semibold mb-1">Scoring rules (applied automatically):</p>
+              <ul className="list-disc list-inside space-y-0.5">
+                <li>College Tier 1/2 scores highest, Tier 3 scores lower — <strong>Tier 4/5 is an automatic rejection</strong>.</li>
+                <li>CGPA <strong>below 8.0 is an automatic rejection</strong>; 8.0–10.0 scales the CGPA score.</li>
+                <li>Skills and projects are weighted toward Python / ML / AI relevance, with extra credit for
+                  well-explained projects backed by a real GitHub link.</li>
+                <li>Passing both gates automatically moves the candidate to <strong>Screening</strong> with their
+                  score attached, ready for you to review; failing either gate automatically rejects them with
+                  a courteous email — you can still act manually before or after either happens.</li>
+              </ul>
+            </div>
+          )}
         </section>
 
         {/* JD document */}

@@ -19,6 +19,7 @@ import { jobsApi } from '@/api/jobs';
 import { offersApi } from '@/api/offers';
 import { usersApi } from '@/api/users';
 import { documentsApi } from '@/api/documents';
+import { screeningApi } from '@/api/screening';
 import { interviewSlotsApi } from '@/api/interviewSlots';
 import { ROUND_MAP } from '@/constants/interviewRounds';
 import ResumeVersions from '@/components/shared/ResumeVersions';
@@ -1404,6 +1405,13 @@ export default function ApplicationDetailPage() {
     onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to send request'),
   });
 
+  const { data: screeningData } = useQuery({
+    queryKey: ['application-screening', id],
+    queryFn: () => screeningApi.getByApplication(id).then((r) => r.data),
+    enabled: !!id && canManage,
+    retry: false,
+  });
+
   const { data: assessmentsData, refetch: refetchAssessments } = useQuery({
     queryKey: ['application-assessments', id],
     queryFn: () => assessmentsApi.list({ application_id: id }).then((r) => r.data),
@@ -1542,6 +1550,7 @@ export default function ApplicationDetailPage() {
     ...(canManage ? [
       { key: 'documents', label: `Documents${docsData?.documents?.length ? ` (${docsData.documents.length})` : ''}${docsData?.status === 'complete' ? ' ✓' : ''}` },
       { key: 'offer', label: `Offer${offerData ? ' ●' : ''}` },
+      ...(screeningData ? [{ key: 'screening', label: `Screening${screeningData.overall_score != null ? ` (${Math.round(screeningData.overall_score)})` : ''}` }] : []),
     ] : []),
   ];
 
@@ -2386,6 +2395,117 @@ export default function ApplicationDetailPage() {
                 Send Document Request
               </button>
             </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Screening Tab (HR/admin only) ── */}
+      {activeTab === 'screening' && canManage && screeningData && (
+        <div className="space-y-4">
+          {screeningData.status === 'pending' ? (
+            <div className="bg-surface-50 rounded-xl border border-dashed border-surface-300 py-12 text-center">
+              <Loader2 className="w-8 h-8 text-gray-300 mx-auto mb-3" />
+              <p className="text-sm font-medium text-gray-600">Waiting on the candidate to submit the questionnaire</p>
+            </div>
+          ) : (
+            <>
+              {screeningData.auto_reject ? (
+                <div className="flex items-start gap-3 p-4 rounded-xl border bg-red-50 border-red-200">
+                  <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-red-800">Automatically rejected by the screening gate</p>
+                    <p className="text-xs text-red-600 mt-1">{screeningData.auto_reject_reason}</p>
+                  </div>
+                </div>
+              ) : (
+                <div className={`flex items-center justify-between p-4 rounded-xl border ${
+                  screeningData.recommendation === 'strong_fit' ? 'bg-green-50 border-green-200' :
+                  screeningData.recommendation === 'moderate_fit' ? 'bg-amber-50 border-amber-200' :
+                  'bg-red-50 border-red-200'
+                }`}>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-800">
+                      Overall score: {Math.round(screeningData.overall_score)} / 100
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5 capitalize">
+                      {screeningData.recommendation?.replace('_', ' ')}
+                      {!screeningData.is_ai_scored && ' · scored heuristically (Azure OpenAI not configured)'}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  { label: 'College', score: screeningData.college_score, extra: screeningData.college_tier ? `Tier ${screeningData.college_tier}` : null },
+                  { label: 'CGPA', score: screeningData.cgpa_score, extra: screeningData.cgpa != null ? screeningData.cgpa.toFixed(2) : null },
+                  { label: 'Skills', score: screeningData.skills_score },
+                  { label: 'Projects', score: screeningData.project_score },
+                ].map((d) => (
+                  <div key={d.label} className="bg-white rounded-xl border border-surface-200 p-3.5 text-center">
+                    <p className="text-xs text-gray-400 mb-1">{d.label}</p>
+                    <p className="text-lg font-bold text-gray-900">{d.score != null ? Math.round(d.score) : '—'}</p>
+                    {d.extra && <p className="text-xs text-gray-400 mt-0.5">{d.extra}</p>}
+                  </div>
+                ))}
+              </div>
+
+              {screeningData.ai_reasoning && (
+                <div className="bg-white rounded-xl border border-surface-200 p-4 space-y-2">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">AI reasoning (internal only)</p>
+                  {screeningData.ai_reasoning.college && (
+                    <p className="text-sm text-gray-700"><strong>College:</strong> {screeningData.ai_reasoning.college}</p>
+                  )}
+                  {screeningData.ai_reasoning.skills && (
+                    <p className="text-sm text-gray-700"><strong>Skills:</strong> {screeningData.ai_reasoning.skills}</p>
+                  )}
+                  {screeningData.ai_reasoning.projects && (
+                    <p className="text-sm text-gray-700"><strong>Projects:</strong> {screeningData.ai_reasoning.projects}</p>
+                  )}
+                </div>
+              )}
+
+              <div className="bg-white rounded-xl border border-surface-200 p-4 space-y-3">
+                <p className="text-sm"><strong className="text-gray-700">College:</strong> {screeningData.college_name}</p>
+                {screeningData.relevant_experience && (
+                  <p className="text-sm text-gray-700"><strong>Relevant experience:</strong> {screeningData.relevant_experience}</p>
+                )}
+                {screeningData.skills?.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {screeningData.skills.map((s) => (
+                      <span key={s} className="text-xs bg-brand-50 text-brand-700 border border-brand-100 px-2 py-0.5 rounded-md">{s}</span>
+                    ))}
+                  </div>
+                )}
+                {screeningData.github_profile_url && (
+                  <a href={screeningData.github_profile_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs text-brand-600 hover:underline w-fit">
+                    <Github className="w-3.5 h-3.5" /> GitHub profile
+                  </a>
+                )}
+                {screeningData.achievements && (
+                  <p className="text-sm text-gray-700"><strong>Achievements:</strong> {screeningData.achievements}</p>
+                )}
+              </div>
+
+              {screeningData.projects?.length > 0 && (
+                <div className="space-y-2">
+                  {screeningData.projects.map((p, idx) => (
+                    <div key={idx} className="bg-white rounded-xl border border-surface-200 p-4">
+                      <p className="text-sm font-semibold text-gray-800">{p.title}</p>
+                      <p className="text-sm text-gray-600 mt-1">{p.description}</p>
+                      <div className="flex items-center gap-3 mt-2">
+                        {p.tech_stack && <span className="text-xs text-gray-400">{p.tech_stack}</span>}
+                        {p.github_url && (
+                          <a href={p.github_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs text-brand-600 hover:underline">
+                            <Github className="w-3 h-3" /> Repo
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

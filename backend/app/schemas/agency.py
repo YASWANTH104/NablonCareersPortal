@@ -36,6 +36,10 @@ class JobAgencyAssignmentCreate(BaseModel):
     expires_at: Optional[datetime] = None
 
 
+class JobAgencyAssignmentUpdate(BaseModel):
+    max_submissions: Optional[int] = None
+
+
 class JobAgencyAssignmentResponse(BaseModel):
     model_config = {"from_attributes": True}
 
