@@ -12,7 +12,7 @@ from app.schemas.application import (
     ApplicationCreate, ApplicationResponse, ApplicationDetailResponse,
     ApplicationStageUpdate, ApplicationListResponse,
     ApplicationRatingUpdate, ApplicationAssignUpdate, ApplicationHoldUpdate,
-    ApplicationUpdate, NoteCreate, StageHistoryEntry, ApplicationResumeResponse,
+    ApplicationUpdate, StageHistoryEntry, ApplicationResumeResponse,
     ApplicationMoveJobRequest,
 )
 from app.services import application_service
@@ -360,14 +360,36 @@ async def set_hold(
     return await application_service.set_hold(db, application_id, data.on_hold, data.hold_reason)
 
 
+MAX_NOTE_ATTACHMENTS = 5
+
+
 @router.post("/{application_id}/notes", response_model=StageHistoryEntry)
 async def add_note(
     application_id: uuid.UUID,
-    data: NoteCreate,
+    note: str = Form(""),
+    files: list[UploadFile] = File(default=[]),
     user=Depends(require_roles(*_HR_AND_INTERVIEWER)),
     db: AsyncSession = Depends(get_db),
 ):
-    return await application_service.add_note(db, application_id, data.note, user.id)
+    files = [f for f in files if f.filename]
+    if not note.strip() and not files:
+        raise HTTPException(400, "Add a note or attach at least one file")
+    if len(files) > MAX_NOTE_ATTACHMENTS:
+        raise HTTPException(400, f"You can attach up to {MAX_NOTE_ATTACHMENTS} files per note")
+
+    from app.services import storage_service
+
+    attachments = []
+    for file in files:
+        url = await storage_service.upload_document(file, folder=f"notes/{application_id}", document_type="note_attachment")
+        attachments.append({
+            "url": url,
+            "name": file.filename,
+            "content_type": file.content_type,
+            "size": file.size,
+        })
+
+    return await application_service.add_note(db, application_id, note.strip(), user.id, attachments or None)
 
 
 @router.get("/{application_id}/timeline", response_model=list[StageHistoryEntry])

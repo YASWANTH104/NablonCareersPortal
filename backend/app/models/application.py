@@ -79,6 +79,9 @@ class ApplicationStageHistory(Base):
     to_stage: Mapped[str] = mapped_column(String(50), nullable=False)
     changed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     notes: Mapped[str | None] = mapped_column(Text)
+    # Files/images attached to a note (to_stage == "_note"). Never set on a real
+    # stage-transition row. [{url, name, content_type, size}, ...]
+    attachments: Mapped[list | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
     application: Mapped["Application"] = relationship("Application", back_populates="stage_history")

@@ -11,7 +11,10 @@ import {
   Clock, User, Github, Linkedin, Globe, ChevronDown, Plus, Loader2,
   Video, Phone, MapPin, CheckCircle2, AlertCircle, Send, FolderOpen, Download, Eye, X,
   Pencil, Wallet, Briefcase, GraduationCap, AlertTriangle, Pause, PlayCircle, ArrowRightLeft,
+  Paperclip,
 } from 'lucide-react';
+import { PendingAttachmentChip, NoteAttachmentGallery } from '@/components/shared/NoteAttachments';
+import FilePreviewModal from '@/components/shared/FilePreviewModal';
 import { applicationsApi } from '@/api/applications';
 import { interviewsApi } from '@/api/interviews';
 import { assessmentsApi } from '@/api/assessments';
@@ -22,7 +25,7 @@ import { documentsApi } from '@/api/documents';
 import { screeningApi } from '@/api/screening';
 import { interviewSlotsApi } from '@/api/interviewSlots';
 import { ROUND_MAP } from '@/constants/interviewRounds';
-import ResumeVersions from '@/components/shared/ResumeVersions';
+import ResumeVersions, { resolveFileUrl } from '@/components/shared/ResumeVersions';
 import { InlineFeedbackForm, InterviewFeedbackCard } from '@/components/interviews/feedback';
 import { FREE_TEXT_MAX } from '@/constants/fieldLimits';
 import ScheduleTimeGrid from '@/components/interviews/ScheduleTimeGrid';
@@ -1368,6 +1371,10 @@ export default function ApplicationDetailPage() {
   const [editingDetails, setEditingDetails] = useState(false);
   const [showMoveJobModal, setShowMoveJobModal] = useState(false);
   const [noteText, setNoteText] = useState('');
+  const [noteFiles, setNoteFiles] = useState([]);
+  const [noteDragActive, setNoteDragActive] = useState(false);
+  const [previewAttachment, setPreviewAttachment] = useState(null);
+  const noteFileInputRef = useRef(null);
   const [offerPdfUrl, setOfferPdfUrl] = useState(null);
   const [offerPdfLoading, setOfferPdfLoading] = useState(false);
 
@@ -1474,14 +1481,31 @@ export default function ApplicationDetailPage() {
     onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to update'),
   });
 
+  const MAX_NOTE_ATTACHMENTS = 5;
+
   const noteMutation = useMutation({
-    mutationFn: (note) => applicationsApi.addNote(id, note),
+    mutationFn: ({ note, files }) => applicationsApi.addNote(id, note, files),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['application-detail', id] });
       setNoteText('');
+      setNoteFiles([]);
       toast.success('Note added');
     },
+    onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to add note'),
   });
+
+  const addNoteFiles = (incoming) => {
+    setNoteFiles((prev) => {
+      const existingKeys = new Set(prev.map((f) => `${f.name}:${f.size}`));
+      const deduped = Array.from(incoming).filter((f) => !existingKeys.has(`${f.name}:${f.size}`));
+      const combined = [...prev, ...deduped];
+      if (combined.length > MAX_NOTE_ATTACHMENTS) {
+        toast.error(`You can attach up to ${MAX_NOTE_ATTACHMENTS} files per note`);
+        return combined.slice(0, MAX_NOTE_ATTACHMENTS);
+      }
+      return combined;
+    });
+  };
 
   const [confirmCompleteId, setConfirmCompleteId] = useState(null);
 
@@ -1532,7 +1556,10 @@ export default function ApplicationDetailPage() {
 
   const currentStage = STAGE_MAP[app.stage];
   const validNext = VALID_TRANSITIONS[app.stage] ?? [];
-  const interviews = interviewsData?.items ?? [];
+  // Latest-scheduled first — matches Notes/Timeline's recency-first ordering elsewhere on this page.
+  const interviews = [...(interviewsData?.items ?? [])].sort(
+    (a, b) => new Date(b.scheduled_at) - new Date(a.scheduled_at)
+  );
   const assessments = Array.isArray(assessmentsData) ? assessmentsData : [];
 
   const stageHistory = (app.stage_history ?? []).filter((h) => h.to_stage !== '_note');
@@ -2283,7 +2310,27 @@ export default function ApplicationDetailPage() {
           {/* Add note — HR and interviewers can both leave notes on a candidate;
               a view-only hiring-manager viewer sees the list below but not this form. */}
           {canWriteNotesAndFeedback && (
-            <div className="bg-white rounded-xl border border-surface-200 p-4">
+            <div
+              className={`relative bg-white rounded-xl border p-4 transition-colors ${
+                noteDragActive ? 'border-brand-400 ring-2 ring-brand-100' : 'border-surface-200'
+              }`}
+              onDragOver={(e) => { e.preventDefault(); setNoteDragActive(true); }}
+              onDragLeave={() => setNoteDragActive(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setNoteDragActive(false);
+                const dropped = Array.from(e.dataTransfer.files || []);
+                if (dropped.length) addNoteFiles(dropped);
+              }}
+            >
+              {noteDragActive && (
+                <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-brand-50/90 border-2 border-dashed border-brand-300 pointer-events-none">
+                  <p className="flex items-center gap-2 text-sm font-medium text-brand-600">
+                    <Paperclip className="w-4 h-4" /> Drop to attach
+                  </p>
+                </div>
+              )}
+
               <textarea
                 value={noteText}
                 onChange={(e) => setNoteText(e.target.value)}
@@ -2291,13 +2338,53 @@ export default function ApplicationDetailPage() {
                 rows={3}
                 className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
               />
-              <div className="flex justify-end mt-2">
+
+              {noteFiles.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-surface-100">
+                  {noteFiles.map((file, i) => (
+                    <PendingAttachmentChip
+                      key={`${file.name}-${file.size}-${i}`}
+                      file={file}
+                      onRemove={() => setNoteFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                    />
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-center justify-between mt-3">
                 <button
-                  onClick={() => noteText.trim() && noteMutation.mutate(noteText.trim())}
-                  disabled={!noteText.trim() || noteMutation.isPending}
+                  type="button"
+                  onClick={() => noteFileInputRef.current?.click()}
+                  disabled={noteFiles.length >= MAX_NOTE_ATTACHMENTS}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-surface-200 rounded-lg hover:bg-surface-50 hover:border-surface-300 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                >
+                  <Paperclip className="w-3.5 h-3.5" />
+                  {noteFiles.length > 0
+                    ? `${noteFiles.length}/${MAX_NOTE_ATTACHMENTS} attached`
+                    : 'Attach files or images'}
+                </button>
+                <input
+                  ref={noteFileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    // Snapshot into a plain array before resetting .value — clearing the
+                    // input synchronously invalidates the live FileList, and React 18
+                    // batches the setState updater to run after this handler returns, so
+                    // by the time it read e.target.files it would already be empty.
+                    const selected = Array.from(e.target.files || []);
+                    e.target.value = '';
+                    if (selected.length) addNoteFiles(selected);
+                  }}
+                />
+                <button
+                  onClick={() => (noteText.trim() || noteFiles.length > 0) && noteMutation.mutate({ note: noteText.trim(), files: noteFiles })}
+                  disabled={(!noteText.trim() && noteFiles.length === 0) || noteMutation.isPending}
                   className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white font-semibold rounded-lg text-sm hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Send className="w-3.5 h-3.5" /> Add note
+                  {noteMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  Add note
                 </button>
               </div>
             </div>
@@ -2310,7 +2397,8 @@ export default function ApplicationDetailPage() {
             <div className="space-y-3">
               {[...notes].reverse().map((note) => (
                 <div key={note.id} className="bg-white rounded-xl border border-surface-200 p-4">
-                  <p className="text-sm text-gray-700 whitespace-pre-wrap">{note.notes}</p>
+                  {note.notes && <p className="text-sm text-gray-700 whitespace-pre-wrap">{note.notes}</p>}
+                  <NoteAttachmentGallery attachments={note.attachments} onPreview={setPreviewAttachment} />
                   <p className="text-xs text-gray-400 mt-2">
                     {formatDistanceToNow(new Date(note.created_at), { addSuffix: true })}
                     {note.changed_by_name && <> · by {note.changed_by_name}</>}
@@ -2821,6 +2909,14 @@ export default function ApplicationDetailPage() {
           onConfirm={(reason) =>
             holdMutation.mutate({ id: pendingHold.id, on_hold: true, hold_reason: reason })
           }
+        />
+      )}
+
+      {previewAttachment && (
+        <FilePreviewModal
+          url={resolveFileUrl(previewAttachment.url)}
+          name={previewAttachment.name}
+          onClose={() => setPreviewAttachment(null)}
         />
       )}
     </div>

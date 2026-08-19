@@ -88,8 +88,11 @@ class ApplicationMoveJobRequest(BaseModel):
     new_job_id: uuid.UUID
 
 
-class NoteCreate(BaseModel):
-    note: str
+class NoteAttachmentOut(BaseModel):
+    url: str
+    name: str
+    content_type: Optional[str] = None
+    size: Optional[int] = None
 
 
 class ApplicantBrief(BaseModel):
@@ -111,6 +114,7 @@ class StageHistoryEntry(BaseModel):
     # is None (an automated/system move, e.g. the AI screening gate) and when
     # it's set but the user record can't be resolved (e.g. deleted account).
     changed_by_name: Optional[str] = None
+    attachments: Optional[list[NoteAttachmentOut]] = None
     created_at: datetime
 
 

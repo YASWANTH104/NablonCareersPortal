@@ -856,6 +856,8 @@ async def get_application_by_id(
         "email": email,
         "avatar_url": avatar_url,
     }
+    from app.services.storage_service import refresh_url
+
     d["stage_history"] = [
         {
             "id": h.id,
@@ -864,6 +866,11 @@ async def get_application_by_id(
             "notes": h.notes,
             "changed_by": h.changed_by,
             "changed_by_name": mover_name,
+            # Re-sign each attachment's blob URL on every read — the SAS token
+            # baked in at upload time only lasts 7 days (see storage_service.refresh_url).
+            "attachments": [
+                {**a, "url": refresh_url(a["url"])} for a in h.attachments
+            ] if h.attachments else None,
             "created_at": h.created_at,
         }
         for h, mover_name in history
@@ -1124,6 +1131,7 @@ async def add_note(
     application_id: uuid.UUID,
     note: str,
     user_id: uuid.UUID,
+    attachments: Optional[list[dict]] = None,
 ) -> ApplicationStageHistory:
     app = await db.get(Application, application_id)
     if not app:
@@ -1135,6 +1143,7 @@ async def add_note(
         to_stage="_note",
         notes=note,
         changed_by=user_id,
+        attachments=attachments,
     )
     db.add(entry)
     await db.commit()
@@ -1145,7 +1154,9 @@ async def add_note(
 async def get_timeline(
     db: AsyncSession,
     application_id: uuid.UUID,
-) -> list[ApplicationStageHistory]:
+) -> list[StageHistoryEntry]:
+    from app.services.storage_service import refresh_url
+
     app = await db.get(Application, application_id)
     if not app:
         raise HTTPException(404, "Application not found")
@@ -1155,7 +1166,22 @@ async def get_timeline(
         .where(ApplicationStageHistory.application_id == application_id)
         .order_by(ApplicationStageHistory.created_at.asc())
     )).scalars().all()
-    return list(rows)
+
+    return [
+        StageHistoryEntry(
+            id=row.id,
+            from_stage=row.from_stage,
+            to_stage=row.to_stage,
+            notes=row.notes,
+            changed_by=row.changed_by,
+            changed_by_name=None,
+            attachments=[
+                {**a, "url": refresh_url(a["url"])} for a in row.attachments
+            ] if row.attachments else None,
+            created_at=row.created_at,
+        )
+        for row in rows
+    ]
 
 
 # Candidate may self-edit only while the application is early in the pipeline.
