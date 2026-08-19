@@ -13,6 +13,8 @@ RUN apt-get update && apt-get install -y \
     libffi8 \
     shared-mime-info \
     fonts-freefont-ttf \
+    libxml2-dev \
+    libxslt1-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
