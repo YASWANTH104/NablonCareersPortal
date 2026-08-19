@@ -19,6 +19,8 @@ import StageReasonDialog from '@/components/shared/StageReasonDialog';
 import HoldReasonDialog from '@/components/shared/HoldReasonDialog';
 import { useHoldToggle } from '@/hooks/useHoldToggle';
 import { PIPELINE_STAGES, STAGE_MAP, REASON_REQUIRED_STAGES } from '@/constants/pipelineStages';
+import { useAuthStore } from '@/store/authStore';
+import { HR_ROLES } from '@/utils/permissions';
 
 // Same 4 values as Application.source on the backend — kept here rather than a
 // shared constants file since only this page's filter dropdown needs the list
@@ -43,10 +45,11 @@ function initials(name) {
 
 // ── Kanban Card ──────────────────────────────────────────────────────────────
 
-function KanbanCard({ application, onClick, onToggleHold }) {
+function KanbanCard({ application, onClick, onToggleHold, readOnly }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: application.id,
     data: { application },
+    disabled: readOnly,
   });
 
   const style = transform
@@ -65,14 +68,16 @@ function KanbanCard({ application, onClick, onToggleHold }) {
       onClick={() => !isDragging && onClick(application.id)}
     >
       <div className="flex items-start gap-2 mb-2">
-        <div
-          {...listeners}
-          {...attributes}
-          className="mt-0.5 text-gray-300 hover:text-gray-500 cursor-grab active:cursor-grabbing flex-shrink-0"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <GripVertical className="w-3.5 h-3.5" />
-        </div>
+        {!readOnly && (
+          <div
+            {...listeners}
+            {...attributes}
+            className="mt-0.5 text-gray-300 hover:text-gray-500 cursor-grab active:cursor-grabbing flex-shrink-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <GripVertical className="w-3.5 h-3.5" />
+          </div>
+        )}
         <div className="w-7 h-7 rounded-full bg-brand-100 flex items-center justify-center flex-shrink-0 text-xs font-semibold text-brand-700">
           {initials(name)}
         </div>
@@ -86,19 +91,24 @@ function KanbanCard({ application, onClick, onToggleHold }) {
         {application.is_starred && (
           <Star className="w-3.5 h-3.5 text-yellow-400 fill-yellow-400 flex-shrink-0" />
         )}
-        <button
-          onClick={(e) => { e.stopPropagation(); onToggleHold(application); }}
-          className={`p-0.5 rounded flex-shrink-0 transition-colors ${
-            application.on_hold ? 'text-amber-500 hover:text-amber-600' : 'text-gray-300 hover:text-gray-500'
-          }`}
-          title={
-            application.on_hold
-              ? `On hold${application.hold_reason ? `: ${application.hold_reason}` : ''} — click to resume`
-              : 'Put on hold'
-          }
-        >
-          <Pause className="w-3.5 h-3.5" />
-        </button>
+        {application.on_hold && readOnly && (
+          <Pause className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" title={application.hold_reason ?? 'On hold'} />
+        )}
+        {!readOnly && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onToggleHold(application); }}
+            className={`p-0.5 rounded flex-shrink-0 transition-colors ${
+              application.on_hold ? 'text-amber-500 hover:text-amber-600' : 'text-gray-300 hover:text-gray-500'
+            }`}
+            title={
+              application.on_hold
+                ? `On hold${application.hold_reason ? `: ${application.hold_reason}` : ''} — click to resume`
+                : 'Put on hold'
+            }
+          >
+            <Pause className="w-3.5 h-3.5" />
+          </button>
+        )}
       </div>
       {application.on_hold && (
         <span className="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 mb-1.5">
@@ -159,7 +169,7 @@ function kanbanStageQueryKey(stageKey, filters) {
   return ['kanban-stage', stageKey, filters];
 }
 
-function KanbanColumn({ stageKey, label, colorClass, filters, onCardClick, onToggleHold }) {
+function KanbanColumn({ stageKey, label, colorClass, filters, onCardClick, onToggleHold, readOnly }) {
   const { isOver, setNodeRef } = useDroppable({ id: stageKey });
   const isLazy = LAZY_STAGES.has(stageKey);
 
@@ -199,7 +209,7 @@ function KanbanColumn({ stageKey, label, colorClass, filters, onCardClick, onTog
         ) : (
           <>
             {cards.map((app) => (
-              <KanbanCard key={app.id} application={app} onClick={onCardClick} onToggleHold={onToggleHold} />
+              <KanbanCard key={app.id} application={app} onClick={onCardClick} onToggleHold={onToggleHold} readOnly={readOnly} />
             ))}
             {hasNextPage && (
               <button
@@ -223,7 +233,7 @@ function KanbanColumn({ stageKey, label, colorClass, filters, onCardClick, onTog
 
 // ── Kanban View ───────────────────────────────────────────────────────────────
 
-function KanbanView({ filters, onCardClick, onToggleHold }) {
+function KanbanView({ filters, onCardClick, onToggleHold, readOnly }) {
   const queryClient = useQueryClient();
   const [activeApp, setActiveApp] = useState(null);
   const [pendingDrop, setPendingDrop] = useState(null); // { app, toStage }
@@ -300,6 +310,10 @@ function KanbanView({ filters, onCardClick, onToggleHold }) {
 
   function handleDragEnd({ active, over }) {
     setActiveApp(null);
+    // Defense in depth alongside each card's useDraggable({ disabled: readOnly })
+    // above — a view-only hiring-manager viewer must never be able to move a
+    // stage via drag, even if a drag somehow started.
+    if (readOnly) return;
     if (!over) return;
     const toStage = over.id;
     const app = active.data.current?.application;
@@ -332,6 +346,7 @@ function KanbanView({ filters, onCardClick, onToggleHold }) {
             filters={filters}
             onCardClick={onCardClick}
             onToggleHold={onToggleHold}
+            readOnly={readOnly}
           />
         ))}
       </div>
@@ -368,7 +383,7 @@ function KanbanView({ filters, onCardClick, onToggleHold }) {
 
 // ── Table View ────────────────────────────────────────────────────────────────
 
-function TableView({ applications, onRowClick, onToggleHold }) {
+function TableView({ applications, onRowClick, onToggleHold, readOnly }) {
   return (
     <div className="bg-white rounded-xl border border-surface-200 overflow-x-auto">
       <table className="w-full text-sm min-w-[720px]">
@@ -389,7 +404,7 @@ function TableView({ applications, onRowClick, onToggleHold }) {
             <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wide px-4 py-3">
               Applied
             </th>
-            <th className="px-4 py-3" />
+            {!readOnly && <th className="px-4 py-3" />}
           </tr>
         </thead>
         <tbody className="divide-y divide-surface-50">
@@ -471,21 +486,23 @@ function TableView({ applications, onRowClick, onToggleHold }) {
                 <td className="px-4 py-3.5 text-xs text-gray-400">
                   {formatDistanceToNow(new Date(app.applied_at), { addSuffix: true })}
                 </td>
-                <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    onClick={() => onToggleHold(app)}
-                    className={`p-1 rounded transition-colors ${
-                      app.on_hold ? 'text-amber-500 hover:text-amber-600' : 'text-gray-300 hover:text-gray-500'
-                    }`}
-                    title={
-                      app.on_hold
-                        ? `On hold${app.hold_reason ? `: ${app.hold_reason}` : ''} — click to resume`
-                        : 'Put on hold'
-                    }
-                  >
-                    <Pause className="w-4 h-4" />
-                  </button>
-                </td>
+                {!readOnly && (
+                  <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => onToggleHold(app)}
+                      className={`p-1 rounded transition-colors ${
+                        app.on_hold ? 'text-amber-500 hover:text-amber-600' : 'text-gray-300 hover:text-gray-500'
+                      }`}
+                      title={
+                        app.on_hold
+                          ? `On hold${app.hold_reason ? `: ${app.hold_reason}` : ''} — click to resume`
+                          : 'Put on hold'
+                      }
+                    >
+                      <Pause className="w-4 h-4" />
+                    </button>
+                  </td>
+                )}
               </tr>
             );
           })}
@@ -580,6 +597,13 @@ export default function ApplicantsPage() {
   const location = useLocation();
   const queryClient = useQueryClient();
 
+  // A job's assigned hiring manager also lands on this page now (see App.jsx),
+  // scoped by the backend to only their own jobs — but unlike HR they get a
+  // strictly read-only view here: no add/bulk-upload, no drag-to-move-stage,
+  // no hold toggle.
+  const { user } = useAuthStore();
+  const canManage = HR_ROLES.includes(user?.role);
+
   // Carried into ApplicationDetailPage as location.state.from so its "All
   // applicants" back-link can return to this exact filtered view instead of
   // a bare /hr/applicants — see the note by the filter state below for why.
@@ -631,11 +655,23 @@ export default function ApplicantsPage() {
   const { data: agenciesData } = useQuery({
     queryKey: ['agencies'],
     queryFn: () => agenciesApi.list().then((r) => r.data),
+    // GET /agencies is HR-only on the backend — a hiring-manager viewer would
+    // just 403 on this, and the agency filter dropdown already hides itself
+    // when agenciesData is empty/undefined (see agenciesData?.length > 0 below).
+    enabled: canManage,
   });
 
+  // HR gets every job (unchanged). Anyone else must NOT fall through to
+  // jobsApi.list()'s non-HR branch — that's the public/referral job board,
+  // an entirely unrelated list — so they get the dedicated endpoint scoped
+  // to jobs they actually have applicant-view access to (hiring-manager
+  // jobs, or jobs they're an assigned interview panelist on).
   const { data: jobsData } = useQuery({
-    queryKey: ['hr-jobs-list'],
-    queryFn: () => jobsApi.list({ limit: 100 }).then((r) => r.data.items),
+    queryKey: canManage ? ['hr-jobs-list'] : ['my-applicant-access-jobs'],
+    queryFn: () =>
+      canManage
+        ? jobsApi.list({ limit: 100 }).then((r) => r.data.items)
+        : jobsApi.myApplicantAccess().then((r) => r.data),
   });
 
   // Kanban's columns each fetch their own stage independently (see KanbanColumn) —
@@ -686,20 +722,24 @@ export default function ApplicantsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => setShowAddCandidate(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-brand-500 text-white text-sm font-semibold rounded-lg hover:bg-brand-600 transition-colors"
-          >
-            <UserPlus className="w-4 h-4" />
-            Add candidate
-          </button>
-          <button
-            onClick={() => setShowBulkUpload(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-white border border-surface-200 text-gray-700 text-sm font-semibold rounded-lg hover:bg-surface-50 transition-colors"
-          >
-            <UploadCloud className="w-4 h-4" />
-            Bulk upload
-          </button>
+          {canManage && (
+            <>
+              <button
+                onClick={() => setShowAddCandidate(true)}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-brand-500 text-white text-sm font-semibold rounded-lg hover:bg-brand-600 transition-colors"
+              >
+                <UserPlus className="w-4 h-4" />
+                Add candidate
+              </button>
+              <button
+                onClick={() => setShowBulkUpload(true)}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-white border border-surface-200 text-gray-700 text-sm font-semibold rounded-lg hover:bg-surface-50 transition-colors"
+              >
+                <UploadCloud className="w-4 h-4" />
+                Bulk upload
+              </button>
+            </>
+          )}
           {/* The two view toggles are one control — keep them on the same line
               when the row wraps on narrow screens. */}
           <div className="flex items-center gap-2 ml-auto sm:ml-0">
@@ -810,6 +850,7 @@ export default function ApplicantsPage() {
           filters={filters}
           onCardClick={(id) => openApplication(id)}
           onToggleHold={toggleHold}
+          readOnly={!canManage}
         />
       ) : isLoading ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
@@ -832,6 +873,7 @@ export default function ApplicantsPage() {
             applications={applications}
             onRowClick={(id) => openApplication(id)}
             onToggleHold={toggleHold}
+            readOnly={!canManage}
           />
           {data && data.pages > 1 && (
             <div className="flex items-center justify-end gap-3 mt-4">

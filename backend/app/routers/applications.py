@@ -226,21 +226,31 @@ async def list_applications(
     source: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=500),
-    user=Depends(require_roles(*_HR_AND_INTERVIEWER)),
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # Not require_roles(*_HR_AND_INTERVIEWER) — a job's assigned hiring
+    # manager (any internal role) also gets view-only access here, scoped to
+    # only their own jobs inside get_all_applications. An applicant hitting
+    # this directly gets an empty/self-scoped-to-nothing result since they
+    # can never be a hiring_manager_id; they have their own /mine route.
+    if current_user.role == Role.APPLICANT.value:
+        raise HTTPException(403, "Not authorized")
     return await application_service.get_all_applications(
-        db, job_id=job_id, stage=stage, search=search, agency_id=agency_id, source=source, page=page, limit=limit
+        db, job_id=job_id, stage=stage, search=search, agency_id=agency_id, source=source,
+        page=page, limit=limit, current_user=current_user,
     )
 
 
 @router.get("/{application_id}", response_model=ApplicationDetailResponse)
 async def get_application(
     application_id: uuid.UUID,
-    user=Depends(require_roles(*_HR_AND_INTERVIEWER)),
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await application_service.get_application_by_id(db, application_id)
+    if current_user.role == Role.APPLICANT.value:
+        raise HTTPException(403, "Not authorized")
+    return await application_service.get_application_by_id(db, application_id, current_user=current_user)
 
 
 @router.patch("/{application_id}", response_model=ApplicationResponse)

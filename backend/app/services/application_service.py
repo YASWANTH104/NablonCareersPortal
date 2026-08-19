@@ -706,10 +706,12 @@ async def get_all_applications(
     source: Optional[str] = None,
     page: int = 1,
     limit: int = 20,
+    current_user=None,
 ) -> dict:
     from app.models.user import User
     from app.models.agency import Agency
     from app.models.screening import ScreeningResponse
+    from app.services import job_service
 
     base = (
         select(
@@ -722,6 +724,29 @@ async def get_all_applications(
     )
 
     filters = []
+
+    # HR: unrestricted (unchanged). Everyone else gets scoped here — the role
+    # gate on the router was relaxed to get_current_user specifically for
+    # this, so this function is the actual authorization boundary now.
+    #
+    # This list view is deliberately ONLY about hiring_manager_id, for every
+    # non-HR role including interviewer — full pipeline visibility here is a
+    # hiring-manager privilege, never granted just by being an interviewer
+    # somewhere (that access is detail-page-only, reached via "My Interviews",
+    # not this general list — see get_application_by_id). A plain interviewer
+    # with no hiring-manager jobs sees nothing here; an explicit job_id
+    # outside anyone's managed scope is a 403, not a silent empty result,
+    # since that's a deliberate attempt to view a specific job rather than
+    # just browsing.
+    if current_user is not None and current_user.role not in _HR_EDIT_ROLES:
+        managed_job_ids = await job_service.hiring_manager_job_ids(db, current_user.id)
+
+        if job_id:
+            if job_id not in managed_job_ids:
+                raise HTTPException(403, "You don't have access to this job's applications")
+        else:
+            filters.append(Application.job_id.in_(managed_job_ids))
+
     if job_id:
         filters.append(Application.job_id == job_id)
     if stage:
@@ -766,13 +791,16 @@ async def get_all_applications(
     return {"items": items, "total": total, "page": page, "limit": limit, "pages": max(1, -(-total // limit))}
 
 
-async def get_application_by_id(db: AsyncSession, application_id: uuid.UUID) -> ApplicationDetailResponse:
+async def get_application_by_id(
+    db: AsyncSession, application_id: uuid.UUID, current_user=None
+) -> ApplicationDetailResponse:
     from sqlalchemy.orm import aliased
     from app.models.user import User
     from app.models.interview import Interview
     from app.models.candidate_profile import CandidateProfile
     from app.models.agency import Agency
     from app.models.referral import Referral
+    from app.services import job_service
 
     Referrer = aliased(User)
 
@@ -792,13 +820,28 @@ async def get_application_by_id(db: AsyncSession, application_id: uuid.UUID) -> 
         raise HTTPException(404, "Application not found")
 
     app, full_name, email, avatar_url, date_of_birth, agency_name, referrer_name = row
+
+    # Same relaxed-gate reasoning as get_all_applications above — a caller
+    # who isn't HR only reaches this function at all because the router now
+    # allows any authenticated user through. Hiring manager on this
+    # application's job -> full access; a plain interviewer -> only if
+    # they're an assigned panelist on one of this application's interviews;
+    # anyone else -> denied.
+    if current_user is not None and current_user.role not in _HR_EDIT_ROLES:
+        if not await job_service.is_hiring_manager(db, app.job_id, current_user.id):
+            from app.services import interview_service
+            if current_user.role != "interviewer" or not await interview_service.is_panelist_for_application(
+                db, application_id, current_user.id
+            ):
+                raise HTTPException(403, "You don't have access to this application")
     profile = await db.get(CandidateProfile, app.applicant_id)
 
     history = (await db.execute(
-        select(ApplicationStageHistory)
+        select(ApplicationStageHistory, User.full_name.label("mover_name"))
+        .outerjoin(User, User.id == ApplicationStageHistory.changed_by)
         .where(ApplicationStageHistory.application_id == application_id)
         .order_by(ApplicationStageHistory.created_at.asc())
-    )).scalars().all()
+    )).all()
 
     interview_count = (await db.execute(
         select(func.count()).select_from(Interview).where(Interview.application_id == application_id)
@@ -820,9 +863,10 @@ async def get_application_by_id(db: AsyncSession, application_id: uuid.UUID) -> 
             "to_stage": h.to_stage,
             "notes": h.notes,
             "changed_by": h.changed_by,
+            "changed_by_name": mover_name,
             "created_at": h.created_at,
         }
-        for h in history
+        for h, mover_name in history
     ]
     d["interview_count"] = interview_count
     d["date_of_birth"] = date_of_birth
@@ -1214,16 +1258,32 @@ _RESUME_CLOSED_STAGES = ("hired", "rejected", "withdrawn", "interview_drop", "of
 
 
 async def _resume_access(db: AsyncSession, application_id: uuid.UUID, current_user):
-    """Load the application and classify the caller as HR, owner, or neither."""
+    """Load the application and classify the caller as HR, an interviewer
+    assigned to this application, the job's hiring manager (view-only),
+    owner, or neither. Being an interviewer somewhere does NOT by itself
+    grant access — only an actual panel assignment on this application does,
+    same tightened rule as get_all_applications/get_application_by_id."""
+    from app.services import job_service
+    from app.services import interview_service
+
     app = await db.get(Application, application_id)
     if not app:
         raise HTTPException(404, "Application not found")
 
     role = getattr(current_user, "role", None)
     is_hr = role in _HR_EDIT_ROLES
-    is_interviewer = role == "interviewer"
     is_owner = str(app.applicant_id) == str(current_user.id)
-    return app, is_hr, is_interviewer, is_owner
+
+    is_hiring_manager = False
+    is_interviewer = False
+    if not (is_hr or is_owner):
+        is_hiring_manager = await job_service.is_hiring_manager(db, app.job_id, current_user.id)
+        if role == "interviewer" and not is_hiring_manager:
+            is_interviewer = await interview_service.is_panelist_for_application(
+                db, application_id, current_user.id
+            )
+
+    return app, is_hr, is_interviewer, is_owner, is_hiring_manager
 
 
 async def list_application_resumes(
@@ -1235,8 +1295,8 @@ async def list_application_resumes(
     from app.models.user import User as UserModel
     from app.services.storage_service import refresh_url
 
-    app, is_hr, is_interviewer, is_owner = await _resume_access(db, application_id, current_user)
-    if not (is_hr or is_interviewer or is_owner):
+    app, is_hr, is_interviewer, is_owner, is_hiring_manager = await _resume_access(db, application_id, current_user)
+    if not (is_hr or is_interviewer or is_owner or is_hiring_manager):
         raise HTTPException(403, "Not your application")
 
     rows = (await db.execute(
@@ -1277,7 +1337,7 @@ async def add_application_resume(
     from app.models.application_resume import ApplicationResume
     from app.services.storage_service import upload_resume
 
-    app, is_hr, _is_interviewer, is_owner = await _resume_access(db, application_id, current_user)
+    app, is_hr, _is_interviewer, is_owner, _is_hiring_manager = await _resume_access(db, application_id, current_user)
 
     if not is_hr:
         if not is_owner:
