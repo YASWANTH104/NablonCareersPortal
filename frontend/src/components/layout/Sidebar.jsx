@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import {
   LayoutDashboard, Briefcase, Users, Star, Calendar,
   FileText, BarChart2, Settings, LogOut, ChevronLeft,
@@ -8,6 +9,7 @@ import {
 import { useAuthStore } from '@/store/authStore';
 import { useUIStore } from '@/store/uiStore';
 import { HR_ROLES, ROLES } from '@/utils/permissions';
+import { jobsApi } from '@/api/jobs';
 import { cn } from '@/lib/utils';
 
 const NAV_ITEMS = {
@@ -27,12 +29,20 @@ const NAV_ITEMS = {
   ],
   interviewer: [
     { to: '/hr/interviews',         label: 'My Interviews',     icon: Calendar },
+    // Applicants is NOT here statically — a plain interviewer has no
+    // pipeline-browse access at all; their only path to a candidate's
+    // application is the detail page reached from a specific interview on
+    // "My Interviews". It's spliced in dynamically below only if this
+    // specific person also happens to be a hiring manager on some job.
     { to: '/hr/availability',       label: 'My Availability',   icon: CalendarClock },
     { to: '/employee/refer',        label: 'Refer a Candidate', icon: UserCheck },
     { to: '/employee/my-referrals', label: 'My Referrals',      icon: Award },
     { to: '/employee/jobs',         label: 'Browse Jobs',       icon: Briefcase },
   ],
   employee: [
+    // Same story as interviewer above — Applicants only appears (spliced in
+    // dynamically below) for an employee who's actually a hiring manager on
+    // at least one job; otherwise there's nothing here for them to browse.
     { to: '/employee/refer',         label: 'Refer a Candidate', icon: UserCheck },
     { to: '/employee/my-referrals',  label: 'My Referrals',      icon: Award },
     { to: '/employee/jobs',          label: 'Browse Jobs',       icon: Briefcase },
@@ -58,7 +68,26 @@ export default function Sidebar() {
   const { pathname } = useLocation();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
-  const navItems = getNavItems(user?.role);
+  // Whether this interviewer/employee is a hiring manager on at least one
+  // job — the same endpoint that already scopes the Applicants job filter
+  // dropdown, reused here to decide whether the nav item should exist at
+  // all. HR never needs this (always has it); an applicant never can.
+  const needsHiringManagerCheck = user?.role === ROLES.INTERVIEWER || user?.role === ROLES.EMPLOYEE;
+  const { data: managedJobs } = useQuery({
+    queryKey: ['my-applicant-access-jobs'],
+    queryFn: () => jobsApi.myApplicantAccess().then((r) => r.data),
+    enabled: needsHiringManagerCheck,
+    staleTime: 60_000,
+  });
+
+  // Build a new array rather than mutating the one getNavItems returns —
+  // that's the same object reference stored in the module-level NAV_ITEMS
+  // constant, so splicing it in place would permanently corrupt it across
+  // renders and every other session sharing this module.
+  const baseNavItems = getNavItems(user?.role);
+  const navItems = needsHiringManagerCheck && managedJobs?.length > 0
+    ? [baseNavItems[0], { to: '/hr/applicants', label: 'Applicants', icon: Users }, ...baseNavItems.slice(1)]
+    : baseNavItems;
 
   // Navigating always dismisses the mobile drawer.
   useEffect(() => {

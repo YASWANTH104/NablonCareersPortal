@@ -13,6 +13,8 @@ from app.schemas.interview import (
     CandidateInterviewSummary,
 )
 
+_HR_ROLES = ("hr_manager", "admin", "super_admin")
+
 
 async def _get_previous_rounds(
     db: AsyncSession,
@@ -549,6 +551,7 @@ async def list_interviews(
     date_to: Optional[datetime] = None,
     page: int = 1,
     limit: int = 20,
+    current_user=None,
 ) -> dict:
     from app.models.application import Application
     from app.models.user import User
@@ -562,6 +565,27 @@ async def list_interviews(
     )
 
     filters = []
+
+    # Same gate as application_service.get_application_by_id — the router
+    # relaxes this endpoint's role gate to any authenticated user, so a
+    # non-HR caller must be scoped to a specific application they're actually
+    # authorized to see: the job's hiring manager gets full access, a plain
+    # interviewer only if they're an assigned panelist on THIS application
+    # (not just any interviewer, full stop — that was the pre-existing
+    # behavior, tightened per explicit product decision).
+    if current_user is not None and current_user.role not in ("hr_manager", "admin", "super_admin"):
+        if not application_id:
+            raise HTTPException(403, "Not authorized")
+        from app.services import job_service
+
+        target_app = await db.get(Application, application_id)
+        is_hm = target_app is not None and await job_service.is_hiring_manager(db, target_app.job_id, current_user.id)
+        if not is_hm:
+            if current_user.role != "interviewer" or not await is_panelist_for_application(
+                db, application_id, current_user.id
+            ):
+                raise HTTPException(403, "Not authorized")
+
     if application_id:
         filters.append(Interview.application_id == application_id)
     if status:
@@ -1003,14 +1027,57 @@ async def submit_feedback_by_token(
     return await submit_feedback(db, interview.id, data, submitted_by=panelist.user_id)
 
 
+async def _is_panelist(db: AsyncSession, interview_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+    return (await db.execute(
+        select(InterviewPanelist).where(
+            InterviewPanelist.interview_id == interview_id,
+            InterviewPanelist.user_id == user_id,
+        )
+    )).scalar_one_or_none() is not None
+
+
+async def is_panelist_for_application(db: AsyncSession, application_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+    """Whether user_id is an assigned panelist on a still-active (non-
+    cancelled) interview for this application — the scope a plain
+    interviewer gets by default (see
+    application_service.get_all_applications/get_application_by_id): full
+    visibility into a job's pipeline is reserved for its hiring manager, not
+    every interviewer, so being on the panel only grants access while that
+    assignment is real. Cancelling an interview only flips Interview.status
+    (the InterviewPanelist row is never deleted — see cancel_interview, which
+    also frees the associated slot back to open), so without this exclusion
+    a cancelled assignment would keep granting visibility forever. A hiring
+    manager's access is untouched either way — it never depends on this."""
+    return (await db.execute(
+        select(InterviewPanelist)
+        .join(Interview, Interview.id == InterviewPanelist.interview_id)
+        .where(
+            Interview.application_id == application_id,
+            InterviewPanelist.user_id == user_id,
+            Interview.status != "cancelled",
+        )
+    )).first() is not None
+
+
 async def submit_feedback(
     db: AsyncSession,
     interview_id: uuid.UUID,
     data: InterviewFeedbackCreate,
     submitted_by: uuid.UUID,
+    submitted_by_role: Optional[str] = None,
 ) -> InterviewFeedback:
     if not await db.get(Interview, interview_id):
         raise HTTPException(404, "Interview not found")
+
+    # Pre-existing gap closed here: this endpoint previously had no
+    # authorization at all beyond being logged in — any authenticated user
+    # could submit feedback attributed to themselves for any interview.
+    # Only HR or an actual assigned panelist may do this. submitted_by_role
+    # is optional (None) only for the panelist-token flow above, which is
+    # already scoped by knowledge of a specific panelist's feedback_token.
+    if submitted_by_role is not None and submitted_by_role not in _HR_ROLES:
+        if not await _is_panelist(db, interview_id, submitted_by):
+            raise HTTPException(403, "Only an assigned panelist or HR can submit feedback for this interview")
 
     existing = (await db.execute(
         select(InterviewFeedback).where(
@@ -1037,7 +1104,9 @@ async def submit_feedback(
     return feedback
 
 
-async def upload_feedback_attachment(db: AsyncSession, interview_id: uuid.UUID, file) -> dict:
+async def upload_feedback_attachment(
+    db: AsyncSession, interview_id: uuid.UUID, file, uploaded_by: uuid.UUID, uploaded_by_role: str,
+) -> dict:
     """Store an optional supporting file for interview feedback (e.g. a written
     test, marked-up code, a scorecard) and hand back its URL — uploaded first,
     same "upload then reference the URL" pattern as resume_url, so the feedback
@@ -1046,6 +1115,11 @@ async def upload_feedback_attachment(db: AsyncSession, interview_id: uuid.UUID, 
 
     if not await db.get(Interview, interview_id):
         raise HTTPException(404, "Interview not found")
+
+    # Same gap/fix as submit_feedback above — only HR or an assigned panelist
+    # may attach a file to this interview's feedback.
+    if uploaded_by_role not in _HR_ROLES and not await _is_panelist(db, interview_id, uploaded_by):
+        raise HTTPException(403, "Only an assigned panelist or HR can attach files to this interview's feedback")
 
     url = await storage_service.upload_document(file, folder=f"feedback/{interview_id}", document_type="attachment")
     return {"url": url, "name": getattr(file, "filename", None)}

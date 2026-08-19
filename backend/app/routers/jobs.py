@@ -85,6 +85,18 @@ async def list_jobs(
     )
 
 
+@router.get("/my-applicant-access")
+async def my_applicant_access_jobs(
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Minimal {id, title} list of jobs THIS caller actually has applicant-
+    view access to — used by the ApplicantsPage job filter for anyone who
+    isn't HR (HR keeps using the full GET /jobs list). Declared before
+    GET /{identifier} so it isn't swallowed by that path param."""
+    return await job_service.list_accessible_jobs_for_applicant_view(db, current_user)
+
+
 @router.get("/{identifier}", response_model=JobResponse)
 async def get_job(
     identifier: str,

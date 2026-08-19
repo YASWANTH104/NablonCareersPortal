@@ -1333,13 +1333,22 @@ export default function ApplicationDetailPage() {
 
   // Interviewers land on this same page for full candidate context, but get a
   // read-only view — no scheduling, no offers/documents (HR/finance territory).
+  // A job's assigned hiring manager also lands here (view-only, scoped to
+  // their own jobs by the backend) — unlike interviewers, they never get
+  // write access to notes/feedback either, so that's its own narrower flag
+  // rather than reusing canManage.
   const { user } = useAuthStore();
   const canManage = HR_ROLES.includes(user?.role);
+  const canWriteNotesAndFeedback = canManage || user?.role === 'interviewer';
 
   // ApplicantsPage passes its current URL (filters included) as location.state.from
   // when navigating here — falling back to a bare list only when arriving some
-  // other way (e.g. a bookmarked/direct link to this application).
-  const backToApplicants = location.state?.from || (canManage ? '/hr/applicants' : '/hr/interviews');
+  // other way (e.g. a bookmarked/direct link to this application). Interviewers
+  // don't have the /hr/applicants list route, so they fall back to their own
+  // Interviews page instead; HR and a hiring-manager viewer both fall back to
+  // the (scoped, for the latter) Applicants list.
+  const backToApplicants = location.state?.from
+    || (user?.role === 'interviewer' ? '/hr/interviews' : '/hr/applicants');
 
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') ?? 'overview');
 
@@ -1529,6 +1538,16 @@ export default function ApplicationDetailPage() {
   const stageHistory = (app.stage_history ?? []).filter((h) => h.to_stage !== '_note');
   const notes = (app.stage_history ?? []).filter((h) => h.to_stage === '_note');
 
+  // "Last updated" — the most recent tracked activity of any kind (a stage
+  // move or a note), stage moves and notes are both stored as
+  // ApplicationStageHistory rows so a single most-recent-by-created_at pick
+  // covers either. Falls back to null (no "by" shown) when the application
+  // has never had one recorded yet — e.g. still sitting at "applied" with no
+  // note added.
+  const lastActivity = (app.stage_history ?? []).length
+    ? [...app.stage_history].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0]
+    : null;
+
   const OFFER_STATUS_COLORS = {
     draft:    'bg-gray-100 text-gray-600',
     sent:     'bg-blue-100 text-blue-700',
@@ -1561,7 +1580,7 @@ export default function ApplicationDetailPage() {
         to={backToApplicants}
         className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-5"
       >
-        <ArrowLeft className="w-4 h-4" /> {canManage ? 'All applicants' : 'Interviews'}
+        <ArrowLeft className="w-4 h-4" /> {user?.role === 'interviewer' ? 'Interviews' : 'All applicants'}
       </Link>
 
       {/* Header card */}
@@ -1614,7 +1633,13 @@ export default function ApplicationDetailPage() {
           {/* Stage control */}
           <div className="flex items-center gap-3 flex-shrink-0 w-full sm:w-auto flex-wrap">
             <div className="text-xs text-gray-400">
-              Applied {formatDistanceToNow(new Date(app.applied_at), { addSuffix: true })}
+              <div>Applied {formatDistanceToNow(new Date(app.applied_at), { addSuffix: true })}</div>
+              {lastActivity && (
+                <div>
+                  Last updated {formatDistanceToNow(new Date(lastActivity.created_at), { addSuffix: true })}
+                  {lastActivity.changed_by_name && <> by {lastActivity.changed_by_name}</>}
+                </div>
+              )}
             </div>
             <div className="relative">
               <button
@@ -2050,8 +2075,9 @@ export default function ApplicationDetailPage() {
                     <CandidateSelfAssessment sf={interview.candidate_self_feedback} />
                   )}
 
-                  {/* Submit feedback button — interviewers are the ones who actually give feedback */}
-                  {['scheduled', 'rescheduled', 'completed'].includes(interview.status) && (
+                  {/* Submit feedback button — interviewers are the ones who actually give feedback;
+                      a view-only hiring-manager viewer never gets this (backend rejects it too). */}
+                  {canWriteNotesAndFeedback && ['scheduled', 'rescheduled', 'completed'].includes(interview.status) && (
                     <div className="mt-3">
                       {showFeedbackFor === interview.id ? (
                         <InlineFeedbackForm
@@ -2240,6 +2266,7 @@ export default function ApplicationDetailPage() {
                       )}
                       <p className="text-xs text-gray-400 mt-1">
                         {formatDistanceToNow(new Date(entry.created_at), { addSuffix: true })}
+                        {entry.changed_by_name && <> · by {entry.changed_by_name}</>}
                       </p>
                     </div>
                   </div>
@@ -2253,25 +2280,28 @@ export default function ApplicationDetailPage() {
       {/* ── Notes Tab ── */}
       {activeTab === 'notes' && (
         <div className="space-y-4">
-          {/* Add note — HR and interviewers can both leave notes on a candidate */}
-          <div className="bg-white rounded-xl border border-surface-200 p-4">
-            <textarea
-              value={noteText}
-              onChange={(e) => setNoteText(e.target.value)}
-              placeholder="Add a note about this candidate..."
-              rows={3}
-              className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
-            />
-            <div className="flex justify-end mt-2">
-              <button
-                onClick={() => noteText.trim() && noteMutation.mutate(noteText.trim())}
-                disabled={!noteText.trim() || noteMutation.isPending}
-                className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white font-semibold rounded-lg text-sm hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Send className="w-3.5 h-3.5" /> Add note
-              </button>
+          {/* Add note — HR and interviewers can both leave notes on a candidate;
+              a view-only hiring-manager viewer sees the list below but not this form. */}
+          {canWriteNotesAndFeedback && (
+            <div className="bg-white rounded-xl border border-surface-200 p-4">
+              <textarea
+                value={noteText}
+                onChange={(e) => setNoteText(e.target.value)}
+                placeholder="Add a note about this candidate..."
+                rows={3}
+                className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+              />
+              <div className="flex justify-end mt-2">
+                <button
+                  onClick={() => noteText.trim() && noteMutation.mutate(noteText.trim())}
+                  disabled={!noteText.trim() || noteMutation.isPending}
+                  className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white font-semibold rounded-lg text-sm hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Send className="w-3.5 h-3.5" /> Add note
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Notes list */}
           {notes.length === 0 ? (
@@ -2283,6 +2313,7 @@ export default function ApplicationDetailPage() {
                   <p className="text-sm text-gray-700 whitespace-pre-wrap">{note.notes}</p>
                   <p className="text-xs text-gray-400 mt-2">
                     {formatDistanceToNow(new Date(note.created_at), { addSuffix: true })}
+                    {note.changed_by_name && <> · by {note.changed_by_name}</>}
                     {note.from_stage && (
                       <span className="ml-2 text-gray-300">
                         while in <span className="text-gray-400">{STAGE_MAP[note.from_stage]?.label ?? note.from_stage}</span>

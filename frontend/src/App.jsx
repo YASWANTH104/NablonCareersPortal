@@ -115,7 +115,6 @@ const router = createBrowserRouter([
           { path: '/hr/jobs', element: <HRJobsPage /> },
           { path: '/hr/jobs/new', element: <JobEditPage /> },
           { path: '/hr/jobs/:id/edit', element: <JobEditPage /> },
-          { path: '/hr/applicants', element: <ApplicantsPage /> },
           { path: '/hr/referrals', element: <ReferralsPage /> },
           { path: '/hr/offers', element: <OffersPage /> },
           { path: '/hr/offers/new/:applicationId', element: <OfferBuilderPage /> },
@@ -129,8 +128,6 @@ const router = createBrowserRouter([
   },
 
   // ── INTERVIEWER ─────────────────────────────────────────────
-  // Applicant detail is shared with HR here — ApplicationDetailPage renders a
-  // read-only view internally when the signed-in user is an interviewer.
   {
     element: <ProtectedRoute roles={['interviewer', 'hr_manager', 'admin', 'super_admin']} />,
     children: [
@@ -139,6 +136,27 @@ const router = createBrowserRouter([
         children: [
           { path: '/hr/interviews', element: <InterviewsPage /> },
           { path: '/hr/availability', element: <AvailabilityPage /> },
+        ],
+      },
+    ],
+  },
+
+  // ── APPLICANTS PIPELINE ──────────────────────────────────────
+  // HR gets full access. Interviewer already has unrestricted read access
+  // to every application at the backend regardless of hiring_manager_id
+  // (pre-existing — _HR_AND_INTERVIEWER never scoped them); the only thing
+  // they lacked was a UI path to the full list, not the underlying
+  // permission, so they belong here too, not just on the detail route.
+  // 'employee' is included since a job's hiring_manager_id can be any
+  // internal user — for that role specifically, the backend actually scopes
+  // them to only their own jobs (see application_service.get_all_applications).
+  {
+    element: <ProtectedRoute roles={['employee', 'interviewer', 'hr_manager', 'admin', 'super_admin']} />,
+    children: [
+      {
+        element: <AppShell />,
+        children: [
+          { path: '/hr/applicants', element: <ApplicantsPage /> },
           { path: '/hr/applicants/:id', element: <ApplicationDetailPage /> },
         ],
       },

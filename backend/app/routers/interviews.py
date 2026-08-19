@@ -1,7 +1,7 @@
 import uuid
 from typing import Optional
 from datetime import datetime
-from fastapi import APIRouter, Depends, Query, UploadFile, File
+from fastapi import APIRouter, Depends, Query, UploadFile, File, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -87,12 +87,18 @@ async def list_interviews(
     date_to: Optional[datetime] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=500),
-    user=Depends(require_roles(*_HR_AND_INTERVIEWER)),
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # Not require_roles(*_HR_AND_INTERVIEWER) — a job's hiring manager also
+    # gets view-only access here (scoped to their own job's applications
+    # inside list_interviews); an applicant hitting this directly is denied
+    # by the service (no application_id they'd ever be scoped to grants access).
+    if current_user.role == Role.APPLICANT.value:
+        raise HTTPException(403, "Not authorized")
     return await interview_service.list_interviews(
         db, application_id=application_id, status=status,
-        date_from=date_from, date_to=date_to, page=page, limit=limit,
+        date_from=date_from, date_to=date_to, page=page, limit=limit, current_user=current_user,
     )
 
 
@@ -170,7 +176,9 @@ async def submit_feedback(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await interview_service.submit_feedback(db, interview_id, data, submitted_by=user.id)
+    return await interview_service.submit_feedback(
+        db, interview_id, data, submitted_by=user.id, submitted_by_role=user.role,
+    )
 
 
 @router.post("/{interview_id}/feedback/attachment")
@@ -180,7 +188,9 @@ async def upload_feedback_attachment(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await interview_service.upload_feedback_attachment(db, interview_id, file)
+    return await interview_service.upload_feedback_attachment(
+        db, interview_id, file, uploaded_by=user.id, uploaded_by_role=user.role,
+    )
 
 
 @router.get("/{interview_id}/feedback", response_model=list[InterviewFeedbackResponse])

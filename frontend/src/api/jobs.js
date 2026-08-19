@@ -4,6 +4,7 @@ export const jobsApi = {
   listPublic: (params) => client.get('/jobs', { params }),
   list: (params) => client.get('/jobs', { params }),
   listDepartments: () => client.get('/jobs/departments'),
+  myApplicantAccess: () => client.get('/jobs/my-applicant-access'),
   getBySlug: (slug) => client.get(`/jobs/${slug}`),
   getById: (id) => client.get(`/jobs/${id}`),
   create: (data) => client.post('/jobs', data),

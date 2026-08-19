@@ -107,6 +107,10 @@ class StageHistoryEntry(BaseModel):
     to_stage: str
     notes: Optional[str] = None
     changed_by: Optional[uuid.UUID] = None
+    # Resolved display name for changed_by — None both when changed_by itself
+    # is None (an automated/system move, e.g. the AI screening gate) and when
+    # it's set but the user record can't be resolved (e.g. deleted account).
+    changed_by_name: Optional[str] = None
     created_at: datetime
 
 

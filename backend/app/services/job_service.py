@@ -113,6 +113,49 @@ async def list_jobs_hr(
     return {"items": items, "total": total, "page": page, "limit": limit, "pages": max(1, -(-total // limit))}
 
 
+async def is_hiring_manager(db: AsyncSession, job_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+    """Single source of truth for the "is this user the hiring manager on
+    this job" check — used by application_service/interview_service/etc. to
+    grant view-only pipeline access to a job's assigned hiring manager
+    without duplicating this query in every service module."""
+    job = await db.get(Job, job_id)
+    return bool(job and job.hiring_manager_id and str(job.hiring_manager_id) == str(user_id))
+
+
+async def hiring_manager_job_ids(db: AsyncSession, user_id: uuid.UUID) -> list[uuid.UUID]:
+    """Every job id this user is the assigned hiring manager on — used to
+    scope a hiring manager's application-list view to only their own jobs."""
+    rows = (await db.execute(select(Job.id).where(Job.hiring_manager_id == user_id))).scalars().all()
+    return list(rows)
+
+
+async def list_accessible_jobs_for_applicant_view(db: AsyncSession, current_user) -> list[dict]:
+    """Minimal {id, title} list of jobs current_user can see applications for
+    on ApplicantsPage — mirrors exactly the scoping rule in
+    application_service.get_all_applications: HR sees every job; a hiring
+    manager sees their own jobs. Deliberately does NOT include jobs a plain
+    interviewer merely has an assigned interview on — this list/the
+    Applicants tab is a hiring-manager-only view; an interviewer's access to
+    a specific candidate is detail-page-only, reached via "My Interviews",
+    never through this general job-scoped browse list. Also deliberately NOT
+    the same source as the public GET /jobs endpoint, which for a non-HR
+    caller returns the published/referral job board — an unrelated list that
+    has nothing to do with hiring_manager_id."""
+    hr_roles = {"hr_manager", "admin", "super_admin"}
+    if current_user.role in hr_roles:
+        rows = (await db.execute(select(Job.id, Job.title).order_by(Job.title))).all()
+        return [{"id": jid, "title": title} for jid, title in rows]
+
+    job_ids = set(await hiring_manager_job_ids(db, current_user.id))
+    if not job_ids:
+        return []
+
+    rows = (await db.execute(
+        select(Job.id, Job.title).where(Job.id.in_(job_ids)).order_by(Job.title)
+    )).all()
+    return [{"id": jid, "title": title} for jid, title in rows]
+
+
 async def get_job_by_slug(db: AsyncSession, slug: str) -> Optional[Job]:
     result = await db.execute(select(Job).where(Job.slug == slug))
     return result.scalar_one_or_none()
