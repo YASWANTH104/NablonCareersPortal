@@ -49,6 +49,9 @@ import ScreeningFormPage from '@/pages/public/ScreeningFormPage';
 import ReportsPage from '@/pages/hr/ReportsPage';
 import SettingsPage from '@/pages/hr/SettingsPage';
 import AgenciesPage from '@/pages/hr/AgenciesPage';
+import ResourcesPage from '@/pages/hr/ResourcesPage';
+import ResourceDetailPage from '@/pages/hr/ResourceDetailPage';
+import ProjectDetailPage from '@/pages/hr/ProjectDetailPage';
 import AgencyPortalPage from '@/pages/public/AgencyPortalPage';
 import InterviewFeedbackPage from '@/pages/public/InterviewFeedbackPage';
 import AgencyApplyLayout from '@/components/layout/AgencyApplyLayout';
@@ -122,6 +125,9 @@ const router = createBrowserRouter([
           { path: '/hr/reports', element: <ReportsPage /> },
           { path: '/hr/settings', element: <SettingsPage /> },
           { path: '/hr/agencies', element: <AgenciesPage /> },
+          { path: '/hr/resources', element: <ResourcesPage /> },
+          { path: '/hr/resources/projects/:id', element: <ProjectDetailPage /> },
+          { path: '/hr/resources/:id', element: <ResourceDetailPage /> },
         ],
       },
     ],

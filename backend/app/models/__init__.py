@@ -12,6 +12,7 @@ from app.models.document import DocumentRequest, ApplicationDocument
 from app.models.agency import Agency, JobAgencyAssignment
 from app.models.interview_slot import InterviewSlot
 from app.models.screening import ScreeningResponse
+from app.models.resource import EmployeeProfile, Project, ProjectAllocation
 
 __all__ = [
     "User",
@@ -27,4 +28,5 @@ __all__ = [
     "Agency", "JobAgencyAssignment",
     "InterviewSlot",
     "ScreeningResponse",
+    "EmployeeProfile", "Project", "ProjectAllocation",
 ]

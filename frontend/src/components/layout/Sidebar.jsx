@@ -5,6 +5,7 @@ import {
   LayoutDashboard, Briefcase, Users, Star, Calendar,
   FileText, BarChart2, Settings, LogOut, ChevronLeft,
   ChevronRight, UserCheck, Award, AlertTriangle, Building2, X, CalendarClock,
+  UserCog,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { useUIStore } from '@/store/uiStore';
@@ -24,6 +25,7 @@ const NAV_ITEMS = {
     { to: '/employee/my-referrals', label: 'My Referrals',      icon: Award },
     { to: '/hr/offers',      label: 'Offers',       icon: FileText },
     { to: '/hr/agencies',    label: 'Agencies',     icon: Building2 },
+    { to: '/hr/resources',   label: 'Resource Management', icon: UserCog },
     { to: '/hr/reports',     label: 'Reports',      icon: BarChart2 },
     { to: '/hr/settings',    label: 'Settings',     icon: Settings },
   ],
