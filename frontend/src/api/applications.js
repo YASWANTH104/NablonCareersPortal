@@ -45,7 +45,14 @@ export const applicationsApi = {
   toggleStar: (id) => client.patch(`/applications/${id}/star`),
   reviewDuplicate: (id) => client.patch(`/applications/${id}/duplicate-review`),
   setRating: (id, rating) => client.patch(`/applications/${id}/rating`, { rating }),
-  addNote: (id, note) => client.post(`/applications/${id}/notes`, { note }),
+  addNote: (id, note, files = []) => {
+    const form = new FormData();
+    form.append('note', note ?? '');
+    files.forEach((f) => form.append('files', f));
+    return client.post(`/applications/${id}/notes`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
   getTimeline: (id) => client.get(`/applications/${id}/timeline`),
   listResumes: (id) => client.get(`/applications/${id}/resumes`),
   addResume: (id, file, note) => {
