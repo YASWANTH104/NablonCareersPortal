@@ -72,6 +72,8 @@ class PanelistResponse(BaseModel):
     interview_id: uuid.UUID
     user_id: uuid.UUID
     role: str
+    full_name: Optional[str] = None
+    email: Optional[str] = None
 
 
 class InterviewFeedbackCreate(BaseModel):
@@ -94,6 +96,8 @@ class InterviewFeedbackResponse(BaseModel):
     id: uuid.UUID
     interview_id: uuid.UUID
     submitted_by: uuid.UUID
+    submitted_by_name: Optional[str] = None
+    submitted_by_email: Optional[str] = None
     overall_rating: Optional[int] = None
     recommendation: Optional[str] = None
     technical_score: Optional[int] = None
