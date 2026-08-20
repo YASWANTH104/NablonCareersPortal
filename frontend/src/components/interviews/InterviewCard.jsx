@@ -81,7 +81,7 @@ export default function InterviewCard({
             {interview.panelists?.length > 0 && (
               <span className="flex items-center gap-1">
                 <Users className="w-3.5 h-3.5 text-gray-400" />
-                {interview.panelists.length} panelist{interview.panelists.length !== 1 ? 's' : ''}
+                {interview.panelists.map((p) => p.full_name || 'Unknown').join(', ')}
               </span>
             )}
             {interview.location && (

@@ -55,6 +55,9 @@ export function InterviewFeedbackCard({ fb }) {
 
   return (
     <div className="bg-surface-50 rounded-xl border border-surface-200 p-4">
+      {fb.submitted_by_name && (
+        <p className="text-xs font-semibold text-gray-700 mb-2">{fb.submitted_by_name}</p>
+      )}
       <div className="flex items-center gap-2 mb-3">
         {fb.overall_rating && (
           <div className="flex gap-0.5">

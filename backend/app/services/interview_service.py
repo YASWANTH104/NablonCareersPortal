@@ -16,6 +16,19 @@ from app.schemas.interview import (
 _HR_ROLES = ("hr_manager", "admin", "super_admin")
 
 
+async def _users_by_id(db: AsyncSession, user_ids: set) -> dict:
+    """Batch-resolve user ids (panelists, feedback submitters) to User rows for
+    name/email display — callers otherwise only have a bare user_id/submitted_by
+    uuid to show, which is meaningless in the UI."""
+    from app.models.user import User
+
+    ids = {uid for uid in user_ids if uid}
+    if not ids:
+        return {}
+    users = (await db.execute(select(User).where(User.id.in_(ids)))).scalars().all()
+    return {u.id: u for u in users}
+
+
 async def _get_previous_rounds(
     db: AsyncSession,
     application_id: uuid.UUID,
@@ -39,9 +52,10 @@ async def _get_previous_rounds(
     fb_by = {}
     for f in all_fb:
         fb_by.setdefault(f.interview_id, []).append(f)
+    users_by_id = await _users_by_id(db, {f.submitted_by for f in all_fb})
     return [
         {"round_number": iv.round_number, "interview_title": iv.title,
-         "feedback": [_feedback_to_dict(f) for f in fb_by.get(iv.id, [])]}
+         "feedback": [_feedback_to_dict(f, users_by_id) for f in fb_by.get(iv.id, [])]}
         for iv in prior
     ]
 
@@ -71,6 +85,7 @@ async def _batch_previous_rounds(db: AsyncSession, rows: list) -> dict:
     fb_by: dict = {}
     for f in all_fb:
         fb_by.setdefault(f.interview_id, []).append(f)
+    users_by_id = await _users_by_id(db, {f.submitted_by for f in all_fb})
 
     result = {}
     for app_id, current_round, interview_id in needs_prev:
@@ -80,7 +95,7 @@ async def _batch_previous_rounds(db: AsyncSession, rows: list) -> dict:
         )
         result[interview_id] = [
             {"round_number": iv.round_number, "interview_title": iv.title,
-             "feedback": [_feedback_to_dict(f) for f in fb_by.get(iv.id, [])]}
+             "feedback": [_feedback_to_dict(f, users_by_id) for f in fb_by.get(iv.id, [])]}
             for iv in prior
         ]
     return result
@@ -275,13 +290,16 @@ async def get_panelist_day_schedule(
     return results
 
 
-def _feedback_to_dict(f: InterviewFeedback) -> dict:
+def _feedback_to_dict(f: InterviewFeedback, users_by_id: Optional[dict] = None) -> dict:
     from app.services.storage_service import refresh_url
 
+    submitter = (users_by_id or {}).get(f.submitted_by)
     return {
         "id": f.id,
         "interview_id": f.interview_id,
         "submitted_by": f.submitted_by,
+        "submitted_by_name": submitter.full_name if submitter else None,
+        "submitted_by_email": submitter.email if submitter else None,
         "overall_rating": f.overall_rating,
         "recommendation": f.recommendation,
         "technical_score": f.technical_score,
@@ -300,8 +318,15 @@ def _feedback_to_dict(f: InterviewFeedback) -> dict:
     }
 
 
-def _panelist_to_dict(p: InterviewPanelist) -> dict:
-    return {"interview_id": p.interview_id, "user_id": p.user_id, "role": p.role}
+def _panelist_to_dict(p: InterviewPanelist, users_by_id: Optional[dict] = None) -> dict:
+    u = (users_by_id or {}).get(p.user_id)
+    return {
+        "interview_id": p.interview_id,
+        "user_id": p.user_id,
+        "role": p.role,
+        "full_name": u.full_name if u else None,
+        "email": u.email if u else None,
+    }
 
 
 def _self_feedback_to_dict(sf: CandidateInterviewSelfFeedback) -> dict:
@@ -331,6 +356,7 @@ def _interview_to_response(
     job_title: Optional[str] = None,
     self_feedback: Optional[CandidateInterviewSelfFeedback] = None,
     previous_rounds_feedback: Optional[list] = None,
+    users_by_id: Optional[dict] = None,
 ) -> InterviewResponse:
     d = {
         "id": interview.id,
@@ -347,8 +373,8 @@ def _interview_to_response(
         "created_by": interview.created_by,
         "created_at": interview.created_at,
         "updated_at": interview.updated_at,
-        "panelists": [_panelist_to_dict(p) for p in panelists],
-        "feedback": [_feedback_to_dict(f) for f in feedback],
+        "panelists": [_panelist_to_dict(p, users_by_id) for p in panelists],
+        "feedback": [_feedback_to_dict(f, users_by_id) for f in feedback],
         "candidate_name": candidate_name,
         "candidate_email": candidate_email,
         "job_id": job_id,
@@ -448,7 +474,8 @@ async def create_interview(
     except Exception:
         pass
 
-    return _interview_to_response(interview, panelists, [])
+    users_by_id = await _users_by_id(db, {p.user_id for p in panelists})
+    return _interview_to_response(interview, panelists, [], users_by_id=users_by_id)
 
 
 async def list_my_interviews(
@@ -525,6 +552,9 @@ async def list_my_interviews(
         feedback_by.setdefault(f.interview_id, []).append(f)
 
     prev_rounds_by = await _batch_previous_rounds(db, rows)
+    users_by_id = await _users_by_id(
+        db, {p.user_id for p in all_panelists} | {f.submitted_by for f in all_feedback}
+    )
 
     items = []
     for interview, full_name, email, job_id, job_title in rows:
@@ -537,6 +567,7 @@ async def list_my_interviews(
             job_id=job_id,
             job_title=job_title,
             previous_rounds_feedback=prev_rounds_by.get(interview.id, []),
+            users_by_id=users_by_id,
         ))
 
     return {"items": items, "total": total, "page": page, "limit": limit, "pages": max(1, -(-total // limit))}
@@ -639,6 +670,9 @@ async def list_interviews(
     self_feedback_by = {sf.interview_id: sf for sf in all_self_feedback}
 
     prev_rounds_by = await _batch_previous_rounds(db, rows)
+    users_by_id = await _users_by_id(
+        db, {p.user_id for p in all_panelists} | {f.submitted_by for f in all_feedback}
+    )
 
     items = []
     for interview, full_name, email, job_id, job_title in rows:
@@ -652,6 +686,7 @@ async def list_interviews(
             job_title=job_title,
             self_feedback=self_feedback_by.get(interview.id),
             previous_rounds_feedback=prev_rounds_by.get(interview.id, []),
+            users_by_id=users_by_id,
         ))
 
     return {"items": items, "total": total, "page": page, "limit": limit, "pages": max(1, -(-total // limit))}
@@ -683,10 +718,14 @@ async def get_interview(db: AsyncSession, interview_id: uuid.UUID) -> InterviewR
     )).scalars().all()
 
     prev_rounds = await _get_previous_rounds(db, interview.application_id, interview.round_number)
+    users_by_id = await _users_by_id(
+        db, {p.user_id for p in panelists} | {f.submitted_by for f in feedback}
+    )
     return _interview_to_response(
         interview, list(panelists), list(feedback), full_name, email, job_id,
         job_title=job_title,
         previous_rounds_feedback=prev_rounds,
+        users_by_id=users_by_id,
     )
 
 

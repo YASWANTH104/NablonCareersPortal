@@ -99,10 +99,13 @@ export default function InterviewDetailDrawer({
 
               {interview.panelists?.length > 0 && (
                 <DetailRow icon={Users} label="Panel">
-                  {interview.panelists.length} panelist{interview.panelists.length !== 1 ? 's' : ''}
-                  {interview.panelists.some((p) => p.role) && (
-                    <span className="text-gray-400"> · {interview.panelists.map((p) => p.role).filter(Boolean).join(', ')}</span>
-                  )}
+                  {interview.panelists.map((p, i) => (
+                    <span key={p.user_id}>
+                      {i > 0 && ', '}
+                      {p.full_name || 'Unknown'}
+                      {p.role && <span className="text-gray-400"> ({p.role})</span>}
+                    </span>
+                  ))}
                 </DetailRow>
               )}
 
