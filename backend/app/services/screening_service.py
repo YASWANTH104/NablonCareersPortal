@@ -2,10 +2,13 @@
 scoring for the questionnaire sent when an application enters the `screening`
 stage on a job with `Job.screening_enabled = True`.
 
-Two hard gates are deterministic and never depend on Azure OpenAI being
-configured, per the explicit scoring brief this module implements:
-  - College tier 4/5                    -> auto-reject
-  - CGPA below CGPA_HARD_MIN            -> auto-reject
+Three hard gates drive auto-rejection. The first two are deterministic and
+never depend on Azure OpenAI being configured, per the explicit scoring brief
+this module implements; the third runs only after both of those pass, using
+the composite score which is itself partly AI-assisted:
+  - College tier 4/5                          -> auto-reject
+  - CGPA below CGPA_HARD_MIN                  -> auto-reject
+  - Composite score below OVERALL_SCORE_HARD_MIN -> auto-reject
   - Referral-sourced applications skip the questionnaire entirely (see
     create_and_queue_email)
 
@@ -35,6 +38,14 @@ logger = logging.getLogger(__name__)
 
 REQUEST_EXPIRY_HOURS = 48
 CGPA_HARD_MIN = 7.5
+
+# Third hard gate, applied after the composite score is computed (college tier
+# and CGPA gates above run first and short-circuit before this is ever
+# reached): a candidate who clears both of those but still scores below this
+# bar on the weighted composite is auto-rejected too, per the explicit ask
+# that a low overall score should reject like the other two gates rather than
+# just sitting there as an HR-facing label.
+OVERALL_SCORE_HARD_MIN = 70.0
 
 # Composite weights — must sum to 1.0. Matches the brief: college pedigree and
 # skills/project substance matter most; CGPA is a real but smaller signal once
@@ -392,8 +403,15 @@ async def score_screening_response(
     resp.project_score = project_score
     resp.overall_score = round(overall, 2)
     resp.recommendation = _recommendation(overall)
-    resp.auto_reject = False
-    resp.auto_reject_reason = None
+    if overall < OVERALL_SCORE_HARD_MIN:
+        resp.auto_reject = True
+        resp.auto_reject_reason = (
+            f"Overall screening score {overall:.1f} is below the required minimum of "
+            f"{OVERALL_SCORE_HARD_MIN:.0f}."
+        )
+    else:
+        resp.auto_reject = False
+        resp.auto_reject_reason = None
     resp.ai_reasoning = {
         "college": tier_reasoning,
         "skills": skills_reasoning,

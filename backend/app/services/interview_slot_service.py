@@ -109,6 +109,59 @@ async def unpublish_slot(db: AsyncSession, slot_id: uuid.UUID, requesting_user) 
     await db.commit()
 
 
+async def reschedule_slot(
+    db: AsyncSession,
+    slot_id: uuid.UUID,
+    requesting_user,
+    *,
+    start_time: Optional[datetime] = None,
+    duration_mins: Optional[int] = None,
+) -> SlotResponse:
+    """Editing a not-yet-booked slot's time/duration in place, instead of
+    unpublish-then-republish — used by the availability grid's drag-to-resize
+    (duration only) and the slot detail popover's reschedule form (start_time,
+    or both). Same ownership rule as unpublish_slot; booked slots are never
+    touched here (they're a real scheduled interview, not raw availability)."""
+    slot = await db.get(InterviewSlot, slot_id)
+    if not slot:
+        raise HTTPException(404, "Slot not found")
+    if not _is_hr(requesting_user) and slot.interviewer_id != requesting_user.id:
+        raise HTTPException(403, "You can only reschedule your own slots")
+    if slot.status != "open":
+        raise HTTPException(400, "Only open (unbooked) slots can be changed")
+    if start_time is None and duration_mins is None:
+        raise HTTPException(400, "Nothing to change")
+
+    new_start = start_time if start_time is not None else slot.start_time
+    new_duration = duration_mins if duration_mins is not None else slot.duration_mins
+
+    now = datetime.now(timezone.utc)
+    if new_start.tzinfo is None:
+        new_start = new_start.replace(tzinfo=timezone.utc)
+    if new_start < now:
+        raise HTTPException(400, "Can't move a slot into the past")
+
+    # Same real-interval-overlap check as publish_slots, against every other
+    # slot on this interviewer's calendar (the slot being edited is excluded
+    # so it never collides with its own current time/duration).
+    existing = (await db.execute(
+        select(InterviewSlot.start_time, InterviewSlot.duration_mins).where(
+            InterviewSlot.interviewer_id == slot.interviewer_id,
+            InterviewSlot.id != slot.id,
+        )
+    )).all()
+    new_end = new_start + timedelta(minutes=new_duration)
+    for e_start, e_dur in existing:
+        e_end = e_start + timedelta(minutes=e_dur)
+        if new_start < e_end and new_end > e_start:
+            raise HTTPException(409, "That time overlaps another slot on your calendar")
+
+    slot.start_time = new_start
+    slot.duration_mins = new_duration
+    await db.commit()  # see unassign_slot below — no refresh needed
+    return _to_response(slot)
+
+
 async def unassign_slot(db: AsyncSession, slot_id: uuid.UUID) -> SlotResponse:
     """HR pulling a published-but-never-booked slot back to raw availability —
     clears job_id/round_type but keeps the underlying time slot intact (status

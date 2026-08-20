@@ -6,7 +6,7 @@ from app.database import get_db
 from app.dependencies import require_roles, Role
 from app.schemas.interview_slot import (
     SlotPublishRequest, SlotResponse, SlotBookRequest, SlotAssignBatchRequest,
-    SlotBookUnassignedRequest,
+    SlotBookUnassignedRequest, SlotRescheduleRequest,
 )
 from app.services import interview_slot_service
 
@@ -47,6 +47,18 @@ async def my_slots(
     db: AsyncSession = Depends(get_db),
 ):
     return await interview_slot_service.get_my_slots(db, user.id)
+
+
+@router.patch("/{slot_id}", response_model=SlotResponse)
+async def reschedule_slot(
+    slot_id: uuid.UUID,
+    data: SlotRescheduleRequest,
+    user=Depends(require_roles(*_HR_AND_INTERVIEWER)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await interview_slot_service.reschedule_slot(
+        db, slot_id, user, start_time=data.start_time, duration_mins=data.duration_mins,
+    )
 
 
 @router.delete("/{slot_id}", status_code=204)

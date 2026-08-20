@@ -99,6 +99,7 @@ class ApplicantBrief(BaseModel):
     id: uuid.UUID
     full_name: str
     email: str
+    phone: Optional[str] = None
     avatar_url: Optional[str] = None
 
 

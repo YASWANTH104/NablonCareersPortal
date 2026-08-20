@@ -5,6 +5,7 @@ export const interviewSlotsApi = {
   publish: (data) => client.post('/interview-slots/publish', data),
   mine: () => client.get('/interview-slots/mine'),
   unpublish: (id) => client.delete(`/interview-slots/${id}`),
+  reschedule: (id, data) => client.patch(`/interview-slots/${id}`, data),
   assignBatch: (data) => client.post('/interview-slots/assign-batch', data),
   unassign: (id) => client.patch(`/interview-slots/${id}/unassign`),
   forInterviewer: (userId) => client.get(`/interview-slots/interviewer/${userId}`),

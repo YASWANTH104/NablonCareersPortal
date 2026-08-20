@@ -4,7 +4,10 @@ import {
   startOfWeek, addDays, addWeeks, subWeeks, format, isSameDay,
   startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isToday,
 } from 'date-fns';
-import { ChevronLeft, ChevronRight, X, Loader2, Search, CalendarClock, Copy, Maximize2, Minimize2, BellRing } from 'lucide-react';
+import {
+  ChevronLeft, ChevronRight, X, Loader2, Search, CalendarClock, Copy, Maximize2, Minimize2,
+  BellRing, Trash2, Repeat,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import { interviewSlotsApi } from '@/api/interviewSlots';
 import { applicationsApi } from '@/api/applications';
@@ -23,6 +26,17 @@ const FULL_END_HOUR = 24; // exclusive
 // is always in fixed 60-min blocks. HR later assigns a job+round without
 // touching duration.
 const PUBLISH_DURATION_MINS = 60;
+
+// Grid row height in px — used both for the CSS grid template and for
+// pixel-positioning the current-time indicator line, so the two never drift
+// out of sync with each other. Sized for Teams/Google-Calendar-style event
+// chips (roomy enough to read a label + time range inside a 30-min block),
+// not a cramped spreadsheet grid.
+const ROW_PX = 40;
+// Drag-to-resize is capped at 60 min (2 rows) — matches the backend's
+// SlotRescheduleRequest, which only accepts {30, 60} so a resized slot stays
+// bookable by the agency self-book path (it only ever queries those two).
+const RESIZE_MAX_SPAN = Math.round(60 / SLOT_MINUTES);
 
 // Distinct-per-round colors for the grid only (kept local, not touching the
 // shared ROUND_MAP badge colors used elsewhere — tr1/tr2 share one color
@@ -413,16 +427,17 @@ function computeDragStartTimes(day, loRow, hiRow, durationMins, covered, startHo
 }
 
 function WeekGrid({
-  weekStart, slots, editable, startHour, rows,
-  onPublishRange, onSlotClick, onRemoveRange, onCopyDay, copyingDay,
+  days, slots, editable, startHour, rows, nowTick,
+  onPublishRange, onSlotClick, onRemoveRange, onCopyDay, copyingDay, onResizeSlot,
 }) {
-  const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const now = new Date();
 
-  // Drag state: which day column, the row range touched so far, and whether
-  // this drag is painting new slots ('create') or sweeping open slots for
-  // bulk removal ('remove') — decided by what the mouse went down on.
-  const [drag, setDrag] = useState(null); // { dayIndex, startRow, endRow, mode }
+  // Drag state: which day column, the row range touched so far, and which of
+  // three things this drag is doing — painting new slots ('create'), sweeping
+  // open slots for bulk removal ('remove'), or dragging a single open slot's
+  // bottom edge to change its duration ('resize') — decided by what the mouse
+  // went down on.
+  const [drag, setDrag] = useState(null); // { dayIndex, startRow, endRow, mode, ... }
   const draggingRef = useRef(null);
   draggingRef.current = drag;
 
@@ -433,41 +448,114 @@ function WeekGrid({
       draggingRef.current = null;
       setDrag(null);
       if (!d) return;
-      const lo = Math.min(d.startRow, d.endRow);
-      const hi = Math.max(d.startRow, d.endRow);
-      if (d.mode === 'create') onPublishRange(days[d.dayIndex], lo, hi);
-      else onRemoveRange(d.removedIds);
+      if (d.mode === 'create') {
+        const lo = Math.min(d.startRow, d.endRow);
+        const hi = Math.max(d.startRow, d.endRow);
+        onPublishRange(days[d.dayIndex], lo, hi);
+      } else if (d.mode === 'resize') {
+        const span = d.previewSpan ?? d.originalSpan;
+        if (span * SLOT_MINUTES !== d.originalDuration) onResizeSlot(d.slotId, span * SLOT_MINUTES);
+      } else if (d.removedIds.size > 0) onRemoveRange(d.removedIds);
+      // A 'remove'-mode drag that never left its starting cell (removedIds
+      // stays empty — see startRemoveDrag) removes nothing, which is what
+      // lets a plain click fall through to onClick/onSlotClick below instead
+      // of instantly deleting the slot.
     };
     window.addEventListener('mouseup', finish, { once: true });
     return () => window.removeEventListener('mouseup', finish);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drag]);
 
+  // Resize tracks the raw mouse Y position rather than which grid cell the
+  // pointer happens to be over — a 60-min slot is a SINGLE DOM element
+  // spanning both its rows, so it only ever fires one mouseenter no matter
+  // where inside it the pointer moves, which made cell-based tracking unable
+  // to register a shrink at all (and made a plain click on the handle
+  // register as an instant, unintended shrink to the minimum). Registered
+  // once for the component's lifetime — reading the live drag off the ref
+  // avoids tearing the listener down and rebuilding it on every pixel of
+  // movement.
+  useEffect(() => {
+    function handleMove(e) {
+      const d = draggingRef.current;
+      if (!d || d.mode !== 'resize') return;
+      const deltaRows = Math.round((e.clientY - d.startClientY) / ROW_PX);
+      const previewSpan = Math.min(RESIZE_MAX_SPAN, Math.max(1, d.originalSpan + deltaRows));
+      if (previewSpan !== d.previewSpan) {
+        draggingRef.current = { ...d, previewSpan };
+        setDrag(draggingRef.current);
+      }
+    }
+    window.addEventListener('mousemove', handleMove);
+    return () => window.removeEventListener('mousemove', handleMove);
+  }, []);
+
   function startCreateDrag(dayIndex, rowIdx) {
     if (!editable) return;
     setDrag({ dayIndex, startRow: rowIdx, endRow: rowIdx, mode: 'create' });
   }
+  // Seeds an EMPTY removedIds set — the origin slot is only added once the
+  // mouse actually moves to a different row (see enterCell), so a plain
+  // click (mousedown+mouseup with no movement) removes nothing and is free
+  // to be treated as a click that opens the detail popover instead.
   function startRemoveDrag(dayIndex, rowIdx, slotId) {
     if (!editable) return;
-    setDrag({ dayIndex, startRow: rowIdx, endRow: rowIdx, mode: 'remove', removedIds: new Set([slotId]) });
+    setDrag({ dayIndex, startRow: rowIdx, endRow: rowIdx, mode: 'remove', removedIds: new Set(), originSlotId: slotId });
+  }
+  // originalSpan is the slot's CURRENT span (not always 1) — anchoring the
+  // drag to that instead of assuming a fresh 1-row start is what makes a
+  // plain click (zero mouse movement) a true no-op on an already-60-min slot.
+  function startResizeDrag(dayIndex, rowIdx, slot, span, clientY) {
+    if (!editable) return;
+    setDrag({
+      dayIndex, startRow: rowIdx, mode: 'resize', slotId: slot.id,
+      originalDuration: slot.duration_mins, originalSpan: span,
+      startClientY: clientY, previewSpan: span,
+    });
   }
   function enterCell(dayIndex, rowIdx, coveredHere, slotAtRow) {
     setDrag((d) => {
-      if (!d || d.dayIndex !== dayIndex) return d;
+      if (!d || d.dayIndex !== dayIndex || d.mode === 'resize') return d;
       const next = { ...d, endRow: rowIdx };
-      if (d.mode === 'remove' && slotAtRow && slotAtRow.status === 'open') {
-        next.removedIds = new Set(d.removedIds).add(slotAtRow.id);
+      if (d.mode === 'remove' && rowIdx !== d.startRow) {
+        next.removedIds = new Set(d.removedIds);
+        if (d.originSlotId) next.removedIds.add(d.originSlotId);
+        if (slotAtRow && slotAtRow.status === 'open') next.removedIds.add(slotAtRow.id);
       }
       return next;
     });
   }
 
+  const todayIdx = days.findIndex((d) => isSameDay(d, now));
+  const nowRowFloat = ((now.getHours() - startHour) * 60 + now.getMinutes()) / SLOT_MINUTES;
+  const showNowLine = todayIdx !== -1 && nowRowFloat >= 0 && nowRowFloat <= rows;
+  void nowTick; // re-renders this component every tick so the line above stays live
+
   return (
     <div className="overflow-x-auto select-none">
       <div
-        className="min-w-[760px] grid"
-        style={{ gridTemplateColumns: '64px repeat(7, 1fr)', gridTemplateRows: `auto repeat(${rows}, 22px)` }}
+        className="min-w-[860px] grid relative"
+        style={{ gridTemplateColumns: `64px repeat(${days.length}, 1fr)`, gridTemplateRows: `auto repeat(${rows}, ${ROW_PX}px)` }}
       >
+        {showNowLine && (
+          <div
+            style={{ gridRow: `2 / span ${rows}`, gridColumn: todayIdx + 2 }}
+            className="relative pointer-events-none z-20"
+          >
+            <div className="absolute left-0 right-0 border-t-2 border-rose-500" style={{ top: `${nowRowFloat * ROW_PX}px` }}>
+              <span className="absolute -left-1 -top-[5px] w-2 h-2 rounded-full bg-rose-500" />
+            </div>
+          </div>
+        )}
+        {drag?.mode === 'resize' && (
+          <div
+            style={{
+              gridRow: `${drag.startRow + 2} / span ${drag.previewSpan ?? drag.originalSpan}`,
+              gridColumn: drag.dayIndex + 2,
+            }}
+            className="m-[1.5px] rounded-md ring-2 ring-brand-500 bg-brand-500/10 pointer-events-none z-10"
+          />
+        )}
         <div style={{ gridRow: 1, gridColumn: 1 }} />
         {days.map((day, di) => {
           const { covered } = buildDayLayout(day, slots, startHour, rows);
@@ -493,7 +581,7 @@ function WeekGrid({
         })}
 
         {Array.from({ length: rows }).map((_, rowIdx) => (
-          <div key={`t-${rowIdx}`} style={{ gridRow: rowIdx + 2, gridColumn: 1 }} className="text-[10px] text-gray-400 text-right pr-2 -mt-2">
+          <div key={`t-${rowIdx}`} style={{ gridRow: rowIdx + 2, gridColumn: 1 }} className="text-xs text-gray-400 text-right pr-2 -mt-2.5">
             {rowIdx % 2 === 0
               ? format(new Date(2000, 0, 1, startHour + Math.floor(rowIdx / 2)), 'h a')
               : ''}
@@ -528,11 +616,16 @@ function WeekGrid({
                 ? AVAILABLE_COLOR
                 : isUnassigned ? UNASSIGNED_COLOR : (GRID_ROUND_COLORS[slot.round_type] ?? DEFAULT_GRID_COLOR);
               const inRemoveDrag = dragHere?.removedIds?.has(slot.id);
-              const showLabel = span >= 2;
-              // A booked slot is a no-op to click in every mode (real
-              // interviews aren't cancelled from this grid) — it should read
-              // as informational, not as an inviting, hoverable target.
-              const interactive = !isBooked;
+              const isResizingThis = dragHere?.mode === 'resize' && dragHere.slotId === slot.id;
+              // Boxes are now big enough (ROW_PX=40) to always carry a label;
+              // the time range only fits as a second line once the block is
+              // at least an hour tall.
+              const showTimeRange = span >= 2;
+              const slotEnd = new Date(new Date(slot.start_time).getTime() + slot.duration_mins * 60000);
+              // Every slot is clickable now (opens the detail popover) —
+              // booked ones just can't be dragged (real interviews aren't
+              // cancelled from this grid), so clicking them is read-only.
+              const showResizeHandle = editable && !isBooked && !isPast;
               return (
                 <button
                   key={`slot-${slot.id}`}
@@ -543,32 +636,52 @@ function WeekGrid({
                     startRemoveDrag(di, rowIdx, slot.id);
                   }}
                   onMouseEnter={() => enterCell(di, rowIdx, true, slot)}
-                  onClick={() => { if (!drag) onSlotClick(slot); }}
+                  onClick={(e) => { if (!drag) onSlotClick(slot, e.currentTarget); }}
                   style={{ gridRow: `${gridRow} / span ${span}`, gridColumn }}
-                  className={`relative border-t border-l border-surface-100 transition-colors flex flex-col items-start justify-center px-1 overflow-hidden ${
+                  className={`relative m-[1.5px] rounded-md transition-colors flex flex-col items-start justify-center px-2 py-1 overflow-hidden shadow-sm ${
                     isPast
-                      ? 'bg-surface-50 cursor-not-allowed'
-                      : interactive
-                      ? `${inRemoveDrag ? 'bg-rose-200 ring-1 ring-inset ring-rose-400' : `${color.bg} ${color.hover}`} cursor-pointer`
-                      : `${color.bg} cursor-default`
+                      ? 'bg-surface-50 cursor-not-allowed shadow-none'
+                      : `${
+                          inRemoveDrag
+                            ? 'bg-rose-200 ring-2 ring-inset ring-rose-400'
+                            : isResizingThis
+                            ? `${color.bg} ring-2 ring-inset ring-brand-500`
+                            : `${color.bg} ${color.hover}`
+                        } cursor-pointer`
                   }`}
                   title={
                     isBooked
-                      ? `Booked · ${slot.candidate_name ?? 'candidate'} (${ROUND_MAP[slot.round_type]?.label}, ${slot.duration_mins} min)`
+                      ? `Booked · ${slot.candidate_name ?? 'candidate'} (${ROUND_MAP[slot.round_type]?.label}, ${slot.duration_mins} min) — click for details`
                       : editable
-                      ? `Available · ${slot.duration_mins} min — drag to remove`
+                      ? `Available · ${slot.duration_mins} min — click for details, drag to remove`
                       : isUnassigned
                       ? `Not published yet · ${slot.duration_mins} min — click to publish for agencies`
                       : `Open · ${ROUND_MAP[slot.round_type]?.label} · ${slot.duration_mins} min`
                   }
                 >
-                  {showLabel && (
-                    <span className={`text-[10px] font-semibold leading-tight truncate w-full ${color.text}`}>
-                      {isBooked
-                        ? (slot.candidate_name ?? 'Booked')
-                        : editable
-                        ? 'Available'
-                        : isUnassigned ? 'Unpublished' : (ROUND_MAP[slot.round_type]?.label ?? slot.round_type)}
+                  <span className={`text-[11px] font-semibold leading-tight truncate w-full ${color.text}`}>
+                    {isBooked
+                      ? (slot.candidate_name ?? 'Booked')
+                      : editable
+                      ? 'Available'
+                      : isUnassigned ? 'Unpublished' : (ROUND_MAP[slot.round_type]?.label ?? slot.round_type)}
+                  </span>
+                  {showTimeRange && (
+                    <span className={`text-[10px] leading-tight truncate w-full opacity-75 ${color.text}`}>
+                      {format(new Date(slot.start_time), 'h:mm a')}–{format(slotEnd, 'h:mm a')}
+                    </span>
+                  )}
+                  {showResizeHandle && (
+                    <span
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        startResizeDrag(di, rowIdx, slot, span, e.clientY);
+                      }}
+                      title="Drag up/down to resize (30/60 min)"
+                      className="absolute left-1 right-1 bottom-0 h-2.5 cursor-ns-resize flex items-center justify-center group"
+                    >
+                      <span className="w-6 h-1 rounded-full bg-black/15 group-hover:bg-black/30" />
                     </span>
                   )}
                 </button>
@@ -595,6 +708,238 @@ function WeekGrid({
           });
         })}
       </div>
+    </div>
+  );
+}
+
+// ── Recurring availability (editable calendars only) ──────────────────────────
+//
+// "Repeat every weekday 2-5pm until X" instead of copying day-by-day — reuses
+// the same batch publish call the drag-to-paint and copy-day flows already
+// make (job/round left null, raw unassigned availability), just fed a
+// pattern-generated start_times list instead of a single drag's worth.
+
+const WEEKDAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+
+function RecurringAvailabilityModal({ onCancel, onSubmit, isPending }) {
+  const [weekdays, setWeekdays] = useState(() => new Set([1, 2, 3, 4, 5])); // Mon–Fri by default
+  const [startTime, setStartTime] = useState('09:00');
+  const [endTime, setEndTime] = useState('17:00');
+  const [until, setUntil] = useState(() => format(addDays(new Date(), 28), 'yyyy-MM-dd'));
+
+  function toggleDay(idx) {
+    setWeekdays((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx); else next.add(idx);
+      return next;
+    });
+  }
+
+  const valid = weekdays.size > 0 && startTime < endTime && !!until;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl w-full max-w-sm p-5">
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-base font-bold text-gray-900 flex items-center gap-1.5">
+            <Repeat className="w-4 h-4 text-brand-500" /> Repeat weekly
+          </h3>
+          <button onClick={onCancel} className="text-gray-400 hover:text-gray-600">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <p className="text-xs text-gray-500 mb-4">
+          Publishes hourly, unassigned availability on each selected day, every week, until the date below.
+        </p>
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Days</label>
+            <div className="flex gap-1">
+              {WEEKDAY_LABELS.map((label, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => toggleDay(idx)}
+                  className={`w-8 h-8 rounded-full text-xs font-semibold ${
+                    weekdays.has(idx) ? 'bg-brand-500 text-white' : 'bg-surface-100 text-gray-500'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="block text-xs font-medium text-gray-500 mb-1">From</label>
+              <input
+                type="time"
+                value={startTime}
+                onChange={(e) => setStartTime(e.target.value)}
+                className="w-full text-sm border border-surface-300 rounded-lg px-3 py-2"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs font-medium text-gray-500 mb-1">To</label>
+              <input
+                type="time"
+                value={endTime}
+                onChange={(e) => setEndTime(e.target.value)}
+                className="w-full text-sm border border-surface-300 rounded-lg px-3 py-2"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Repeat until</label>
+            <input
+              type="date"
+              value={until}
+              onChange={(e) => setUntil(e.target.value)}
+              className="w-full text-sm border border-surface-300 rounded-lg px-3 py-2"
+            />
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 mt-5">
+          <button onClick={onCancel} className="px-4 py-2 text-sm text-gray-600 hover:bg-surface-100 rounded-lg">
+            Cancel
+          </button>
+          <button
+            disabled={!valid || isPending}
+            onClick={() => onSubmit({ weekdays, startTime, endTime, until })}
+            className="px-4 py-2 text-sm font-medium bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-50"
+          >
+            {isPending ? 'Publishing…' : 'Publish pattern'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Slot detail popover (click-for-details, Teams-style) ───────────────────────
+
+function SlotDetailPopover({ slot, anchorRect, editable, onClose, onRemove, onResize, onReschedule, isBusy }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    function onDocMouseDown(e) {
+      if (ref.current && !ref.current.contains(e.target)) onClose();
+    }
+    function onKeyDown(e) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('mousedown', onDocMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [onClose]);
+
+  const isBooked = slot.status === 'booked';
+  const start = new Date(slot.start_time);
+  const end = new Date(start.getTime() + slot.duration_mins * 60000);
+
+  const [rescheduleDate, setRescheduleDate] = useState(() => format(start, 'yyyy-MM-dd'));
+  const [rescheduleTime, setRescheduleTime] = useState(() => format(start, 'HH:mm'));
+
+  function submitReschedule() {
+    const [h, m] = rescheduleTime.split(':').map(Number);
+    const next = new Date(`${rescheduleDate}T00:00:00`);
+    next.setHours(h, m, 0, 0);
+    onReschedule(next);
+  }
+
+  // Clamp so the popover (fixed ~256px wide) never renders off the right or
+  // bottom edge of the viewport — anchorRect is a raw DOM rect with no idea
+  // how big this card actually is.
+  const top = anchorRect ? Math.min(anchorRect.bottom + 6, window.innerHeight - 340) : 100;
+  const left = anchorRect ? Math.min(anchorRect.left, window.innerWidth - 280) : 100;
+
+  return (
+    <div ref={ref} style={{ top, left }} className="fixed z-50 w-64 bg-white rounded-xl border border-surface-200 shadow-lg p-4">
+      <div className="flex items-start justify-between mb-2">
+        <p className="text-sm font-semibold text-gray-900">
+          {format(start, 'EEE, MMM d')} · {format(start, 'h:mm a')}–{format(end, 'h:mm a')}
+        </p>
+        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 -mt-1 -mr-1">
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      {isBooked ? (
+        <div className="text-xs text-gray-500 space-y-1">
+          <p className="text-emerald-700 font-medium">Booked</p>
+          <p>{slot.candidate_name ?? 'Candidate'}</p>
+          {slot.job_title && (
+            <p>{slot.job_title} · {ROUND_MAP[slot.round_type]?.label ?? slot.round_type}</p>
+          )}
+        </div>
+      ) : (
+        <p className="text-xs text-gray-500 mb-1">
+          {slot.job_id
+            ? `${slot.job_title ?? 'Assigned'} · ${ROUND_MAP[slot.round_type]?.label ?? slot.round_type}`
+            : 'Not yet published for agencies'}
+        </p>
+      )}
+
+      {editable && !isBooked && (
+        <div className="mt-3 pt-3 border-t border-surface-100 space-y-3">
+          <div>
+            <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-1">Duration</p>
+            <div className="flex gap-1.5">
+              {[30, 60].map((mins) => (
+                <button
+                  key={mins}
+                  disabled={isBusy}
+                  onClick={() => onResize(mins)}
+                  className={`flex-1 text-xs font-medium py-1.5 rounded-lg border disabled:opacity-50 ${
+                    slot.duration_mins === mins
+                      ? 'bg-brand-500 text-white border-brand-500'
+                      : 'bg-white text-gray-600 border-surface-300 hover:bg-surface-50'
+                  }`}
+                >
+                  {mins} min
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-1">Reschedule</p>
+            <div className="flex gap-1.5">
+              <input
+                type="date"
+                value={rescheduleDate}
+                onChange={(e) => setRescheduleDate(e.target.value)}
+                className="flex-1 min-w-0 text-xs border border-surface-300 rounded-lg px-2 py-1.5"
+              />
+              <input
+                type="time"
+                value={rescheduleTime}
+                onChange={(e) => setRescheduleTime(e.target.value)}
+                className="w-24 text-xs border border-surface-300 rounded-lg px-2 py-1.5"
+              />
+            </div>
+            <button
+              disabled={isBusy}
+              onClick={submitReschedule}
+              className="mt-1.5 w-full text-xs font-medium text-brand-700 bg-brand-50 border border-brand-200 rounded-lg py-1.5 hover:bg-brand-100 disabled:opacity-50"
+            >
+              Move slot
+            </button>
+          </div>
+
+          <button
+            disabled={isBusy}
+            onClick={() => onRemove(slot.id)}
+            className="w-full flex items-center justify-center gap-1.5 text-xs font-medium text-rose-600 hover:bg-rose-50 rounded-lg py-1.5 disabled:opacity-50"
+          >
+            <Trash2 className="w-3.5 h-3.5" /> Remove slot
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -645,13 +990,28 @@ export default function AvailabilityPage() {
   const queryClient = useQueryClient();
   const isHR = HR_ROLES.includes(user?.role);
 
-  const [view, setView] = useState('week');
+  const [view, setView] = useState('week'); // 'week' | 'month' | 'day'
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  const [dayCursor, setDayCursor] = useState(() => new Date());
   const [monthCursor, setMonthCursor] = useState(() => new Date());
   const [selectedInterviewerId, setSelectedInterviewerId] = useState('');
   const [bookingSlot, setBookingSlot] = useState(null);
   const [assigningSlot, setAssigningSlot] = useState(null);
   const [showFullDay, setShowFullDay] = useState(false);
+  const [showRecurringModal, setShowRecurringModal] = useState(false);
+  // { slot, anchorRect } | null — the Teams-style click-for-details popover,
+  // anchored to the DOM rect of whichever slot button was clicked.
+  const [detailPopover, setDetailPopover] = useState(null);
+
+  // Ticks once a minute purely to force WeekGrid to re-render so its
+  // current-time indicator line keeps moving — the grid otherwise only
+  // re-renders on query refetches/state changes, which could leave the line
+  // visibly stuck for a while.
+  const [nowTick, setNowTick] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(new Date()), 60000);
+    return () => clearInterval(id);
+  }, []);
   // HR/Admin/Super Admin often conduct interviews themselves — the backend
   // already lets them call publish/mine/unpublish (see _HR_AND_INTERVIEWER in
   // interview_slots.py), this mode toggle is what actually exposes it in the UI
@@ -665,6 +1025,7 @@ export default function AvailabilityPage() {
   const startHour = showFullDay ? FULL_START_HOUR : WORK_START_HOUR;
   const endHour = showFullDay ? FULL_END_HOUR : WORK_END_HOUR;
   const rows = ((endHour - startHour) * 60) / SLOT_MINUTES;
+  const gridDays = view === 'day' ? [dayCursor] : Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 
   const { data: jobsData } = useQuery({
     queryKey: ['availability-publishable-jobs'],
@@ -740,24 +1101,24 @@ export default function AvailabilityPage() {
   // to 8am–8pm by default must never make real data disappear unnoticed.
   const hiddenOutsideWindow = useMemo(() => {
     if (showFullDay) return 0;
-    const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
     return (slots ?? []).filter((s) => {
       const st = new Date(s.start_time);
-      return weekDays.some((d) => isSameDay(d, st)) && (st.getHours() < WORK_START_HOUR || st.getHours() >= WORK_END_HOUR);
+      return gridDays.some((d) => isSameDay(d, st)) && (st.getHours() < WORK_START_HOUR || st.getHours() >= WORK_END_HOUR);
     }).length;
-  }, [slots, weekStart, showFullDay]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slots, weekStart, dayCursor, view, showFullDay]);
 
   // Surfaced to HR while browsing an interviewer's calendar — the "publish
   // for agencies" action only exists as a click target on individual slate
   // cells in the grid, which is easy to miss entirely if nothing points it
   // out first.
   const unassignedCountThisWeek = useMemo(() => {
-    const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
     return (slots ?? []).filter((s) => {
       const st = new Date(s.start_time);
-      return s.status === 'open' && !s.job_id && weekDays.some((d) => isSameDay(d, st));
+      return s.status === 'open' && !s.job_id && gridDays.some((d) => isSameDay(d, st));
     }).length;
-  }, [slots, weekStart]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slots, weekStart, dayCursor, view]);
 
   const invalidateSlots = () => {
     queryClient.invalidateQueries({ queryKey: ['interview-slots', manageOwnSlots ? 'mine' : viewingInterviewerId] });
@@ -997,8 +1358,62 @@ export default function AvailabilityPage() {
     }
   }
 
-  function handleSlotClick(slot) {
-    if (editable) return; // handled via drag-to-remove now
+  // Backs both the resize-drag handle and the popover's 30/60 toggle —
+  // capped to the same {30, 60} set the backend accepts (see
+  // SlotRescheduleRequest), which keeps a resized slot bookable by the
+  // agency self-book path.
+  const rescheduleMutation = useMutation({
+    mutationFn: ({ slotId, data }) => interviewSlotsApi.reschedule(slotId, data),
+  });
+
+  async function handleResizeSlot(slotId, durationMins) {
+    const queryKey = ['interview-slots', manageOwnSlots ? 'mine' : viewingInterviewerId];
+    const previous = queryClient.getQueryData(queryKey);
+    queryClient.setQueryData(queryKey, (old) =>
+      (old ?? []).map((s) => (s.id === slotId ? { ...s, duration_mins: durationMins } : s))
+    );
+    try {
+      await rescheduleMutation.mutateAsync({ slotId, data: { duration_mins: durationMins } });
+      invalidateSlots();
+    } catch (err) {
+      queryClient.setQueryData(queryKey, previous);
+      toast.error(err.response?.data?.detail ?? 'Could not resize this slot');
+    }
+  }
+
+  async function handleRescheduleSlot(slotId, startTime) {
+    try {
+      await rescheduleMutation.mutateAsync({ slotId, data: { start_time: startTime.toISOString() } });
+      invalidateSlots();
+      setDetailPopover(null);
+      toast.success('Slot rescheduled');
+    } catch (err) {
+      toast.error(err.response?.data?.detail ?? 'Could not reschedule this slot');
+    }
+  }
+
+  async function handleRemoveSlotFromPopover(slotId) {
+    try {
+      await unpublishMutation.mutateAsync(slotId);
+      invalidateSlots();
+      setDetailPopover(null);
+      toast.success('Slot removed');
+    } catch (err) {
+      toast.error(err.response?.data?.detail ?? 'Could not remove this slot');
+    }
+  }
+
+  function handleSlotClick(slot, anchorEl) {
+    const anchorRect = anchorEl?.getBoundingClientRect();
+    // Booked slots are read-only everywhere (real interviews aren't managed
+    // from this grid), but they're worth a click now — Teams-style, clicking
+    // any event should show its details rather than doing nothing.
+    if (slot.status === 'booked') { setDetailPopover({ slot, anchorRect }); return; }
+    // The editable calendar (an interviewer's own slots, or HR's "My
+    // availability" tab) always opens the detail popover on click now —
+    // single-slot removal moves from instant-click to the popover's Remove
+    // button; bulk removal by dragging across several cells is unchanged.
+    if (editable) { setDetailPopover({ slot, anchorRect }); return; }
     if (!isHR || slot.status !== 'open') return;
     // This tab is for booking an internal candidate directly — never
     // "publish for agencies" (that's the dedicated Publish tab's job).
@@ -1015,6 +1430,51 @@ export default function AvailabilityPage() {
   function handlePickJobRoundForBooking(slot, { job_id, round_type }) {
     setAssigningSlot(null);
     setBookingSlot({ ...slot, job_id, round_type, __unassigned: true });
+  }
+
+  // "Repeat weekly" — generates every matching start_time (selected weekdays,
+  // hourly steps from the pattern's start to end time) between today and the
+  // until-date, then republishes as raw unassigned availability through the
+  // same batch call handleCopyDay already makes.
+  async function handleRecurringSubmit({ weekdays, startTime, endTime, until }) {
+    const [startH, startM] = startTime.split(':').map(Number);
+    const [endH, endM] = endTime.split(':').map(Number);
+    const untilDate = new Date(`${until}T23:59:59`);
+    const now = new Date();
+
+    const startTimes = [];
+    for (let day = new Date(); day <= untilDate; day = addDays(day, 1)) {
+      if (!weekdays.has(day.getDay())) continue;
+      for (let h = startH, m = startM; h < endH || (h === endH && m < endM); ) {
+        const dt = new Date(day);
+        dt.setHours(h, m, 0, 0);
+        if (dt >= now) startTimes.push(dt);
+        m += PUBLISH_DURATION_MINS;
+        while (m >= 60) { m -= 60; h += 1; }
+      }
+    }
+
+    if (startTimes.length === 0) {
+      toast.error('Nothing to publish — that pattern has no upcoming times before the until-date');
+      return;
+    }
+
+    try {
+      const res = await publishBatchMutation.mutateAsync({
+        jobId: null, roundType: null, durationMins: PUBLISH_DURATION_MINS, startTimes,
+      });
+      invalidateSlots();
+      const created = res.data?.length ?? 0;
+      setShowRecurringModal(false);
+      if (created === 0) toast.error('Nothing published — every one of those times is already taken');
+      else if (created < startTimes.length) {
+        toast.success(`Published ${created} of ${startTimes.length} slots (the rest were already occupied)`);
+      } else {
+        toast.success(`Published ${created} slot${created !== 1 ? 's' : ''} as unassigned availability`);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.detail ?? 'Could not publish this pattern');
+    }
   }
 
   return (
@@ -1047,6 +1507,12 @@ export default function AvailabilityPage() {
         </div>
         {hrMode !== 'publish' && (
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setView('day')}
+              className={`px-3 py-1.5 text-sm rounded-lg font-medium ${view === 'day' ? 'bg-brand-500 text-white' : 'bg-white border border-surface-200 text-gray-600'}`}
+            >
+              Day
+            </button>
             <button
               onClick={() => setView('week')}
               className={`px-3 py-1.5 text-sm rounded-lg font-medium ${view === 'week' ? 'bg-brand-500 text-white' : 'bg-white border border-surface-200 text-gray-600'}`}
@@ -1115,10 +1581,16 @@ export default function AvailabilityPage() {
       {editable && (
         <div className="flex items-center gap-2.5 mb-4 bg-surface-50 border border-surface-200 rounded-xl p-3.5">
           <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${AVAILABLE_COLOR.dot}`} />
-          <span className="text-sm text-gray-600">
-            Click a cell to mark one hour free, or drag across several at once. Drag across an
-            available cell again to remove it — a <span className="font-medium text-emerald-700">booked</span> slot is locked in and can't be removed here.
+          <span className="text-sm text-gray-600 flex-1">
+            Click an empty cell to mark one hour free, or drag across several at once. Drag across free
+            time again to remove it, or drag a slot's bottom edge to resize it — click any slot for details.
           </span>
+          <button
+            onClick={() => setShowRecurringModal(true)}
+            className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-brand-700 bg-white border border-brand-200 rounded-lg hover:bg-brand-50"
+          >
+            <Repeat className="w-3.5 h-3.5" /> Repeat weekly…
+          </button>
         </div>
       )}
 
@@ -1143,16 +1615,34 @@ export default function AvailabilityPage() {
         <div className="bg-white rounded-xl border border-surface-200 p-4">
           {isLoading ? (
             <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>
-          ) : view === 'week' ? (
+          ) : view === 'week' || view === 'day' ? (
             <>
               <div className="flex items-center justify-between mb-3">
-                <button onClick={() => setWeekStart(subWeeks(weekStart, 1))} className="p-1.5 rounded-lg hover:bg-surface-100">
+                <button
+                  onClick={() => (view === 'day' ? setDayCursor(addDays(dayCursor, -1)) : setWeekStart(subWeeks(weekStart, 1)))}
+                  className="p-1.5 rounded-lg hover:bg-surface-100"
+                >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
-                <p className="text-sm font-semibold text-gray-800">
-                  {format(weekStart, 'MMM d')} – {format(addDays(weekStart, 6), 'MMM d, yyyy')}
-                </p>
-                <button onClick={() => setWeekStart(addWeeks(weekStart, 1))} className="p-1.5 rounded-lg hover:bg-surface-100">
+                <div className="flex items-center gap-2">
+                  {view === 'day' && (
+                    <button
+                      onClick={() => setDayCursor(new Date())}
+                      className="text-xs font-medium text-gray-400 hover:text-brand-600"
+                    >
+                      Today
+                    </button>
+                  )}
+                  <p className="text-sm font-semibold text-gray-800">
+                    {view === 'day'
+                      ? format(dayCursor, 'EEEE, MMM d, yyyy')
+                      : `${format(weekStart, 'MMM d')} – ${format(addDays(weekStart, 6), 'MMM d, yyyy')}`}
+                  </p>
+                </div>
+                <button
+                  onClick={() => (view === 'day' ? setDayCursor(addDays(dayCursor, 1)) : setWeekStart(addWeeks(weekStart, 1)))}
+                  className="p-1.5 rounded-lg hover:bg-surface-100"
+                >
                   <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
@@ -1160,7 +1650,7 @@ export default function AvailabilityPage() {
               {!editable && unassignedCountThisWeek > 0 && (
                 <div className="w-full mb-3 flex items-center gap-1.5 text-xs font-medium text-slate-700 bg-slate-100 border border-slate-200 rounded-lg py-2 px-3">
                   <span className={`w-2 h-2 rounded-full shrink-0 ${UNASSIGNED_COLOR.dot}`} />
-                  {unassignedCountThisWeek} slot{unassignedCountThisWeek !== 1 ? 's' : ''} not yet published for agencies this week —
+                  {unassignedCountThisWeek} slot{unassignedCountThisWeek !== 1 ? 's' : ''} not yet published for agencies —
                   click a slate-colored slot below to pick its job &amp; round.
                 </div>
               )}
@@ -1176,16 +1666,18 @@ export default function AvailabilityPage() {
               )}
 
               <WeekGrid
-                weekStart={weekStart}
+                days={gridDays}
                 slots={slots}
                 editable={editable}
                 startHour={startHour}
                 rows={rows}
+                nowTick={nowTick}
                 onPublishRange={handlePublishRange}
                 onSlotClick={handleSlotClick}
                 onRemoveRange={handleRemoveRange}
                 onCopyDay={handleCopyDay}
                 copyingDay={copyingDay}
+                onResizeSlot={handleResizeSlot}
               />
 
               <div className="flex flex-wrap items-center justify-between gap-2 mt-3">
@@ -1271,6 +1763,27 @@ export default function AvailabilityPage() {
           jobsData={jobsData}
           onCancel={() => setAssigningSlot(null)}
           onContinue={(data) => handlePickJobRoundForBooking(assigningSlot, data)}
+        />
+      )}
+
+      {showRecurringModal && (
+        <RecurringAvailabilityModal
+          isPending={publishBatchMutation.isPending}
+          onCancel={() => setShowRecurringModal(false)}
+          onSubmit={handleRecurringSubmit}
+        />
+      )}
+
+      {detailPopover && (
+        <SlotDetailPopover
+          slot={detailPopover.slot}
+          anchorRect={detailPopover.anchorRect}
+          editable={editable}
+          isBusy={unpublishMutation.isPending || rescheduleMutation.isPending}
+          onClose={() => setDetailPopover(null)}
+          onRemove={handleRemoveSlotFromPopover}
+          onResize={(mins) => handleResizeSlot(detailPopover.slot.id, mins)}
+          onReschedule={(date) => handleRescheduleSlot(detailPopover.slot.id, date)}
         />
       )}
     </div>

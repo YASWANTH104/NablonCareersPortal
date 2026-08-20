@@ -806,7 +806,7 @@ async def get_application_by_id(
 
     row = (await db.execute(
         select(
-            Application, User.full_name, User.email, User.avatar_url, User.date_of_birth,
+            Application, User.full_name, User.email, User.phone, User.avatar_url, User.date_of_birth,
             Agency.name.label("agency_name"), Referrer.full_name.label("referrer_name"),
         )
         .join(User, User.id == Application.applicant_id)
@@ -819,7 +819,7 @@ async def get_application_by_id(
     if not row:
         raise HTTPException(404, "Application not found")
 
-    app, full_name, email, avatar_url, date_of_birth, agency_name, referrer_name = row
+    app, full_name, email, phone, avatar_url, date_of_birth, agency_name, referrer_name = row
 
     # Same relaxed-gate reasoning as get_all_applications above — a caller
     # who isn't HR only reaches this function at all because the router now
@@ -854,6 +854,7 @@ async def get_application_by_id(
         "id": app.applicant_id,
         "full_name": full_name,
         "email": email,
+        "phone": phone,
         "avatar_url": avatar_url,
     }
     from app.services.storage_service import refresh_url
