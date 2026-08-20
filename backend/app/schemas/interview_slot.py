@@ -19,6 +19,15 @@ class SlotPublishRequest(BaseModel):
     start_times: list[datetime] = Field(min_length=1)
 
 
+class SlotRescheduleRequest(BaseModel):
+    """Editing a not-yet-booked slot's time and/or duration in place. Duration
+    is capped to the same {30, 60} set as SlotPublishRequest/AgencySlotBookRequest —
+    a resized slot must stay bookable by the agency self-book path, which only
+    ever queries for 30 or 60 min slots."""
+    start_time: Optional[datetime] = None
+    duration_mins: Optional[Literal[30, 60]] = None
+
+
 class SlotAssignBatchRequest(BaseModel):
     """HR picking a job+round once and applying it to several selected slots
     at the same time, instead of repeating the single-slot assign per slot."""
