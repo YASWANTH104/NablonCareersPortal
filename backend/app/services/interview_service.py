@@ -12,6 +12,7 @@ from app.schemas.interview import (
     CandidateSelfFeedbackCreate, CandidateSelfFeedbackResponse,
     CandidateInterviewSummary,
 )
+from app.utils.timezone import format_ist
 
 _HR_ROLES = ("hr_manager", "admin", "super_admin")
 
@@ -430,7 +431,7 @@ async def create_interview(
         app = await db.get(Application, data.application_id)
         if app:
             candidate = await db.get(User, app.applicant_id)
-            scheduled_str = data.scheduled_at.strftime("%A, %d %B %Y at %I:%M %p UTC") if data.scheduled_at else "TBD"
+            scheduled_str = format_ist(data.scheduled_at)
 
             if candidate:
                 db.add(Notification(
@@ -775,10 +776,7 @@ async def update_interview(
             app_obj = await db.get(Application, interview.application_id)
             if app_obj:
                 candidate = await db.get(User, app_obj.applicant_id)
-                scheduled_str = (
-                    interview.scheduled_at.strftime("%A, %d %B %Y at %I:%M %p UTC")
-                    if interview.scheduled_at else "TBD"
-                )
+                scheduled_str = format_ist(interview.scheduled_at)
 
                 if candidate:
                     db.add(Notification(
@@ -826,10 +824,7 @@ async def cancel_interview(db: AsyncSession, interview_id: uuid.UUID) -> None:
     if not interview:
         raise HTTPException(404, "Interview not found")
 
-    scheduled_str = (
-        interview.scheduled_at.strftime("%A, %d %B %Y at %I:%M %p UTC")
-        if interview.scheduled_at else "TBD"
-    )
+    scheduled_str = format_ist(interview.scheduled_at)
     interview.status = "cancelled"
     await db.commit()
 

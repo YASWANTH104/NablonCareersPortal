@@ -1,9 +1,10 @@
 import { useMemo } from 'react';
 import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek,
-  eachDayOfInterval, format, isSameMonth, isToday, isSameDay, parseISO,
+  eachDayOfInterval, format, isSameMonth, isToday, isSameDay,
 } from 'date-fns';
 import { groupByDayKey, dayKey, statusStyle } from './calendarUtils';
+import { toIST } from '@/utils/formatters';
 
 const WEEK_STARTS_ON = 1; // Monday — interviews cluster in the work week
 const MAX_CHIPS = 3;
@@ -15,12 +16,12 @@ function DayChip({ interview, onSelect }) {
   return (
     <button
       onClick={(e) => { e.stopPropagation(); onSelect(interview); }}
-      title={`${format(parseISO(interview.scheduled_at), 'h:mm a')} · ${interview.candidate_name ?? 'Interview'}`}
+      title={`${format(toIST(interview.scheduled_at), 'h:mm a')} IST · ${interview.candidate_name ?? 'Interview'}`}
       className={`group w-full flex items-center gap-1.5 pl-1.5 pr-2 py-1 rounded-md border text-left transition-colors ${style.chip}`}
     >
       <span className={`w-1 h-3.5 rounded-full flex-shrink-0 ${style.bar}`} />
       <span className="text-[11px] font-semibold tabular-nums flex-shrink-0">
-        {format(parseISO(interview.scheduled_at), 'h:mm')}
+        {format(toIST(interview.scheduled_at), 'h:mm')}
       </span>
       <span className="text-[11px] truncate">
         {interview.candidate_name ?? interview.title ?? `Round ${interview.round_number}`}

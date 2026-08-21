@@ -657,10 +657,8 @@ async def _send_assessment_scheduled_async(assessment_id: str):
         job = await db.get(Job, app.job_id)
 
         job_title = job.title if job else "the position"
-        deadline_str = (
-            assessment.deadline.strftime("%B %d, %Y at %I:%M %p")
-            if assessment.deadline else "TBD"
-        )
+        from app.utils.timezone import format_ist
+        deadline_str = format_ist(assessment.deadline)
         type_label = assessment.assessment_type.replace("_", " ").title()
 
         await send_email(
@@ -683,10 +681,8 @@ async def _send_assessment_scheduled_async(assessment_id: str):
 
 
 def _interview_scheduled_str(interview) -> str:
-    return (
-        interview.scheduled_at.strftime("%A, %d %B %Y at %I:%M %p UTC")
-        if interview.scheduled_at else "TBD"
-    )
+    from app.utils.timezone import format_ist
+    return format_ist(interview.scheduled_at)
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)

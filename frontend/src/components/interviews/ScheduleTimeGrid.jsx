@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { format, addMinutes, isSameDay } from 'date-fns';
 import { Loader2, Sparkles, Users } from 'lucide-react';
+import { toIST } from '@/utils/formatters';
 
 const ROW_H = 36;
 const HEADER_H = 20;
@@ -112,7 +113,7 @@ export default function ScheduleTimeGrid({
 
   const suggestions = useMemo(() => {
     const now = Date.now();
-    const notBefore = isSameDay(dayStart, new Date()) ? Math.max(windowStart, now) : windowStart;
+    const notBefore = isSameDay(toIST(dayStart), toIST(now)) ? Math.max(windowStart, now) : windowStart;
     return suggestSlots(freeWindows, durationMs, notBefore);
   }, [freeWindows, durationMs, dayStart, windowStart]);
 
@@ -149,7 +150,7 @@ export default function ScheduleTimeGrid({
     <div className="rounded-xl border border-surface-200 bg-white overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-surface-200 bg-surface-50">
         <p className="text-xs font-semibold text-gray-600 flex items-center gap-1.5">
-          Availability
+          Availability (IST)
           {loading && <Loader2 className="w-3 h-3 animate-spin text-gray-400" />}
         </p>
         <div className="flex items-center gap-3 text-[10px] text-gray-500">
@@ -188,7 +189,7 @@ export default function ScheduleTimeGrid({
                   style={{ left: `${pct(t)}%` }}
                   className="absolute top-0 -translate-x-1/2 text-[10px] text-gray-400 tabular-nums whitespace-nowrap"
                 >
-                  {format(new Date(t), 'h a')}
+                  {format(toIST(t), 'h a')}
                 </span>
               )
             ))}
@@ -228,7 +229,7 @@ export default function ScheduleTimeGrid({
                     return (
                       <div
                         key={i}
-                        title={`${BUSY_LABELS[b.status] ?? 'Busy'} · ${format(new Date(start), 'h:mm a')}–${format(new Date(end), 'h:mm a')}`}
+                        title={`${BUSY_LABELS[b.status] ?? 'Busy'} · ${format(toIST(start), 'h:mm a')}–${format(toIST(end), 'h:mm a')} IST`}
                         style={{ left: `${pct(start)}%`, width: `${Math.max(0.6, pct(end) - pct(start))}%` }}
                         className={`absolute inset-y-0 ${BUSY_STYLES[b.status] ?? BUSY_STYLES.busy}`}
                       />
@@ -279,9 +280,9 @@ export default function ScheduleTimeGrid({
                       : 'bg-white border-surface-300 text-gray-700 hover:border-brand-400 hover:text-brand-600'
                   }`}
                 >
-                  {format(new Date(ms), 'h:mm a')}
+                  {format(toIST(ms), 'h:mm a')}
                   <span className={active ? 'text-white/70' : 'text-gray-400'}>
-                    {' '}– {format(addMinutes(new Date(ms), durationMins || 60), 'h:mm a')}
+                    {' '}– {format(toIST(addMinutes(new Date(ms), durationMins || 60)), 'h:mm a')}
                   </span>
                 </button>
               );

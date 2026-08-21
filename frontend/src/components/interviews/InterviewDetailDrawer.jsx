@@ -59,7 +59,7 @@ export default function InterviewDetailDrawer({
               {format(start, 'EEEE, MMMM d')}
             </p>
             <p className="text-sm text-gray-600 mt-0.5 tabular-nums">
-              {format(start, 'h:mm a')} – {format(end, 'h:mm a')}
+              {format(start, 'h:mm a')} – {format(end, 'h:mm a')} IST
               <span className="text-gray-400"> · {interview.duration_mins} min</span>
             </p>
           </div>

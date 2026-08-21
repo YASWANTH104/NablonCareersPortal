@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  format, parseISO, isToday, isTomorrow, isThisWeek, isSameDay,
+  format, isToday, isTomorrow, isThisWeek, isSameDay,
   startOfMonth, endOfMonth, startOfWeek, endOfWeek, startOfDay,
   addMonths, addWeeks, addDays,
 } from 'date-fns';
@@ -15,6 +15,7 @@ import {
 import { interviewsApi } from '@/api/interviews';
 import { useAuthStore } from '@/store/authStore';
 import { HR_ROLES, ROLES } from '@/utils/permissions';
+import { toIST } from '@/utils/formatters';
 import MonthCalendar from '@/components/interviews/MonthCalendar';
 import WeekCalendar from '@/components/interviews/WeekCalendar';
 import InterviewCard from '@/components/interviews/InterviewCard';
@@ -59,7 +60,7 @@ function rangeFor(view, cursor) {
 }
 
 function dateGroupLabel(dateStr) {
-  const d = parseISO(dateStr);
+  const d = toIST(dateStr);
   if (isToday(d)) return 'Today';
   if (isTomorrow(d)) return 'Tomorrow';
   if (isThisWeek(d, { weekStartsOn: WEEK_STARTS_ON })) return format(d, 'EEEE');
@@ -69,7 +70,7 @@ function dateGroupLabel(dateStr) {
 function groupByDate(interviews) {
   const groups = {};
   interviews.forEach((interview) => {
-    const key = dayKey(parseISO(interview.scheduled_at));
+    const key = dayKey(toIST(interview.scheduled_at));
     if (!groups[key]) groups[key] = [];
     groups[key].push(interview);
   });
@@ -175,7 +176,7 @@ export default function InterviewsPage() {
   );
 
   const selectedDayInterviews = useMemo(
-    () => interviews.filter((iv) => isSameDay(parseISO(iv.scheduled_at), selectedDay)),
+    () => interviews.filter((iv) => isSameDay(toIST(iv.scheduled_at), selectedDay)),
     [interviews, selectedDay],
   );
 
@@ -415,7 +416,7 @@ export default function InterviewsPage() {
                 {dateGroupLabel(dayInterviews[0].scheduled_at)}
                 <span className="text-gray-300 font-normal">·</span>
                 <span className="text-gray-400 font-normal">
-                  {format(parseISO(dayInterviews[0].scheduled_at), 'MMMM d')}
+                  {format(toIST(dayInterviews[0].scheduled_at), 'MMMM d')}
                 </span>
               </h2>
               <div className="space-y-3">

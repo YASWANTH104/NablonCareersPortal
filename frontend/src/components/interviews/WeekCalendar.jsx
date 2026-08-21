@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { addDays, format, isToday, isSameDay, getHours, getMinutes } from 'date-fns';
 import { layoutOverlaps, minutesIntoDay, statusStyle, typeIcon } from './calendarUtils';
+import { toIST } from '@/utils/formatters';
 
 const HOUR_PX = 64;
 const DEFAULT_START_HOUR = 8;
@@ -56,10 +57,10 @@ function EventBlock({ item, startHour, isSelected, onSelect }) {
 
 export default function WeekCalendar({ weekStart, interviews, selectedInterviewId, onSelectInterview, fullDay }) {
   const scrollRef = useRef(null);
-  const [now, setNow] = useState(() => new Date());
+  const [now, setNow] = useState(() => toIST(new Date()));
 
   useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 60_000);
+    const id = setInterval(() => setNow(toIST(new Date())), 60_000);
     return () => clearInterval(id);
   }, []);
 
@@ -78,7 +79,7 @@ export default function WeekCalendar({ weekStart, interviews, selectedInterviewI
     let latest = DEFAULT_END_HOUR;
 
     days.forEach((day) => {
-      const dayEvents = interviews.filter((iv) => isSameDay(new Date(iv.scheduled_at), day));
+      const dayEvents = interviews.filter((iv) => isSameDay(toIST(iv.scheduled_at), day));
       const placed = layoutOverlaps(dayEvents);
       placed.forEach(({ start, end }) => {
         earliest = Math.min(earliest, getHours(start));
