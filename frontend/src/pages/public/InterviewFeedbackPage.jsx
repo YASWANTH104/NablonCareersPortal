@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { ClipboardCheck, Star, Loader2, CheckCircle, AlertTriangle, Paperclip, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { interviewsApi } from '@/api/interviews';
+import { toIST } from '@/utils/formatters';
 
 const RECOMMENDATIONS = [
   { value: 'strong_yes', label: 'Strong Yes', cls: 'bg-green-600 text-white border-green-600' },
@@ -192,7 +193,7 @@ export default function InterviewFeedbackPage() {
           </h1>
           <p className="text-sm text-gray-500 mt-1">
             Hi {data?.interviewer_name} — please share your assessment of this interview
-            {data?.scheduled_at ? ` held on ${format(new Date(data.scheduled_at), 'd MMM yyyy, h:mm a')}` : ''}.
+            {data?.scheduled_at ? ` held on ${format(toIST(data.scheduled_at), 'd MMM yyyy, h:mm a')} IST` : ''}.
             {data?.existing_feedback ? ' You have already submitted — submitting again updates your feedback.' : ''}
           </p>
         </div>

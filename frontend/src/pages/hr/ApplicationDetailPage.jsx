@@ -35,6 +35,10 @@ import { useHoldToggle } from '@/hooks/useHoldToggle';
 import { PIPELINE_STAGES, STAGE_MAP, VALID_TRANSITIONS, REASON_REQUIRED_STAGES, MOVE_JOB_ALLOWED_STAGES } from '@/constants/pipelineStages';
 import { useAuthStore } from '@/store/authStore';
 import { HR_ROLES } from '@/utils/permissions';
+import {
+  utcToISTInputValue, istInputValueToUTCISOString, toIST,
+  istDateKey, istTimeKey, fromISTDateTime,
+} from '@/utils/formatters';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -51,17 +55,12 @@ const DURATION_OPTIONS = [
 // Full 24-hour window — interviews are also scheduled against US-timezone
 // panelists/candidates, so the grid can't assume an India-hours-only workday.
 const WORKDAY_START = '00:00';
-const WORKDAY_END = '24:00';
 
 const QUICK_DAYS = [
   { label: 'Today', offset: 0 },
   { label: 'Tomorrow', offset: 1 },
   { label: 'In 2 days', offset: 2 },
 ];
-
-/** `yyyy-MM-dd` in the browser's timezone, for <input type="date">. */
-const localDateValue = (date) =>
-  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
 function StepHeading({ step, title, required }) {
   return (
@@ -211,7 +210,7 @@ function PublishedSlotPicker({ jobId, applicationId, bookedRoundNumbers, onClose
         <div key={s.id} className="flex items-center justify-between gap-3 bg-surface-50 rounded-lg px-4 py-3">
           <div>
             <p className="text-sm font-medium text-gray-900">
-              {format(new Date(s.start_time), 'EEE, MMM d · h:mm a')}
+              {format(toIST(s.start_time), 'EEE, MMM d · h:mm a')} IST
             </p>
             <p className="text-xs text-gray-500">
               {s.interviewer_name} · {ROUND_MAP[s.round_type]?.label ?? s.round_type} · {s.duration_mins} min
@@ -262,11 +261,11 @@ function ScheduleInterviewDialog({ applicationId, jobId, defaultRoundNumber = 1,
   // The day being browsed is held separately from the picked time so the
   // availability grid can load as soon as a date is chosen — HR shouldn't have
   // to guess a time before being shown which times are actually open.
-  const [browseDate, setBrowseDate] = useState(() => localDateValue(new Date()));
+  const [browseDate, setBrowseDate] = useState(() => istDateKey(new Date()));
   const [timeStr, setTimeStr] = useState('');
 
   const dayWindow = browseDate
-    ? { start: new Date(`${browseDate}T${WORKDAY_START}:00`), end: new Date(`${browseDate}T${WORKDAY_END}:00`) }
+    ? { start: fromISTDateTime(browseDate, WORKDAY_START), end: new Date(fromISTDateTime(browseDate, WORKDAY_START).getTime() + 24 * 3600_000) }
     : null;
 
   // scheduled_at stays the single field the schema and API care about; the date
@@ -326,7 +325,7 @@ function ScheduleInterviewDialog({ applicationId, jobId, defaultRoundNumber = 1,
       try {
         const res = await interviewsApi.checkAvailability({
           panelist_ids: panelists.map((p) => p.id),
-          scheduled_at: new Date(scheduledAtWatch).toISOString(),
+          scheduled_at: istInputValueToUTCISOString(scheduledAtWatch),
           duration_mins: Number(durationWatch) || 60,
         });
         setAvailability(Object.fromEntries(res.data.map((a) => [a.user_id, a])));
@@ -341,8 +340,8 @@ function ScheduleInterviewDialog({ applicationId, jobId, defaultRoundNumber = 1,
   }, [panelists, scheduledAtWatch, durationWatch]);
 
   const pickSlot = (date) => {
-    setBrowseDate(localDateValue(date));
-    setTimeStr(`${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`);
+    setBrowseDate(istDateKey(date));
+    setTimeStr(istTimeKey(date));
   };
 
   const createMutation = useMutation({
@@ -364,7 +363,7 @@ function ScheduleInterviewDialog({ applicationId, jobId, defaultRoundNumber = 1,
       application_id: applicationId,
       ...values,
       round_number: Number(values.round_number),
-      scheduled_at: new Date(values.scheduled_at).toISOString(),
+      scheduled_at: istInputValueToUTCISOString(values.scheduled_at),
       duration_mins: Number(values.duration_mins),
       meeting_link: (needsPhone || needsLocation || values.use_teams_meeting) ? undefined : (values.meeting_link || undefined),
       location: values.location || undefined,
@@ -393,7 +392,7 @@ function ScheduleInterviewDialog({ applicationId, jobId, defaultRoundNumber = 1,
       (!panelistSearch || u.full_name.toLowerCase().includes(panelistSearch.toLowerCase()))
   );
 
-  const selectedStart = scheduledAtWatch ? new Date(scheduledAtWatch) : null;
+  const selectedStart = scheduledAtWatch ? new Date(istInputValueToUTCISOString(scheduledAtWatch)) : null;
   const selectedEnd = selectedStart
     ? new Date(selectedStart.getTime() + (Number(durationWatch) || 60) * 60000)
     : null;
@@ -565,7 +564,7 @@ function ScheduleInterviewDialog({ applicationId, jobId, defaultRoundNumber = 1,
 
             <div className="flex flex-wrap items-end gap-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Date (IST)</label>
                 <input
                   type="date"
                   value={browseDate}
@@ -574,7 +573,7 @@ function ScheduleInterviewDialog({ applicationId, jobId, defaultRoundNumber = 1,
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Start time</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Start time (IST)</label>
                 <input
                   type="time"
                   value={timeStr}
@@ -599,9 +598,9 @@ function ScheduleInterviewDialog({ applicationId, jobId, defaultRoundNumber = 1,
                   <button
                     key={label}
                     type="button"
-                    onClick={() => setBrowseDate(localDateValue(addDays(new Date(), offset)))}
+                    onClick={() => setBrowseDate(istDateKey(addDays(new Date(), offset)))}
                     className={`px-2.5 py-2 rounded-lg text-xs font-medium border transition-colors ${
-                      browseDate === localDateValue(addDays(new Date(), offset))
+                      browseDate === istDateKey(addDays(new Date(), offset))
                         ? 'bg-brand-50 border-brand-300 text-brand-700'
                         : 'bg-white border-surface-300 text-gray-600 hover:border-brand-300'
                     }`}
@@ -628,9 +627,9 @@ function ScheduleInterviewDialog({ applicationId, jobId, defaultRoundNumber = 1,
             {selectedStart ? (
               <p className="flex items-center gap-2 text-sm text-gray-700 bg-brand-50 border border-brand-100 rounded-lg px-3 py-2">
                 <Calendar className="w-4 h-4 text-brand-500 flex-shrink-0" />
-                <span className="font-semibold">{format(selectedStart, 'EEEE, MMMM d')}</span>
+                <span className="font-semibold">{format(toIST(selectedStart), 'EEEE, MMMM d')}</span>
                 <span className="text-gray-500 tabular-nums">
-                  {format(selectedStart, 'h:mm a')} – {format(selectedEnd, 'h:mm a')}
+                  {format(toIST(selectedStart), 'h:mm a')} – {format(toIST(selectedEnd), 'h:mm a')} IST
                 </span>
               </p>
             ) : (
@@ -750,13 +749,12 @@ function ScheduleInterviewDialog({ applicationId, jobId, defaultRoundNumber = 1,
 
 // UPDATE_URLS: replace placeholder hrefs with your actual assessment platform links
 const ASSESSMENT_PRESETS = [
-  { label: 'AI Intern',       url: 'https://assessment.nablon.ai/ai-intern' },
-  { label: 'AI Engineer 1',   url: 'https://assessment.nablon.ai/ai-engineer-1' },
-  { label: 'AI Engineer 2',   url: 'https://assessment.nablon.ai/ai-engineer-2' },
-  { label: 'Data Engineer 1', url: 'https://assessment.nablon.ai/data-engineer-1' },
-  { label: 'Data Engineer 2', url: 'https://assessment.nablon.ai/data-engineer-2' },
-  { label: 'ML Engineer',     url: 'https://assessment.nablon.ai/ml-engineer' },
-  { label: 'Backend Engineer',url: 'https://assessment.nablon.ai/backend-engineer' },
+  { label: 'Intern - AI Engineer',   url: 'https://www.autoproctor.co/tests/WaUuT0uDxq/instructions/' },
+  { label: 'Associate AI Engineer',  url: 'https://www.autoproctor.co/tests/WaUuT0uDxq/instructions/' },
+  { label: 'AI Engineer 1',   url: 'https://www.autoproctor.co/tests/QjBnmy7SKh/instructions/' },
+  { label: 'AI Engineer 2',   url: 'https://www.autoproctor.co/tests/Nj7fLKVvdf/instructions/' },
+  { label: 'Computer Vision Architect',     url: 'https://www.autoproctor.co/tests/ZEkNoybx33/instructions/' },
+  { label: 'Impact Architect',url: 'https://www.autoproctor.co/tests/OCZ3ibsBdf/instructions/' },
   { label: 'Custom link',     url: '__custom__' },
 ];
 
@@ -943,9 +941,7 @@ const rescheduleSchema = z.object({
 }).superRefine(refineMeetingDetails);
 
 function RescheduleInterviewDialog({ interview, onClose, onSuccess }) {
-  const existingDate = interview.scheduled_at
-    ? new Date(interview.scheduled_at).toISOString().slice(0, 16)
-    : '';
+  const existingDate = utcToISTInputValue(interview.scheduled_at);
   const needsPhone = interview.interview_type === 'phone';
   const needsLocation = interview.interview_type === 'onsite';
 
@@ -967,7 +963,7 @@ function RescheduleInterviewDialog({ interview, onClose, onSuccess }) {
   const updateMutation = useMutation({
     mutationFn: (data) =>
       interviewsApi.update(interview.id, {
-        scheduled_at: new Date(data.scheduled_at).toISOString(),
+        scheduled_at: istInputValueToUTCISOString(data.scheduled_at),
         duration_mins: Number(data.duration_mins),
         meeting_link: data.meeting_link || undefined,
         location: data.location || undefined,
@@ -988,7 +984,7 @@ function RescheduleInterviewDialog({ interview, onClose, onSuccess }) {
         <form onSubmit={handleSubmit((v) => updateMutation.mutate(v))} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">New Date & Time *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">New Date & Time (IST) *</label>
               <input
                 {...register('scheduled_at')}
                 type="datetime-local"
@@ -2059,7 +2055,7 @@ export default function ApplicationDetailPage() {
                   <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-gray-600">
                     <div className="flex items-center gap-1.5">
                       <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                      {format(new Date(interview.scheduled_at), 'PPp')}
+                      {format(toIST(interview.scheduled_at), 'PPp')} IST
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Clock className="w-3.5 h-3.5 text-gray-400" />

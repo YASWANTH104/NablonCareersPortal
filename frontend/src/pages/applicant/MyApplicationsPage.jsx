@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { format, isPast } from 'date-fns';
+import { toIST } from '@/utils/formatters';
 import toast from 'react-hot-toast';
 import {
   Briefcase, ChevronRight, FileText, AlertTriangle, Pencil, X, Loader2,
@@ -796,7 +797,7 @@ function SelfFeedbackModal({ interview, onClose }) {
   };
 
   const interviewTitle = interview.title || `Round ${interview.round_number}`;
-  const interviewDate = format(new Date(interview.scheduled_at), 'dd MMM yyyy');
+  const interviewDate = format(toIST(interview.scheduled_at), 'dd MMM yyyy');
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 overflow-y-auto">
@@ -946,7 +947,7 @@ function InterviewsPanel({ applicationId }) {
                   {iv.title || `Round ${iv.round_number}`}
                   {iv.interview_type && <span className="ml-1.5 text-xs text-gray-400">({TYPE_LABELS[iv.interview_type] ?? iv.interview_type})</span>}
                 </p>
-                <p className="text-xs text-gray-400">{format(new Date(iv.scheduled_at), 'dd MMM yyyy, h:mm a')}</p>
+                <p className="text-xs text-gray-400">{format(toIST(iv.scheduled_at), 'dd MMM yyyy, h:mm a')} IST</p>
               </div>
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">

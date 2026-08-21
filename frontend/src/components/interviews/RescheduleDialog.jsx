@@ -5,6 +5,7 @@ import { z } from 'zod';
 import toast from 'react-hot-toast';
 import { RefreshCw, Loader2 } from 'lucide-react';
 import { interviewsApi } from '@/api/interviews';
+import { utcToISTInputValue, istInputValueToUTCISOString } from '@/utils/formatters';
 
 const DURATION_OPTIONS = [
   { value: 30, label: '30 min' },
@@ -42,9 +43,7 @@ const rescheduleSchema = z.object({
 });
 
 export default function RescheduleDialog({ interview, onClose, onSuccess }) {
-  const existingDate = interview.scheduled_at
-    ? new Date(interview.scheduled_at).toISOString().slice(0, 16)
-    : '';
+  const existingDate = utcToISTInputValue(interview.scheduled_at);
   const needsPhone = interview.interview_type === 'phone';
   const needsLocation = interview.interview_type === 'onsite';
 
@@ -62,7 +61,7 @@ export default function RescheduleDialog({ interview, onClose, onSuccess }) {
   const updateMut = useMutation({
     mutationFn: (data) =>
       interviewsApi.update(interview.id, {
-        scheduled_at: new Date(data.scheduled_at).toISOString(),
+        scheduled_at: istInputValueToUTCISOString(data.scheduled_at),
         duration_mins: Number(data.duration_mins),
         meeting_link: data.meeting_link || undefined,
         location: data.location || undefined,
@@ -89,7 +88,7 @@ export default function RescheduleDialog({ interview, onClose, onSuccess }) {
         <form onSubmit={handleSubmit((v) => updateMut.mutate(v))} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">New Date & Time *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">New Date & Time (IST) *</label>
               <input
                 {...register('scheduled_at')}
                 type="datetime-local"

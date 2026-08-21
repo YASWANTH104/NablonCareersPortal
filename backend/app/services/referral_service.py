@@ -100,7 +100,6 @@ def _to_dict(row) -> dict:
 
 async def create_referral(db: AsyncSession, data: ReferralCreate, referrer_id: uuid.UUID) -> dict:
     from datetime import datetime, timezone, timedelta
-    from app.models.application import Application
 
     job = await db.get(Job, data.job_id)
     if not job:
@@ -109,20 +108,14 @@ async def create_referral(db: AsyncSession, data: ReferralCreate, referrer_id: u
         raise HTTPException(403, "This job is not open to referrals")
 
     # Block referral if candidate was rejected within the last 6 months
+    from app.services.duplicate_detection_service import check_cooloff
+
     candidate_user = (await db.execute(
         select(User).where(User.email == data.candidate_email)
     )).scalar_one_or_none()
 
     if candidate_user:
-        cooloff_start = datetime.now(timezone.utc) - timedelta(days=183)
-        recent_rejection = (await db.execute(
-            select(Application).where(
-                Application.applicant_id == candidate_user.id,
-                Application.stage == "rejected",
-                Application.stage_updated_at >= cooloff_start,
-            )
-        )).scalar_one_or_none()
-
+        recent_rejection = await check_cooloff(db, candidate_user.id)
         if recent_rejection:
             eligible_date = (recent_rejection.stage_updated_at + timedelta(days=183)).strftime("%d %B %Y")
             raise HTTPException(

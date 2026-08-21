@@ -1,5 +1,6 @@
-import { parseISO, addMinutes, differenceInMinutes, startOfDay } from 'date-fns';
+import { addMinutes, differenceInMinutes, startOfDay } from 'date-fns';
 import { Video, Phone, MapPin, Users, Calendar } from 'lucide-react';
+import { toIST } from '@/utils/formatters';
 
 /* Visual language shared by every interview surface — month chips, week blocks,
    agenda cards and the detail drawer all read status from here so a "cancelled"
@@ -63,9 +64,11 @@ export const typeIcon = (type) => TYPE_ICONS[type] ?? Calendar;
 export const ACTIVE_STATUSES = ['scheduled', 'rescheduled'];
 export const isActive = (interview) => ACTIVE_STATUSES.includes(interview.status);
 
-/** Start/end instants for an interview, defaulting to a 60-minute block. */
+/** Start/end, in IST wall-clock terms, for an interview — defaulting to a
+    60-minute block. `toIST` keeps this correct regardless of the viewer's
+    own machine timezone (see formatters.js). */
 export function interviewRange(interview) {
-  const start = parseISO(interview.scheduled_at);
+  const start = toIST(interview.scheduled_at);
   return { start, end: addMinutes(start, interview.duration_mins || 60) };
 }
 
@@ -119,11 +122,11 @@ export function layoutOverlaps(events) {
   return placed;
 }
 
-/** Bucket interviews by local calendar day (`yyyy-MM-dd`) for grid lookup. */
+/** Bucket interviews by IST calendar day (`yyyy-MM-dd`) for grid lookup. */
 export function groupByDayKey(interviews) {
   const map = new Map();
   interviews.forEach((interview) => {
-    const key = dayKey(parseISO(interview.scheduled_at));
+    const key = dayKey(toIST(interview.scheduled_at));
     if (!map.has(key)) map.set(key, []);
     map.get(key).push(interview);
   });
@@ -131,8 +134,10 @@ export function groupByDayKey(interviews) {
   return map;
 }
 
-/** Local-time day key. Avoids toISOString(), which would shift days for
-    anyone east or west of UTC and drop interviews into the wrong cell. */
+/** Day key from a date's local getters. Pass a `toIST()`-shifted date so this
+    reads as the IST calendar day regardless of the viewer's own timezone —
+    plain toISOString() would shift days for anyone east or west of UTC and
+    drop interviews into the wrong cell. */
 export function dayKey(date) {
   const month = `${date.getMonth() + 1}`.padStart(2, '0');
   const day = `${date.getDate()}`.padStart(2, '0');
