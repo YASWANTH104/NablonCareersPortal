@@ -1823,7 +1823,7 @@ export default function ApplicationDetailPage() {
         {TABS.map((tab) => (
           <button
             key={tab.key}
-            onClick={() => { setActiveTab(tab.key); setSearchParams({ tab: tab.key }, { replace: true }); }}
+            onClick={() => { setActiveTab(tab.key); setSearchParams({ tab: tab.key }, { replace: true, state: location.state }); }}
             className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors -mb-px ${
               activeTab === tab.key
                 ? 'border-brand-500 text-brand-600'
