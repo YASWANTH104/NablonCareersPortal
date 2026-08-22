@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { AlertTriangle, Loader2 } from 'lucide-react';
 
 export default function ConfirmDialog({
@@ -10,14 +11,33 @@ export default function ConfirmDialog({
   onConfirm,
   onCancel,
 }) {
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e) => { if (e.key === 'Escape' && !isPending) onCancel?.(); };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onCancel, isPending]);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl w-full max-w-sm p-5 sm:p-6">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50 backdrop-blur-sm p-4 animate-in fade-in duration-150"
+      onMouseDown={(e) => { if (e.target === e.currentTarget && !isPending) onCancel?.(); }}
+    >
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-label={title}
+        className="bg-white rounded-2xl shadow-modal w-full max-w-sm p-5 sm:p-6 animate-in zoom-in-95 duration-200"
+      >
         <div className="flex items-start gap-3 mb-4">
           <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
             danger ? 'bg-red-50' : 'bg-amber-50'
           }`}>
-            <AlertTriangle className={`w-4.5 h-4.5 ${danger ? 'text-red-500' : 'text-amber-500'}`} />
+            <AlertTriangle className={`w-4 h-4 ${danger ? 'text-red-500' : 'text-amber-500'}`} />
           </div>
           <div className="min-w-0">
             <h3 className="text-base font-bold text-gray-900">{title}</h3>

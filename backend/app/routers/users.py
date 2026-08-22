@@ -2,7 +2,7 @@ import uuid
 from typing import Optional
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_, or_, func
 
 from app.database import get_db
 from app.dependencies import get_current_user, require_roles, Role
@@ -95,7 +95,12 @@ async def list_users(
             filters.append(User.role == role)
 
     if search:
-        filters.append(User.full_name.ilike(f"%{search}%"))
+        # Email as well as name — the Settings team list previously filtered
+        # client-side across both, and searching server-side by name alone
+        # would have quietly dropped the ability to find someone by address.
+        filters.append(
+            or_(User.full_name.ilike(f"%{search}%"), User.email.ilike(f"%{search}%"))
+        )
 
     stmt = select(User).order_by(User.full_name)
     if filters:

@@ -3,13 +3,21 @@ import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 import { titleCase } from '@/utils/formatters';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function getPageTitle(pathname) {
-  const segment = pathname.split('/').filter(Boolean).pop() ?? '';
+  const parts = pathname.split('/').filter(Boolean);
+  // Detail routes end in an id (/hr/agencies/<uuid>, /hr/applicants/<uuid>) —
+  // title-casing that renders the raw id in the topbar, so fall back to the
+  // collection it belongs to.
+  const segment = (UUID_RE.test(parts.at(-1) ?? '') ? parts.at(-2) : parts.at(-1)) ?? '';
   const map = {
     dashboard: 'Dashboard',
     jobs: 'Jobs',
     applicants: 'Applicants',
     interviews: 'Interviews',
+    availability: 'Interviewer Availability',
+    agencies: 'Agencies',
     referrals: 'Referrals',
     offers: 'Offers',
     reports: 'Reports',

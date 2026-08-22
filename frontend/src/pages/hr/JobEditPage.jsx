@@ -11,6 +11,7 @@ import { usersApi } from '@/api/users';
 import RichTextEditor from '@/components/shared/RichTextEditor';
 import DraftWithAiModal from '@/components/shared/DraftWithAiModal';
 import ImportJdPdfModal from '@/components/shared/ImportJdPdfModal';
+import { LOCATION_TYPES, EMPLOYMENT_TYPES } from '@/constants/jobOptions';
 
 const toOptionalInt = (v) => (v === '' || v === null || v === undefined ? undefined : parseInt(v, 10));
 const toOptionalNum = (v) => (v === '' || v === null || v === undefined ? undefined : parseFloat(v));
@@ -47,14 +48,6 @@ const CRITICALITY_LEVELS = [
   { value: 'low', label: 'Low' },
 ];
 
-const LOCATION_TYPES = ['remote', 'onsite', 'hybrid'];
-const EMPLOYMENT_TYPES = [
-  { value: 'full_time', label: 'Full-time' },
-  { value: 'part_time', label: 'Part-time' },
-  { value: 'contract', label: 'Contract' },
-  { value: 'internship', label: 'Internship' },
-  { value: 'freelance', label: 'Freelance' },
-];
 
 function FieldLabel({ children, required }) {
   return (
@@ -373,8 +366,8 @@ export default function JobEditPage() {
               <FieldLabel>Work mode</FieldLabel>
               <Select {...register('location_type')}>
                 <option value="">Select...</option>
-                {LOCATION_TYPES.map((v) => (
-                  <option key={v} value={v} className="capitalize">{v.charAt(0).toUpperCase() + v.slice(1)}</option>
+                {LOCATION_TYPES.map(({ value, label }) => (
+                  <option key={value} value={value}>{label}</option>
                 ))}
               </Select>
             </div>

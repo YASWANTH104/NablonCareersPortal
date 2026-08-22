@@ -1,14 +1,11 @@
 import { MapPin, Briefcase, Clock, Building2, Users, ChevronRight } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { TiltCard } from '@/components/shared/effects';
+import { formatEmploymentType } from '@/constants/jobOptions';
 
-function formatEmploymentType(val) {
-  return val?.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) ?? '';
-}
-
-// Same visual card used on the public job board and inside the logged-in
-// portal's Browse Jobs pages — `onClick` decides what "open" means (navigate
-// to the public detail page, or open an in-portal detail modal).
+// The public marketing board's job card: one big click target with a 3D tilt.
+// The logged-in portal uses PortalJobCard instead — it needs a status badge and
+// two or three distinct footer actions, which don't fit inside a single button.
 export default function JobCard({ job, onClick, ctaLabel = 'View details' }) {
   return (
     <TiltCard maxTilt={7} className="h-full">

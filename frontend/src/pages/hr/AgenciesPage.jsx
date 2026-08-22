@@ -1,473 +1,298 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import {
-  Building2, Plus, Copy, ChevronDown, ChevronRight, Trash2, Users,
-  X, Mail, TrendingUp, Link2, Power, Pencil, Check, Loader2,
+  Building2, Plus, Search, X, Power, Loader2, AlertCircle, Award,
+  Send, ArrowUpDown, ArrowRight, Crown, Copy, Check, Briefcase, Mail,
 } from 'lucide-react';
-import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import { agenciesApi } from '@/api/agencies';
-import { jobsApi } from '@/api/jobs';
 import { reportsApi } from '@/api/reports';
-import ConfirmDialog from '@/components/shared/ConfirmDialog';
+import { useDebounced } from '@/hooks/useDebounced';
+import { agencyAccent, agencyInitials } from '@/constants/agencyAccents';
+import PipelineFunnel from '@/components/shared/PipelineFunnel';
+import { Modal, EmptyState, Segmented } from '@/components/ui';
+import { cn } from '@/lib/utils';
 
 const inputCls =
-  'w-full text-sm border border-surface-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500';
+  'w-full text-sm border border-surface-300 rounded-lg px-3 py-2.5 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-400';
 
-function StatTile({ label, value, tone = 'neutral' }) {
-  const tones = {
-    neutral: 'bg-surface-50 text-gray-900',
-    brand: 'bg-brand-50 text-brand-700',
-    green: 'bg-green-50 text-green-700',
-  };
+const agencySchema = z.object({
+  name: z.string().trim().min(2, 'Give the agency a name'),
+  contact_name: z.string().optional(),
+  contact_email: z.string().trim().email('A valid contact email is required'),
+});
+
+function Field({ label, required, error, hint, children }) {
   return (
-    <div className={`rounded-xl p-4 text-center ${tones[tone]}`}>
-      <p className="text-2xl font-bold">{value}</p>
-      <p className="text-xs mt-1 opacity-70">{label}</p>
+    <label className="block">
+      <span className="flex items-baseline justify-between gap-2 mb-1.5">
+        <span className="text-xs font-semibold text-gray-700">
+          {label}
+          {required && <span className="text-rose-500"> *</span>}
+        </span>
+        {hint && <span className="text-[11px] text-gray-400">{hint}</span>}
+      </span>
+      {children}
+      {error && (
+        <span className="flex items-center gap-1 text-[11px] text-rose-600 mt-1">
+          <AlertCircle className="w-3 h-3 shrink-0" /> {error}
+        </span>
+      )}
+    </label>
+  );
+}
+
+function KpiTile({ icon: Icon, label, value, accent }) {
+  return (
+    <div className="flex items-center gap-3.5 bg-white rounded-2xl border border-surface-200 p-4 transition-shadow hover:shadow-card">
+      <span className={cn('w-11 h-11 shrink-0 rounded-xl flex items-center justify-center', accent)}>
+        <Icon className="w-5 h-5" />
+      </span>
+      <div className="min-w-0">
+        <p className="font-display text-2xl font-bold text-gray-900 leading-none tabular-nums">{value}</p>
+        <p className="text-[11px] text-gray-500 mt-1.5 truncate">{label}</p>
+      </div>
     </div>
   );
 }
 
-function CopyButton({ text, label, iconOnly = false }) {
+function Metric({ label, value, tone }) {
+  return (
+    <div className="min-w-0">
+      <p className={cn('font-display text-xl font-bold leading-none tabular-nums', tone ?? 'text-gray-900')}>{value}</p>
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mt-1.5 truncate">{label}</p>
+    </div>
+  );
+}
+
+// Copy sits on the card so the portal link — the whole reason this page exists —
+// is one click from the list, without navigating anywhere.
+function PortalCopyButton({ url }) {
   const [copied, setCopied] = useState(false);
-  const copy = (e) => {
+
+  async function copy(e) {
     e.stopPropagation();
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+    e.preventDefault();
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error('Could not copy — open the partner and copy the link from there.');
+    }
+  }
+
   return (
     <button
+      type="button"
       onClick={copy}
-      title={label}
-      className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-brand-600 font-medium transition-colors"
+      className={cn(
+        'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border transition-colors',
+        copied
+          ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+          : 'border-surface-200 bg-white text-gray-500 hover:text-brand-600 hover:border-brand-300'
+      )}
     >
-      <Copy className="w-3.5 h-3.5" />
-      {!iconOnly && (copied ? 'Copied!' : label)}
+      {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+      {copied ? 'Link copied' : 'Portal link'}
     </button>
   );
 }
 
-function PerformanceStats({ perf }) {
-  if (!perf || perf.total_submitted === 0) {
-    return <p className="text-xs text-gray-400">No candidates submitted in the last 12 months</p>;
-  }
-  const items = [
-    { label: 'Submitted', value: perf.total_submitted, cls: 'text-gray-900' },
-    { label: 'In progress', value: perf.in_progress, cls: 'text-amber-600' },
-    { label: 'Hired', value: perf.hired, cls: 'text-green-600' },
-    { label: 'Rejected', value: perf.rejected, cls: 'text-red-400' },
-  ];
-  return (
-    <div className="flex items-center gap-5 flex-wrap">
-      {items.map((it, i) => (
-        <div key={it.label} className={`flex items-baseline gap-1.5 ${i > 0 ? 'pl-5 border-l border-surface-200' : ''}`}>
-          <span className={`text-sm font-bold ${it.cls}`}>{it.value}</span>
-          <span className="text-xs text-gray-400">{it.label}</span>
-        </div>
-      ))}
-      <div className="flex items-center gap-1 pl-5 border-l border-surface-200">
-        <TrendingUp className="w-3.5 h-3.5 text-brand-500" />
-        <span className="text-sm font-bold text-brand-600">{perf.conversion_rate}%</span>
-        <span className="text-xs text-gray-400">conversion</span>
-      </div>
-    </div>
-  );
-}
-
-function AssignmentCard({ assignment, onRemove, removing, onUpdateMaxSubs, updating }) {
-  const jobLink = `${window.location.origin}/jobs/${assignment.job_id}?ref=${assignment.ref_token}`;
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState('');
-
-  const startEditing = () => {
-    setDraft(assignment.max_submissions ? String(assignment.max_submissions) : '');
-    setEditing(true);
+function AgencyCard({ agency, perf, onOpen, index, isTopPartner }) {
+  const accent = agencyAccent(agency.name, agency.is_active);
+  const submitted = perf?.total_submitted ?? 0;
+  const counts = {
+    inProgress: perf?.in_progress ?? 0,
+    hired: perf?.hired ?? 0,
+    rejected: perf?.rejected ?? 0,
   };
-
-  const save = () => {
-    const value = draft.trim() ? parseInt(draft, 10) : null;
-    onUpdateMaxSubs(assignment.id, value);
-    setEditing(false);
-  };
-
-  return (
-    <div className="bg-white border border-surface-200 rounded-lg px-4 py-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-gray-800 truncate">{assignment.job_title}</p>
-          <div className="flex items-center gap-2 mt-1.5">
-            {editing ? (
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="number"
-                  min="1"
-                  autoFocus
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }}
-                  placeholder="Unlimited"
-                  className="w-24 text-xs border border-surface-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                />
-                <button onClick={save} disabled={updating} className="text-green-600 hover:text-green-700 disabled:opacity-40" title="Save">
-                  {updating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-                </button>
-                <button onClick={() => setEditing(false)} className="text-gray-400 hover:text-gray-600" title="Cancel">
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ) : (
-              <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-surface-100 text-gray-500 group">
-                {assignment.max_submissions ? `Max ${assignment.max_submissions}` : 'Unlimited'}
-                <button onClick={startEditing} className="text-gray-400 hover:text-brand-600" title="Edit max submissions">
-                  <Pencil className="w-3 h-3" />
-                </button>
-              </span>
-            )}
-            {assignment.expires_at && (
-              <span className="text-xs px-2 py-0.5 rounded-full bg-surface-100 text-gray-500">
-                Expires {format(new Date(assignment.expires_at), 'MMM d, yyyy')}
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-4 flex-shrink-0">
-          <CopyButton text={jobLink} label="Copy link" />
-          <button
-            onClick={() => onRemove(assignment)}
-            disabled={removing}
-            className="text-gray-300 hover:text-red-400 transition-colors disabled:opacity-40"
-            title="Remove assignment"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AgencyCard({ agency, perf, jobs }) {
-  const [expanded, setExpanded] = useState(false);
-  const [showAssign, setShowAssign] = useState(false);
-  const [selectedJob, setSelectedJob] = useState('');
-  const [maxSubs, setMaxSubs] = useState('');
-  const [expiresAt, setExpiresAt] = useState('');
-  const [pendingRemove, setPendingRemove] = useState(null); // assignment awaiting removal confirmation
-  const [pendingDeactivate, setPendingDeactivate] = useState(false);
-  const queryClient = useQueryClient();
-
-  const { data: assignments, refetch: refetchAssignments } = useQuery({
-    queryKey: ['agency-assignments', agency.id],
-    queryFn: () => agenciesApi.listAgencyAssignments(agency.id).then((r) => r.data),
-    enabled: expanded,
-  });
-
-  const assignMutation = useMutation({
-    mutationFn: (data) => agenciesApi.assignToJob(selectedJob, data),
-    onSuccess: () => {
-      toast.success('Agency assigned to job');
-      setShowAssign(false);
-      setSelectedJob('');
-      setMaxSubs('');
-      setExpiresAt('');
-      refetchAssignments();
-    },
-    onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to assign'),
-  });
-
-  const removeMutation = useMutation({
-    mutationFn: (assignmentId) => agenciesApi.removeAssignment(assignmentId),
-    onSuccess: () => {
-      toast.success('Assignment removed');
-      setPendingRemove(null);
-      refetchAssignments();
-    },
-    onError: () => toast.error('Failed to remove assignment'),
-  });
-
-  const updateMaxSubsMutation = useMutation({
-    mutationFn: ({ assignmentId, maxSubmissions }) => agenciesApi.updateAssignment(assignmentId, maxSubmissions),
-    onSuccess: () => {
-      toast.success('Max submissions updated');
-      refetchAssignments();
-    },
-    onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to update max submissions'),
-  });
-
-  const deactivateMutation = useMutation({
-    mutationFn: () => agenciesApi.update(agency.id, { is_active: !agency.is_active }),
-    onSuccess: () => {
-      toast.success(agency.is_active ? 'Agency deactivated' : 'Agency activated');
-      setPendingDeactivate(false);
-      queryClient.invalidateQueries({ queryKey: ['agencies'] });
-    },
-    onError: () => toast.error('Failed to update agency'),
-  });
-
   const portalUrl = `${window.location.origin}/agency/${agency.portal_token}`;
-  const assignedJobIds = new Set((assignments ?? []).map((a) => a.job_id));
-  const availableJobs = (jobs ?? []).filter((j) => !assignedJobIds.has(j.id) && j.status === 'published');
-
-  const handleAssign = () => {
-    if (!selectedJob) { toast.error('Select a job'); return; }
-    assignMutation.mutate({
-      agency_id: agency.id,
-      max_submissions: maxSubs ? parseInt(maxSubs) : undefined,
-      expires_at: expiresAt || undefined,
-    });
-  };
 
   return (
-    <div className="bg-white border border-surface-200 rounded-xl overflow-hidden hover:border-surface-300 transition-colors">
-      <div
-        className="flex flex-wrap items-start gap-3 sm:gap-4 px-4 sm:px-5 py-4 cursor-pointer"
-        onClick={() => setExpanded((e) => !e)}
-      >
-        <div
-          className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
-            agency.is_active ? 'bg-brand-100' : 'bg-surface-100'
-          }`}
-        >
-          <Building2 className={`w-5 h-5 ${agency.is_active ? 'text-brand-600' : 'text-gray-400'}`} />
-        </div>
+    <article
+      style={{ animationDelay: `${Math.min(index, 9) * 40}ms` }}
+      className={cn(
+        'group relative flex flex-col bg-white rounded-2xl border overflow-hidden transition-all duration-200',
+        'animate-in fade-in slide-in-from-bottom-2 duration-500 fill-mode-both',
+        agency.is_active
+          ? 'border-surface-200 hover:border-brand-200 hover:shadow-card-hover hover:-translate-y-0.5'
+          : 'border-surface-200 bg-surface-50/50'
+      )}
+    >
+      {/* Accent rail — grows on hover, gives each partner its own identity */}
+      <span
+        className={cn(
+          'absolute inset-x-0 top-0 h-1 bg-gradient-to-r transition-all duration-300 group-hover:h-1.5',
+          accent.bar
+        )}
+      />
 
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <p className="font-semibold text-gray-900 text-sm">{agency.name}</p>
-            {!agency.is_active && (
-              <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">Inactive</span>
+      <button onClick={onOpen} className="flex-1 text-left p-5 pt-6 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-inset">
+        <div className="flex items-start gap-3.5">
+          <span
+            className={cn(
+              'w-12 h-12 shrink-0 rounded-2xl flex items-center justify-center font-display text-sm font-bold',
+              accent.tile
             )}
-          </div>
-          <div className="flex items-center gap-1.5 text-xs text-gray-400 mt-0.5">
-            <Mail className="w-3 h-3" />
-            {agency.contact_name ? `${agency.contact_name} · ${agency.contact_email}` : agency.contact_email}
-          </div>
-
-          <div className="mt-3">
-            <PerformanceStats perf={perf} />
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3 flex-shrink-0 pt-1 w-full sm:w-auto flex-wrap" onClick={(e) => e.stopPropagation()}>
-          <CopyButton text={portalUrl} label="Portal link" />
-          <div className="w-px h-4 bg-surface-200" />
-          <button
-            onClick={() => (agency.is_active ? setPendingDeactivate(true) : deactivateMutation.mutate())}
-            className={`flex items-center gap-1.5 text-xs font-medium whitespace-nowrap px-2 py-1 rounded-lg transition-colors ${
-              agency.is_active
-                ? 'text-gray-500 hover:text-red-600 hover:bg-red-50'
-                : 'text-green-600 hover:text-green-700 hover:bg-green-50'
-            }`}
           >
-            <Power className="w-3.5 h-3.5" />
-            {agency.is_active ? 'Deactivate' : 'Activate'}
-          </button>
-          <button onClick={() => setExpanded((e) => !e)} className="text-gray-300 hover:text-gray-500">
-            {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-          </button>
-        </div>
-      </div>
+            {agencyInitials(agency.name)}
+          </span>
 
-      {expanded && (
-        <div className="border-t border-surface-200 px-5 py-4 bg-surface-50 space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
-              <Link2 className="w-3.5 h-3.5 text-gray-400" />
-              Job assignments
-            </p>
-            <button
-              onClick={() => setShowAssign((s) => !s)}
-              className="flex items-center gap-1.5 text-xs font-semibold text-brand-600 hover:text-brand-800"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Assign to job
-            </button>
-          </div>
-
-          {showAssign && (
-            <div className="bg-white border border-surface-200 rounded-lg p-4 space-y-3">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Job</label>
-                <select
-                  value={selectedJob}
-                  onChange={(e) => setSelectedJob(e.target.value)}
-                  className={inputCls}
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start gap-1.5">
+              <h3
+                className={cn(
+                  'font-display font-bold leading-snug break-words transition-colors',
+                  agency.is_active ? 'text-gray-900 group-hover:text-brand-700' : 'text-gray-500'
+                )}
+              >
+                {agency.name}
+              </h3>
+              {isTopPartner && (
+                <span
+                  title="Most hires in the last 12 months"
+                  className="shrink-0 inline-flex items-center gap-0.5 mt-0.5 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200"
                 >
-                  <option value="">Select a published job…</option>
-                  {availableJobs.map((j) => (
-                    <option key={j.id} value={j.id}>{j.title}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Max submissions (optional)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={maxSubs}
-                    onChange={(e) => setMaxSubs(e.target.value)}
-                    placeholder="Unlimited"
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Expires at (optional)</label>
-                  <input
-                    type="date"
-                    value={expiresAt}
-                    onChange={(e) => setExpiresAt(e.target.value)}
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={handleAssign}
-                  disabled={assignMutation.isPending}
-                  className="px-4 py-2 bg-brand-500 text-white text-xs font-semibold rounded-lg hover:bg-brand-600 disabled:opacity-60 transition-colors"
-                >
-                  {assignMutation.isPending ? 'Assigning…' : 'Assign'}
-                </button>
-                <button
-                  onClick={() => setShowAssign(false)}
-                  className="px-4 py-2 text-xs text-gray-500 hover:text-gray-700"
-                >
-                  Cancel
-                </button>
-              </div>
+                  <Crown className="w-2.5 h-2.5" /> Top
+                </span>
+              )}
+              {!agency.is_active && (
+                <span className="shrink-0 mt-0.5 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-surface-100 text-gray-500 border border-surface-200">
+                  Off
+                </span>
+              )}
             </div>
-          )}
-
-          {assignments && assignments.length === 0 && (
-            <p className="text-xs text-gray-400 text-center py-4">No jobs assigned yet</p>
-          )}
-
-          <div className="space-y-2">
-            {assignments?.map((a) => (
-              <AssignmentCard
-                key={a.id}
-                assignment={a}
-                onRemove={setPendingRemove}
-                removing={removeMutation.isPending}
-                onUpdateMaxSubs={(assignmentId, maxSubmissions) => updateMaxSubsMutation.mutate({ assignmentId, maxSubmissions })}
-                updating={updateMaxSubsMutation.isPending}
-              />
-            ))}
+            {agency.contact_name && (
+              <p className="text-xs text-gray-500 mt-1 truncate">{agency.contact_name}</p>
+            )}
+            <p className="flex items-center gap-1.5 text-xs text-gray-400 mt-0.5 min-w-0">
+              <Mail className="w-3 h-3 shrink-0" />
+              <span className="truncate">{agency.contact_email}</span>
+            </p>
           </div>
         </div>
-      )}
 
-      {pendingRemove && (
-        <ConfirmDialog
-          title="Remove job assignment?"
-          message={`"${agency.name}" will no longer see or be able to submit candidates for "${pendingRemove.job_title}". This can't be undone.`}
-          confirmLabel="Remove assignment"
-          danger
-          isPending={removeMutation.isPending}
-          onCancel={() => setPendingRemove(null)}
-          onConfirm={() => removeMutation.mutate(pendingRemove.id)}
-        />
-      )}
+        {/* Headline numbers */}
+        <div className="grid grid-cols-3 gap-3 mt-5">
+          <Metric label="Submitted" value={submitted} />
+          <Metric label="Hired" value={counts.hired} tone={counts.hired > 0 ? 'text-emerald-600' : undefined} />
+          <Metric
+            label="Conversion"
+            value={submitted > 0 ? `${perf.conversion_rate}%` : '—'}
+            tone={submitted > 0 && perf.conversion_rate > 0 ? 'text-brand-600' : 'text-gray-300'}
+          />
+        </div>
 
-      {pendingDeactivate && (
-        <ConfirmDialog
-          title={`Deactivate ${agency.name}?`}
-          message="Their portal link will stop working and they won't be able to submit new candidates. Existing assignments and submitted candidates are kept — you can reactivate anytime."
-          confirmLabel="Deactivate"
-          danger
-          isPending={deactivateMutation.isPending}
-          onCancel={() => setPendingDeactivate(false)}
-          onConfirm={() => deactivateMutation.mutate()}
-        />
-      )}
-    </div>
+        {/* Outcomes */}
+        <div className="mt-4 pt-4 border-t border-surface-100">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-2">Outcomes · 12 mo</p>
+          <PipelineFunnel counts={counts} total={submitted} size="sm" />
+        </div>
+      </button>
+
+      {/* Footer actions — siblings of the body button, never nested inside it */}
+      <div className="flex items-center gap-2 px-5 py-3 border-t border-surface-100 bg-surface-50/60">
+        <PortalCopyButton url={portalUrl} />
+        <button
+          onClick={onOpen}
+          className="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-700 group-hover:gap-1.5 transition-all"
+        >
+          Open partner <ArrowRight className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </article>
   );
 }
 
 function CreateAgencyModal({ onClose }) {
   const queryClient = useQueryClient();
-  const [form, setForm] = useState({ name: '', contact_name: '', contact_email: '' });
+  const navigate = useNavigate();
+  const { register, handleSubmit, formState: { errors } } = useForm({ resolver: zodResolver(agencySchema) });
 
-  const createMutation = useMutation({
+  const mut = useMutation({
     mutationFn: (data) => agenciesApi.create(data),
-    onSuccess: () => {
-      toast.success('Agency created');
+    onSuccess: (res) => {
+      toast.success('Agency added — assign a job and share their portal link');
       queryClient.invalidateQueries({ queryKey: ['agencies'] });
       onClose();
+      // Straight into the new partner: assigning a job and copying the portal
+      // link is always the next thing, and both live there.
+      if (res.data?.id) navigate(`/hr/agencies/${res.data.id}`);
     },
-    onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to create agency'),
+    onError: (err) => toast.error(err.response?.data?.detail ?? 'Could not add this agency'),
   });
 
-  const handleCreate = (e) => {
-    e.preventDefault();
-    if (!form.name || !form.contact_email) { toast.error('Name and contact email are required'); return; }
-    createMutation.mutate(form);
-  };
-
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl w-full max-w-md my-8 p-6">
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-base font-bold text-gray-900">Add recruiting agency</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <X className="w-5 h-5" />
+    <Modal
+      onClose={onClose}
+      title="Add a recruiting agency"
+      description="They get a private portal link — no login required."
+      icon={Building2}
+      size="md"
+      footer={
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-surface-100 rounded-lg transition-colors">
+            Cancel
           </button>
-        </div>
-        <form onSubmit={handleCreate} className="space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Agency name *</label>
-            <input
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              placeholder="ABC Staffing"
-              className={inputCls}
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Contact name</label>
-            <input
-              value={form.contact_name}
-              onChange={(e) => setForm({ ...form, contact_name: e.target.value })}
-              placeholder="John Smith"
-              className={inputCls}
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Contact email *</label>
-            <input
-              type="email"
-              value={form.contact_email}
-              onChange={(e) => setForm({ ...form, contact_email: e.target.value })}
-              placeholder="john@abcstaffing.com"
-              className={inputCls}
-            />
-          </div>
           <button
             type="submit"
-            disabled={createMutation.isPending}
-            className="w-full px-4 py-2.5 bg-brand-500 text-white text-sm font-semibold rounded-lg hover:bg-brand-600 disabled:opacity-60 transition-colors"
+            form="agency-form"
+            disabled={mut.isPending}
+            className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-brand-500 text-white text-sm font-semibold rounded-lg hover:bg-brand-600 disabled:opacity-50 transition-colors"
           >
-            {createMutation.isPending ? 'Creating…' : 'Create agency'}
+            {mut.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
+            {mut.isPending ? 'Adding…' : 'Add agency'}
           </button>
-        </form>
-      </div>
-    </div>
+        </div>
+      }
+    >
+      <form
+        id="agency-form"
+        onSubmit={handleSubmit((v) =>
+          mut.mutate({
+            name: v.name.trim(),
+            contact_name: v.contact_name?.trim() || null,
+            contact_email: v.contact_email.trim(),
+          })
+        )}
+        className="space-y-4"
+      >
+        <Field label="Agency name" required error={errors.name?.message}>
+          <input {...register('name')} className={inputCls} placeholder="Apex Talent Partners" autoFocus />
+        </Field>
+        <Field label="Contact name" hint="Optional" error={errors.contact_name?.message}>
+          <input {...register('contact_name')} className={inputCls} placeholder="Priya Nair" />
+        </Field>
+        <Field label="Contact email" required error={errors.contact_email?.message}>
+          <input {...register('contact_email')} type="email" className={inputCls} placeholder="priya@apextalent.com" />
+        </Field>
+      </form>
+    </Modal>
   );
 }
 
-export default function AgenciesPage() {
-  const [showCreate, setShowCreate] = useState(false);
+const STATUS_OPTIONS = [
+  { value: 'active', label: 'Active' },
+  { value: 'all', label: 'All' },
+  { value: 'inactive', label: 'Off' },
+];
 
-  const { data: agencies, isLoading } = useQuery({
+export default function AgenciesPage() {
+  const navigate = useNavigate();
+  const [showCreate, setShowCreate] = useState(false);
+  const [searchInput, setSearchInput] = useState('');
+  const search = useDebounced(searchInput, 200);
+  const [status, setStatus] = useState('active');
+  const [sort, setSort] = useState('submissions');
+
+  const { data: agencies, isLoading, isError } = useQuery({
     queryKey: ['agencies'],
     queryFn: () => agenciesApi.list().then((r) => r.data),
-  });
-
-  const { data: jobsData } = useQuery({
-    queryKey: ['jobs-hr'],
-    queryFn: () => jobsApi.list({ status: 'published', limit: 100 }).then((r) => r.data.items),
   });
 
   const { data: performance } = useQuery({
@@ -481,75 +306,195 @@ export default function AgenciesPage() {
     return map;
   }, [performance]);
 
-  const sortedAgencies = useMemo(() => {
-    if (!agencies) return [];
-    return [...agencies].sort((a, b) => {
-      const subA = perfByAgency[a.id]?.total_submitted ?? 0;
-      const subB = perfByAgency[b.id]?.total_submitted ?? 0;
-      if (subB !== subA) return subB - subA;
-      return a.name.localeCompare(b.name);
-    });
-  }, [agencies, perfByAgency]);
+  // Only a badge worth showing when there's a real contest — with one partner
+  // hiring, "top" says nothing.
+  const topPartnerId = useMemo(() => {
+    const withHires = (performance ?? []).filter((p) => p.hired > 0);
+    if (withHires.length < 2) return null;
+    return withHires.reduce((best, p) => (p.hired > best.hired ? p : best)).agency_id;
+  }, [performance]);
 
-  const kpis = useMemo(() => {
-    const totalSubmitted = (performance ?? []).reduce((s, p) => s + p.total_submitted, 0);
-    const totalHired = (performance ?? []).reduce((s, p) => s + p.hired, 0);
-    return {
-      total: agencies?.length ?? 0,
-      active: agencies?.filter((a) => a.is_active).length ?? 0,
-      submitted: totalSubmitted,
-      hired: totalHired,
-    };
-  }, [agencies, performance]);
+  const visible = useMemo(() => {
+    let list = agencies ?? [];
+    if (status === 'active') list = list.filter((a) => a.is_active);
+    else if (status === 'inactive') list = list.filter((a) => !a.is_active);
+
+    const needle = search.trim().toLowerCase();
+    if (needle) {
+      list = list.filter(
+        (a) =>
+          a.name?.toLowerCase().includes(needle) ||
+          a.contact_name?.toLowerCase().includes(needle) ||
+          a.contact_email?.toLowerCase().includes(needle)
+      );
+    }
+
+    return [...list].sort((a, b) => {
+      if (sort === 'name') return a.name.localeCompare(b.name);
+      const key = sort === 'hires' ? 'hired' : 'total_submitted';
+      const diff = (perfByAgency[b.id]?.[key] ?? 0) - (perfByAgency[a.id]?.[key] ?? 0);
+      return diff !== 0 ? diff : a.name.localeCompare(b.name);
+    });
+  }, [agencies, status, search, sort, perfByAgency]);
+
+  // KPIs describe the whole roster, never the filtered view.
+  const kpis = useMemo(() => ({
+    total: agencies?.length ?? 0,
+    active: agencies?.filter((a) => a.is_active).length ?? 0,
+    submitted: (performance ?? []).reduce((s, p) => s + p.total_submitted, 0),
+    hired: (performance ?? []).reduce((s, p) => s + p.hired, 0),
+  }), [agencies, performance]);
+
+  const filtersActive = Boolean(search) || status !== 'active';
 
   return (
-    <div>
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
-        <div>
-          <h1 className="font-display text-xl font-bold text-gray-900">Recruiting Agencies</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Manage agencies, track performance, and generate trackable job links</p>
-        </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="flex items-center justify-center gap-2 px-4 py-2 bg-brand-500 text-white text-sm font-semibold rounded-lg hover:bg-brand-600 transition-colors flex-shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          Add agency
-        </button>
-      </div>
+    <div className="max-w-[1200px] space-y-5">
+      {/* ── Header ── */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-brand-700 via-brand-600 to-brand-500 text-white">
+        <div className="absolute -top-24 -right-16 w-72 h-72 rounded-full bg-white/10 blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-28 left-1/3 w-72 h-72 rounded-full bg-brand-300/20 blur-3xl pointer-events-none" />
 
-      {!isLoading && agencies?.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-          <StatTile label="Agencies" value={kpis.total} />
-          <StatTile label="Active" value={kpis.active} />
-          <StatTile label="Submitted (12mo)" value={kpis.submitted} tone="brand" />
-          <StatTile label="Hired (12mo)" value={kpis.hired} tone="green" />
-        </div>
-      )}
-
-      {isLoading && (
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
-            {[1, 2, 3, 4].map((i) => <div key={i} className="h-20 bg-surface-100 rounded-xl animate-pulse" />)}
+        <div className="relative p-5 sm:p-7">
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+            <div className="max-w-xl">
+              <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-white/60">Sourcing partners</p>
+              <h1 className="font-display text-2xl sm:text-3xl font-bold mt-2 leading-tight">Recruiting Agencies</h1>
+              <p className="text-sm text-white/75 mt-2 leading-relaxed">
+                Give a partner a private portal, cap what they can send, and see exactly what each one turns into.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowCreate(true)}
+              className="shrink-0 self-start sm:self-end inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-brand-700 bg-white rounded-xl hover:bg-white/90 transition-colors"
+            >
+              <Plus className="w-4 h-4" /> Add agency
+            </button>
           </div>
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-24 bg-surface-100 rounded-xl animate-pulse" />
-          ))}
         </div>
-      )}
-
-      {!isLoading && agencies?.length === 0 && (
-        <div className="text-center py-20 text-gray-400 bg-white border border-surface-200 rounded-xl">
-          <Building2 className="w-10 h-10 mx-auto mb-3 opacity-30" />
-          <p className="text-sm">No agencies yet. Add one to start tracking sourced candidates.</p>
-        </div>
-      )}
-
-      <div className="space-y-3">
-        {sortedAgencies.map((agency) => (
-          <AgencyCard key={agency.id} agency={agency} perf={perfByAgency[agency.id]} jobs={jobsData} />
-        ))}
       </div>
+
+      {isLoading ? (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {[1, 2, 3, 4].map((i) => <div key={i} className="h-[76px] bg-white border border-surface-200 rounded-2xl animate-pulse" />)}
+          </div>
+          <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {[1, 2, 3].map((i) => <div key={i} className="h-72 bg-white border border-surface-200 rounded-2xl animate-pulse" />)}
+          </div>
+        </>
+      ) : isError ? (
+        <div className="bg-white rounded-2xl border border-surface-200">
+          <EmptyState
+            icon={AlertCircle}
+            title="Couldn’t load agencies"
+            description="The request failed. Refresh the page, or check with an admin if it keeps happening."
+          />
+        </div>
+      ) : (agencies?.length ?? 0) === 0 ? (
+        <div className="bg-white rounded-2xl border border-surface-200">
+          <EmptyState
+            icon={Building2}
+            title="No agencies yet"
+            description="Add a recruiting partner and they get a private portal to submit candidates and book interview slots — with everything they send attributed back to them."
+            action={
+              <button
+                onClick={() => setShowCreate(true)}
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-brand-500 text-white text-sm font-semibold rounded-xl hover:bg-brand-600 transition-colors"
+              >
+                <Plus className="w-4 h-4" /> Add your first agency
+              </button>
+            }
+          />
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <KpiTile icon={Building2} label="Partners" value={kpis.total} accent="bg-brand-50 text-brand-600" />
+            <KpiTile icon={Power} label="Active" value={kpis.active} accent="bg-emerald-50 text-emerald-600" />
+            <KpiTile icon={Send} label="Submitted · 12 mo" value={kpis.submitted} accent="bg-violet-50 text-violet-600" />
+            <KpiTile icon={Award} label="Hired · 12 mo" value={kpis.hired} accent="bg-amber-50 text-amber-600" />
+          </div>
+
+          {/* ── Toolbar ── */}
+          <div className="flex flex-col lg:flex-row lg:items-center gap-2.5">
+            <div className="relative flex-1 min-w-0">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="Search agency, contact or email…"
+                className="w-full pl-10 pr-9 py-3 bg-white border border-surface-200 rounded-2xl text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-300"
+              />
+              {searchInput && (
+                <button
+                  onClick={() => setSearchInput('')}
+                  aria-label="Clear search"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md text-gray-400 hover:bg-surface-100 flex items-center justify-center"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-2.5">
+              <Segmented value={status} onChange={setStatus} options={STATUS_OPTIONS} size="md" className="bg-white border border-surface-200 shadow-sm" />
+              <label className="inline-flex items-center gap-1.5 shrink-0">
+                <ArrowUpDown className="w-3.5 h-3.5 text-gray-400" />
+                <select
+                  value={sort}
+                  onChange={(e) => setSort(e.target.value)}
+                  aria-label="Sort agencies"
+                  className="text-sm bg-white border border-surface-200 rounded-2xl px-3 py-3 text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                >
+                  <option value="submissions">Most submitted</option>
+                  <option value="hires">Most hires</option>
+                  <option value="name">Name (A–Z)</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          {/* ── Cards ── */}
+          {visible.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-surface-200">
+              <EmptyState
+                icon={Search}
+                title="No agencies match"
+                description="Try a different search, or widen the status filter."
+                action={
+                  filtersActive ? (
+                    <button
+                      onClick={() => { setSearchInput(''); setStatus('all'); }}
+                      className="px-4 py-2 text-sm font-semibold text-white bg-brand-500 rounded-xl hover:bg-brand-600 transition-colors"
+                    >
+                      Clear filters
+                    </button>
+                  ) : null
+                }
+              />
+            </div>
+          ) : (
+            <>
+              <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {visible.map((agency, i) => (
+                  <AgencyCard
+                    key={agency.id}
+                    index={i}
+                    agency={agency}
+                    perf={perfByAgency[agency.id]}
+                    isTopPartner={topPartnerId != null && String(topPartnerId) === String(agency.id)}
+                    onOpen={() => navigate(`/hr/agencies/${agency.id}`)}
+                  />
+                ))}
+              </div>
+              <p className="flex items-center gap-1.5 text-[11px] text-gray-400 px-1">
+                <Briefcase className="w-3 h-3" />
+                Showing {visible.length} of {agencies.length} partner{agencies.length === 1 ? '' : 's'}
+                {status === 'active' && ' · deactivated ones hidden'}
+              </p>
+            </>
+          )}
+        </>
+      )}
 
       {showCreate && <CreateAgencyModal onClose={() => setShowCreate(false)} />}
     </div>
