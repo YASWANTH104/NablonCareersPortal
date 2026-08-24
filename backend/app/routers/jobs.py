@@ -60,6 +60,17 @@ async def list_jobs(
     location_type: Optional[str] = Query(None),
     employment_type: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
+    for_referral: bool = Query(
+        False,
+        description=(
+            "Force the referral-audience listing even for HR. HR normally gets the "
+            "full admin list here (every job, any status, and the department/"
+            "location/employment filters ignored), which is wrong for the Refer a "
+            "Candidate page — an HR user browsing that page would be offered "
+            "drafts, closed and internal-only roles that create_referral then "
+            "rejects with a 403."
+        ),
+    ),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     current_user=Depends(get_optional_user),
@@ -69,7 +80,7 @@ async def list_jobs(
     is_hr = current_user and current_user.role in hr_roles
     is_internal_viewer = current_user is not None and current_user.role != Role.APPLICANT.value
 
-    if is_hr:
+    if is_hr and not for_referral:
         return await job_service.list_jobs_hr(
             db, status=status, search=search, page=page, limit=limit
         )

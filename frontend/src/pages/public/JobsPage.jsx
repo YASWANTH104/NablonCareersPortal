@@ -13,21 +13,13 @@ import {
 import { jobsApi } from '@/api/jobs';
 import { HeroBackdrop, Reveal } from '@/components/shared/effects';
 import JobCard from '@/components/shared/JobCard';
+import { LOCATION_TYPES, EMPLOYMENT_TYPES } from '@/constants/jobOptions';
 
-const LOCATION_TYPES = [
-  { value: '', label: 'Any Location' },
-  { value: 'remote', label: 'Remote' },
-  { value: 'onsite', label: 'On-site' },
-  { value: 'hybrid', label: 'Hybrid' },
-];
-
-const EMPLOYMENT_TYPES = [
-  { value: '', label: 'Any Type' },
-  { value: 'full_time', label: 'Full-time' },
-  { value: 'part_time', label: 'Part-time' },
-  { value: 'contract', label: 'Contract' },
-  { value: 'internship', label: 'Internship' },
-];
+// Option lists come from constants/jobOptions so this board can't drift from
+// what JobEditPage is able to set — this local copy was missing `freelance`,
+// making freelance roles impossible to filter for.
+const LOCATION_OPTIONS = [{ value: '', label: 'Any Location' }, ...LOCATION_TYPES];
+const EMPLOYMENT_OPTIONS = [{ value: '', label: 'Any Type' }, ...EMPLOYMENT_TYPES];
 
 function SkeletonCard() {
   return (
@@ -132,7 +124,7 @@ export default function JobsPage() {
               onChange={(e) => handleFilterChange(setLocationType)(e.target.value)}
               className="w-full sm:w-auto px-3 py-2.5 text-sm border border-surface-200 rounded-xl bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 cursor-pointer"
             >
-              {LOCATION_TYPES.map((opt) => (
+              {LOCATION_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
@@ -143,7 +135,7 @@ export default function JobsPage() {
               onChange={(e) => handleFilterChange(setEmploymentType)(e.target.value)}
               className="w-full sm:w-auto px-3 py-2.5 text-sm border border-surface-200 rounded-xl bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 cursor-pointer"
             >
-              {EMPLOYMENT_TYPES.map((opt) => (
+              {EMPLOYMENT_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>

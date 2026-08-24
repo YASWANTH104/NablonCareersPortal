@@ -2,8 +2,16 @@ import client from './client';
 
 export const jobsApi = {
   listPublic: (params) => client.get('/jobs', { params }),
+  // Jobs the caller is actually allowed to refer someone for. HR hitting the
+  // plain list gets the admin view (every job, any status, filters ignored),
+  // which the Refer a Candidate page must never show — `for_referral` pins it
+  // to the same published + referrals-allowed set everyone else sees.
+  listReferable: (params) => client.get('/jobs', { params: { ...params, for_referral: true } }),
   list: (params) => client.get('/jobs', { params }),
   listDepartments: () => client.get('/jobs/departments'),
+  createDepartment: (name) => client.post('/jobs/departments', { name }),
+  updateDepartment: (id, name) => client.put(`/jobs/departments/${id}`, { name }),
+  deleteDepartment: (id) => client.delete(`/jobs/departments/${id}`),
   myApplicantAccess: () => client.get('/jobs/my-applicant-access'),
   getBySlug: (slug) => client.get(`/jobs/${slug}`),
   getById: (id) => client.get(`/jobs/${id}`),

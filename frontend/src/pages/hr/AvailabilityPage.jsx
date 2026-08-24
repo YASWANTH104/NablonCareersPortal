@@ -1,12 +1,14 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  startOfWeek, addDays, addWeeks, subWeeks, format, isSameDay,
-  startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isToday,
+  startOfWeek, addDays, addWeeks, subWeeks, addMonths, subMonths, format, isSameDay,
+  startOfMonth, eachDayOfInterval, isSameMonth, isWeekend,
 } from 'date-fns';
 import {
-  ChevronLeft, ChevronRight, X, Loader2, Search, CalendarClock, Copy, Maximize2, Minimize2,
-  BellRing, Trash2, Repeat,
+  ChevronLeft, ChevronRight, ChevronDown, X, Loader2, Search, CalendarClock, Copy,
+  Maximize2, Minimize2, BellRing, Trash2, Repeat, Users, User, CalendarCheck, Send,
+  CalendarDays, CalendarRange, LayoutGrid, MousePointerClick, Eraser, MoveVertical,
+  Check, RotateCcw, Clock, CalendarX, Hourglass, Sparkles, ArrowRight,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { interviewSlotsApi } from '@/api/interviewSlots';
@@ -15,6 +17,9 @@ import { usersApi } from '@/api/users';
 import { useAuthStore } from '@/store/authStore';
 import { HR_ROLES } from '@/utils/permissions';
 import { ROUND_TYPES, ROUND_MAP } from '@/constants/interviewRounds';
+import { toIST, fromISTDateTime, istDateKey, istTimeKey } from '@/utils/formatters';
+import { Modal, Segmented, StatTile, EmptyState } from '@/components/ui';
+import { cn } from '@/lib/utils';
 
 const SLOT_MINUTES = 30;
 const WORK_START_HOUR = 8;
@@ -33,10 +38,33 @@ const PUBLISH_DURATION_MINS = 60;
 // chips (roomy enough to read a label + time range inside a 30-min block),
 // not a cramped spreadsheet grid.
 const ROW_PX = 40;
+const HEADER_PX = 62; // day-header row — tall enough for weekday + date + count
+const GUTTER_PX = 62; // time-of-day ruler column
+const MIN_COL_PX = 108; // narrowest a day column gets before the grid scrolls
 // Drag-to-resize is capped at 60 min (2 rows) — matches the backend's
 // SlotRescheduleRequest, which only accepts {30, 60} so a resized slot stays
 // bookable by the agency self-book path (it only ever queries those two).
 const RESIZE_MAX_SPAN = Math.round(60 / SLOT_MINUTES);
+
+// ── IST grid space ────────────────────────────────────────────────────────────
+//
+// Slot instants are stored and transmitted as UTC. date-fns reads a Date's
+// *local* getters, so laying the calendar out straight off `new Date(start_time)`
+// only renders correct hours when the viewer's own machine happens to be set to
+// IST — and disagreed with every other scheduling surface in the app
+// (InterviewsPage, ApplicationDetailPage, WeekCalendar all already go through
+// toIST). Everything inside this page therefore works in one consistent
+// "IST wall-clock" space: `gridTime` converts an instant in, `gridToInstant`
+// converts a grid Date back out, and nothing else touches raw start_time.
+const pad2 = (n) => String(n).padStart(2, '0');
+const gridTime = (instant) => toIST(instant);
+const gridNow = () => toIST(new Date());
+function gridToInstant(d) {
+  return fromISTDateTime(
+    `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`,
+    `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+  );
+}
 
 // Distinct-per-round colors for the grid only (kept local, not touching the
 // shared ROUND_MAP badge colors used elsewhere — tr1/tr2 share one color
@@ -44,16 +72,16 @@ const RESIZE_MAX_SPAN = Math.round(60 / SLOT_MINUTES);
 // glance). "Booked" always wins and stays emerald regardless of round, so the
 // existing open/booked mental model never breaks.
 const GRID_ROUND_COLORS = {
-  tr1: { bg: 'bg-sky-100', hover: 'hover:bg-sky-200', text: 'text-sky-800', dot: 'bg-sky-400' },
-  tr2: { bg: 'bg-teal-100', hover: 'hover:bg-teal-200', text: 'text-teal-800', dot: 'bg-teal-400' },
-  hr: { bg: 'bg-violet-100', hover: 'hover:bg-violet-200', text: 'text-violet-800', dot: 'bg-violet-400' },
+  tr1: { bg: 'bg-sky-50', bar: 'bg-sky-400', hover: 'hover:bg-sky-100', text: 'text-sky-900', dot: 'bg-sky-400', swatch: 'bg-sky-200' },
+  tr2: { bg: 'bg-teal-50', bar: 'bg-teal-400', hover: 'hover:bg-teal-100', text: 'text-teal-900', dot: 'bg-teal-400', swatch: 'bg-teal-200' },
+  hr: { bg: 'bg-violet-50', bar: 'bg-violet-400', hover: 'hover:bg-violet-100', text: 'text-violet-900', dot: 'bg-violet-400', swatch: 'bg-violet-200' },
 };
-const DEFAULT_GRID_COLOR = { bg: 'bg-brand-100', hover: 'hover:bg-brand-200', text: 'text-brand-800', dot: 'bg-brand-400' };
+const DEFAULT_GRID_COLOR = { bg: 'bg-brand-50', bar: 'bg-brand-400', hover: 'hover:bg-brand-100', text: 'text-brand-900', dot: 'bg-brand-400', swatch: 'bg-brand-200' };
 // Raw, interviewer-published availability with no job/round attached yet —
 // deliberately neutral (not one of the round colors, not booked-green) so it
 // reads as "needs attention" rather than "ready to book". Only ever shown to
 // HR (job/round is their concept, not the interviewer's).
-const UNASSIGNED_COLOR = { bg: 'bg-slate-200', hover: 'hover:bg-slate-300', text: 'text-slate-700', dot: 'bg-slate-400' };
+const UNASSIGNED_COLOR = { bg: 'bg-slate-100', bar: 'bg-slate-400', hover: 'hover:bg-slate-200', text: 'text-slate-700', dot: 'bg-slate-400', swatch: 'bg-slate-300' };
 // What an interviewer sees on their OWN calendar for any not-yet-booked slot,
 // whether or not HR has quietly attached a job/round behind the scenes — an
 // interviewer never needs to know "Technical Round 1" until it's a real,
@@ -61,8 +89,8 @@ const UNASSIGNED_COLOR = { bg: 'bg-slate-200', hover: 'hover:bg-slate-300', text
 // an agency might never book is confusing, not informative. One calm color,
 // one word: "Available". The round-by-round breakdown stays exclusive to
 // HR's own management views, where it's an actual decision they're making.
-const AVAILABLE_COLOR = { bg: 'bg-brand-100', hover: 'hover:bg-brand-200', text: 'text-brand-800', dot: 'bg-brand-400' };
-const BOOKED_COLOR = { bg: 'bg-emerald-100', hover: 'hover:bg-emerald-200', text: 'text-emerald-800', dot: 'bg-emerald-400' };
+const AVAILABLE_COLOR = { bg: 'bg-brand-50', bar: 'bg-brand-500', hover: 'hover:bg-brand-100', text: 'text-brand-900', dot: 'bg-brand-500', swatch: 'bg-brand-200' };
+const BOOKED_COLOR = { bg: 'bg-emerald-50', bar: 'bg-emerald-500', hover: 'hover:bg-emerald-100', text: 'text-emerald-900', dot: 'bg-emerald-500', swatch: 'bg-emerald-200' };
 
 function timeSlotsForDay(day, startHour, rows) {
   return Array.from({ length: rows }, (_, i) => {
@@ -72,9 +100,191 @@ function timeSlotsForDay(day, startHour, rows) {
   });
 }
 
+function initials(name) {
+  if (!name) return '?';
+  return name.trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase()).join('');
+}
+
+// ── Small shared bits ─────────────────────────────────────────────────────────
+
+function Avatar({ name, className }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center justify-center rounded-full bg-brand-100 text-brand-700 font-semibold shrink-0',
+        'w-7 h-7 text-[11px]',
+        className
+      )}
+    >
+      {initials(name)}
+    </span>
+  );
+}
+
+function IconButton({ icon: Icon, label, onClick, disabled, active, className }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+      className={cn(
+        'w-8 h-8 inline-flex items-center justify-center rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed',
+        active
+          ? 'border-brand-300 bg-brand-50 text-brand-600'
+          : 'border-surface-200 bg-white text-gray-500 hover:bg-surface-50 hover:text-gray-700',
+        className
+      )}
+    >
+      <Icon className="w-4 h-4" />
+    </button>
+  );
+}
+
+function Hint({ icon: Icon, children }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs text-gray-500">
+      <Icon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+      {children}
+    </span>
+  );
+}
+
+function useClickOutside(onOutside, enabled) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!enabled) return;
+    function onDown(e) {
+      if (ref.current && !ref.current.contains(e.target)) onOutside();
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') onOutside();
+    }
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onOutside, enabled]);
+  return ref;
+}
+
+// A searchable person picker — a bare <select> of every interviewer on the
+// panel is unusable past a dozen people, and gave no hint of who you were
+// looking at once chosen.
+function InterviewerPicker({ value, onChange, people, allLabel, placeholder }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const ref = useClickOutside(() => setOpen(false), open);
+
+  const selected = people?.find((p) => p.id === value);
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return people ?? [];
+    return (people ?? []).filter(
+      (p) => p.full_name?.toLowerCase().includes(needle) || p.email?.toLowerCase().includes(needle)
+    );
+  }, [people, q]);
+
+  function pick(id) {
+    onChange(id);
+    setOpen(false);
+    setQ('');
+  }
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={cn(
+          'w-full sm:w-[248px] flex items-center gap-2.5 px-2.5 py-2 rounded-xl border bg-white text-left transition-colors',
+          open ? 'border-brand-400 ring-2 ring-brand-100' : 'border-surface-200 hover:border-surface-300'
+        )}
+      >
+        {selected ? (
+          <Avatar name={selected.full_name} />
+        ) : (
+          <span className="w-7 h-7 rounded-full bg-surface-100 text-gray-400 inline-flex items-center justify-center shrink-0">
+            <Users className="w-3.5 h-3.5" />
+          </span>
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium text-gray-800 truncate">
+            {selected ? selected.full_name : allLabel ?? placeholder}
+          </span>
+          <span className="block text-[11px] text-gray-400 truncate">
+            {selected ? selected.email : 'Interview panel'}
+          </span>
+        </span>
+        <ChevronDown className={cn('w-4 h-4 text-gray-400 shrink-0 transition-transform', open && 'rotate-180')} />
+      </button>
+
+      {open && (
+        <div className="absolute z-40 mt-1.5 w-full sm:w-[300px] bg-white rounded-xl border border-surface-200 shadow-modal overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+          <div className="p-2 border-b border-surface-100">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+              <input
+                autoFocus
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search the panel…"
+                className="w-full pl-8 pr-2 py-1.5 text-sm bg-surface-50 border border-transparent rounded-lg focus:outline-none focus:bg-white focus:border-brand-300"
+              />
+            </div>
+          </div>
+          <div className="max-h-64 overflow-y-auto p-1">
+            {allLabel && (
+              <button
+                type="button"
+                onClick={() => pick('')}
+                className={cn(
+                  'w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-left hover:bg-surface-50',
+                  !value && 'bg-brand-50'
+                )}
+              >
+                <span className="w-7 h-7 rounded-full bg-surface-100 text-gray-400 inline-flex items-center justify-center">
+                  <Users className="w-3.5 h-3.5" />
+                </span>
+                <span className="text-sm font-medium text-gray-700 flex-1">{allLabel}</span>
+                {!value && <Check className="w-4 h-4 text-brand-500" />}
+              </button>
+            )}
+            {filtered.length === 0 ? (
+              <p className="text-xs text-gray-400 text-center py-6">No one matches “{q}”</p>
+            ) : (
+              filtered.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => pick(p.id)}
+                  className={cn(
+                    'w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-left hover:bg-surface-50',
+                    p.id === value && 'bg-brand-50'
+                  )}
+                >
+                  <Avatar name={p.full_name} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium text-gray-800 truncate">{p.full_name}</span>
+                    <span className="block text-[11px] text-gray-400 truncate">{p.email}</span>
+                  </span>
+                  {p.id === value && <Check className="w-4 h-4 text-brand-500 shrink-0" />}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Application picker (HR booking a slot) ────────────────────────────────────
 
-function ApplicationPickerModal({ jobId, onCancel, onPick, isPending }) {
+function ApplicationPickerModal({ jobId, slot, onCancel, onPick, isPending }) {
   const [search, setSearch] = useState('');
   const { data, isLoading } = useQuery({
     queryKey: ['availability-job-applications', jobId, search],
@@ -82,46 +292,67 @@ function ApplicationPickerModal({ jobId, onCancel, onPick, isPending }) {
       applicationsApi.list({ job_id: jobId, search: search || undefined, limit: 50 }).then((r) => r.data),
   });
   const applications = data?.items ?? [];
+  const start = slot ? gridTime(slot.start_time) : null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl w-full max-w-md p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-base font-bold text-gray-900">Book this slot for…</h3>
-          <button onClick={onCancel} className="text-gray-400 hover:text-gray-600">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-        <div className="relative mb-3">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search candidate…"
-            className="w-full pl-9 pr-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+    <Modal
+      onClose={onCancel}
+      title="Who is this interview for?"
+      description={
+        start
+          ? `${format(start, 'EEE, MMM d')} · ${format(start, 'h:mm a')} IST · ${slot.duration_mins} min`
+          : 'Pick the candidate to book into this slot.'
+      }
+      icon={CalendarCheck}
+      size="md"
+    >
+      <div className="relative mb-3">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+        <input
+          autoFocus
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search candidates in this job…"
+          className="w-full pl-9 pr-3 py-2.5 border border-surface-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+        />
+      </div>
+      <div className="max-h-72 overflow-y-auto -mx-1 px-1">
+        {isLoading ? (
+          <div className="flex justify-center py-10"><Loader2 className="w-5 h-5 animate-spin text-gray-400" /></div>
+        ) : applications.length === 0 ? (
+          <EmptyState
+            compact
+            icon={Users}
+            title={search ? 'No matching candidates' : 'No candidates in this pipeline yet'}
+            description={
+              search
+                ? 'Try a different name or email.'
+                : 'Once someone applies to this job they will show up here, ready to book.'
+            }
           />
-        </div>
-        <div className="max-h-72 overflow-y-auto space-y-1">
-          {isLoading ? (
-            <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-gray-400" /></div>
-          ) : applications.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-6">No candidates found for this job</p>
-          ) : (
-            applications.map((app) => (
+        ) : (
+          <div className="space-y-1">
+            {applications.map((app) => (
               <button
                 key={app.id}
                 disabled={isPending}
                 onClick={() => onPick(app.id)}
-                className="w-full text-left px-3 py-2 rounded-lg hover:bg-surface-50 disabled:opacity-50"
+                className="w-full flex items-center gap-3 text-left px-2.5 py-2 rounded-xl border border-transparent hover:border-brand-200 hover:bg-brand-50/50 disabled:opacity-50 transition-colors group"
               >
-                <p className="text-sm font-medium text-gray-900">{app.applicant?.full_name ?? 'Unknown'}</p>
-                <p className="text-xs text-gray-400">{app.applicant?.email}</p>
+                <Avatar name={app.applicant?.full_name} className="w-8 h-8 text-xs" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium text-gray-900 truncate">
+                    {app.applicant?.full_name ?? 'Unknown'}
+                  </span>
+                  <span className="block text-xs text-gray-400 truncate">{app.applicant?.email}</span>
+                </span>
+                <ArrowRight className="w-4 h-4 text-gray-300 group-hover:text-brand-500 shrink-0" />
               </button>
-            ))
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -138,63 +369,70 @@ function ApplicationPickerModal({ jobId, onCancel, onPick, isPending }) {
 function PickJobRoundForBookingModal({ slot, jobsData, onCancel, onContinue }) {
   const [jobId, setJobId] = useState('');
   const [roundType, setRoundType] = useState('tr1');
+  const start = gridTime(slot.start_time);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl w-full max-w-sm p-5">
-        <div className="flex items-center justify-between mb-1">
-          <h3 className="text-base font-bold text-gray-900">Book this slot</h3>
-          <button onClick={onCancel} className="text-gray-400 hover:text-gray-600">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-        <p className="text-xs text-gray-500 mb-4">
-          {format(new Date(slot.start_time), 'EEE, MMM d · h:mm a')} · {slot.duration_mins} min — which job and
-          round is this interview for? You'll pick the candidate next.
-        </p>
-
-        <div className="space-y-3">
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Job</label>
-            <select
-              value={jobId}
-              onChange={(e) => setJobId(e.target.value)}
-              className="w-full text-sm border border-surface-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
-            >
-              <option value="">Select a job…</option>
-              {jobsData?.map((job) => (
-                <option key={job.id} value={job.id}>{job.title}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Round</label>
-            <select
-              value={roundType}
-              onChange={(e) => setRoundType(e.target.value)}
-              className="w-full text-sm border border-surface-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
-            >
-              {ROUND_TYPES.map((r) => (
-                <option key={r.key} value={r.key}>{r.label}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-2 mt-5">
-          <button onClick={onCancel} className="px-4 py-2 text-sm text-gray-600 hover:bg-surface-100 rounded-lg">
+    <Modal
+      onClose={onCancel}
+      title="Book this slot"
+      description={`${format(start, 'EEE, MMM d')} · ${format(start, 'h:mm a')} IST · ${slot.duration_mins} min`}
+      icon={CalendarCheck}
+      size="sm"
+      footer={
+        <div className="flex justify-end gap-2">
+          <button onClick={onCancel} className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-surface-100 rounded-lg transition-colors">
             Cancel
           </button>
           <button
             disabled={!jobId}
             onClick={() => onContinue({ job_id: jobId, round_type: roundType })}
-            className="px-4 py-2 text-sm font-medium bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
-            Choose candidate
+            Choose candidate <ArrowRight className="w-3.5 h-3.5" />
           </button>
         </div>
+      }
+    >
+      <p className="text-sm text-gray-500 mb-4">
+        Which job and round is this interview for? You’ll pick the candidate next — nothing is published to
+        agencies along the way.
+      </p>
+      <div className="space-y-3.5">
+        <label className="block">
+          <span className="block text-xs font-semibold text-gray-600 mb-1.5">Job</span>
+          <select
+            value={jobId}
+            onChange={(e) => setJobId(e.target.value)}
+            className="w-full text-sm border border-surface-300 rounded-lg px-3 py-2.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+          >
+            <option value="">Select a job…</option>
+            {jobsData?.map((job) => (
+              <option key={job.id} value={job.id}>{job.title}</option>
+            ))}
+          </select>
+        </label>
+        <div>
+          <span className="block text-xs font-semibold text-gray-600 mb-1.5">Round</span>
+          <div className="grid grid-cols-3 gap-1.5">
+            {ROUND_TYPES.map((r) => (
+              <button
+                key={r.key}
+                type="button"
+                onClick={() => setRoundType(r.key)}
+                className={cn(
+                  'px-2 py-2 rounded-lg border text-xs font-medium transition-colors',
+                  roundType === r.key
+                    ? 'border-brand-400 bg-brand-50 text-brand-700'
+                    : 'border-surface-200 bg-white text-gray-600 hover:bg-surface-50'
+                )}
+              >
+                {r.label.replace('Technical Round', 'TR')}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -209,7 +447,7 @@ function PickJobRoundForBookingModal({ slot, jobsData, onCancel, onContinue }) {
 // across an interviewer's whole upcoming availability in one pass.
 
 function PublishSlotsPanel({
-  slots, jobsData, onPublish, isPending, onUnassign, unassigningId,
+  slots, jobsData, onPublish, isPending, onUnassign, unassigningId, isLoading,
 }) {
   const [jobId, setJobId] = useState('');
   const [roundType, setRoundType] = useState('tr1');
@@ -235,12 +473,19 @@ function PublishSlotsPanel({
   const groups = useMemo(() => {
     const map = new Map();
     for (const s of available) {
-      const key = format(new Date(s.start_time), 'EEEE, MMM d');
+      const key = format(gridTime(s.start_time), 'EEEE, MMM d');
       if (!map.has(key)) map.set(key, []);
       map.get(key).push(s);
     }
     return map;
   }, [available]);
+
+  // A selection made before a poll refetch can contain slots that have since
+  // been booked elsewhere — only ever publish what is still on screen.
+  const selectedVisible = useMemo(
+    () => available.filter((s) => selectedIds.has(s.id)),
+    [available, selectedIds]
+  );
 
   function toggle(id) {
     setSelectedIds((prev) => {
@@ -249,122 +494,254 @@ function PublishSlotsPanel({
       return next;
     });
   }
-
-  const allSelected = available.length > 0 && available.every((s) => selectedIds.has(s.id));
-  function toggleAll() {
-    setSelectedIds(allSelected ? new Set() : new Set(available.map((s) => s.id)));
+  function toggleMany(ids, on) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => (on ? next.add(id) : next.delete(id)));
+      return next;
+    });
   }
 
+  const allSelected = available.length > 0 && available.every((s) => selectedIds.has(s.id));
+  const selectedJob = jobsData?.find((j) => String(j.id) === String(jobId));
+
   async function handlePublish() {
-    const ok = await onPublish({ slot_ids: Array.from(selectedIds), job_id: jobId, round_type: roundType });
+    const ok = await onPublish({
+      slot_ids: selectedVisible.map((s) => s.id),
+      job_id: jobId,
+      round_type: roundType,
+    });
     if (ok) setSelectedIds(new Set());
   }
 
+  if (isLoading) {
+    return (
+      <div className="bg-white rounded-2xl border border-surface-200 flex justify-center py-20">
+        <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+      </div>
+    );
+  }
+
   return (
-    <div className="bg-white rounded-xl border border-surface-200 p-4">
-      <div className="flex flex-wrap items-end gap-3 mb-4 pb-4 border-b border-surface-200">
-        <div className="flex flex-col gap-1">
-          <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">Job</span>
-          <select
-            value={jobId}
-            onChange={(e) => setJobId(e.target.value)}
-            className="text-sm border border-surface-300 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 min-w-[180px]"
-          >
-            <option value="">Select a job…</option>
-            {jobsData?.map((job) => (
-              <option key={job.id} value={job.id}>{job.title}</option>
-            ))}
-          </select>
+    <div className="grid lg:grid-cols-[1fr_320px] gap-4 items-start">
+      {/* ── Selection list ── */}
+      <div className="bg-white rounded-2xl border border-surface-200 overflow-hidden">
+        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-surface-200">
+          <div className="min-w-0">
+            <h3 className="font-display font-semibold text-gray-900 text-sm">Needs a job</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Raw availability interviewers have opened up, not yet visible to any agency.
+            </p>
+          </div>
+          {available.length > 0 && (
+            <button
+              type="button"
+              onClick={() => toggleMany(available.map((s) => s.id), !allSelected)}
+              className="shrink-0 text-xs font-semibold text-brand-600 hover:text-brand-700 whitespace-nowrap"
+            >
+              {allSelected ? 'Clear all' : `Select all ${available.length}`}
+            </button>
+          )}
         </div>
-        <div className="flex flex-col gap-1">
-          <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">Round</span>
-          <select
-            value={roundType}
-            onChange={(e) => setRoundType(e.target.value)}
-            className="text-sm border border-surface-300 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
-          >
-            {ROUND_TYPES.map((r) => (
-              <option key={r.key} value={r.key}>{r.label}</option>
-            ))}
-          </select>
-        </div>
-        <button
-          disabled={!jobId || selectedIds.size === 0 || isPending}
-          onClick={handlePublish}
-          className="ml-auto px-4 py-2 text-sm font-medium bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {isPending ? 'Publishing…' : `Publish ${selectedIds.size || ''} slot${selectedIds.size === 1 ? '' : 's'}`}
-        </button>
+
+        {available.length === 0 ? (
+          <EmptyState
+            icon={awaitingBooking.length > 0 ? Check : CalendarX}
+            title={awaitingBooking.length > 0 ? 'All caught up' : 'No unpublished availability'}
+            description={
+              awaitingBooking.length > 0
+                ? 'Every open slot already has a job attached. Anything waiting on a booking is listed on the right.'
+                : 'Once an interviewer marks time as free it lands here, ready for you to attach a job and round.'
+            }
+          />
+        ) : (
+          <div className="max-h-[30rem] overflow-y-auto">
+            {Array.from(groups.entries()).map(([day, daySlots]) => {
+              const dayIds = daySlots.map((s) => s.id);
+              const dayAllSelected = dayIds.every((id) => selectedIds.has(id));
+              return (
+                <div key={day}>
+                  <div className="sticky top-0 z-10 flex items-center justify-between gap-2 bg-surface-50/95 backdrop-blur-sm px-4 py-1.5 border-y border-surface-100">
+                    <span className="text-xs font-semibold text-gray-600">{day}</span>
+                    <button
+                      type="button"
+                      onClick={() => toggleMany(dayIds, !dayAllSelected)}
+                      className="text-[11px] font-medium text-gray-400 hover:text-brand-600"
+                    >
+                      {dayAllSelected ? 'Deselect day' : 'Select day'}
+                    </button>
+                  </div>
+                  {daySlots.map((s) => {
+                    const st = gridTime(s.start_time);
+                    const en = new Date(st.getTime() + s.duration_mins * 60000);
+                    const checked = selectedIds.has(s.id);
+                    return (
+                      <label
+                        key={s.id}
+                        className={cn(
+                          'flex items-center gap-3 px-4 py-2.5 cursor-pointer border-b border-surface-100 last:border-0 transition-colors',
+                          checked ? 'bg-brand-50/60' : 'hover:bg-surface-50'
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggle(s.id)}
+                          className="w-4 h-4 rounded border-surface-300 text-brand-500 focus:ring-brand-500"
+                        />
+                        <span className="text-sm font-medium text-gray-800 tabular-nums w-[9.5rem] shrink-0">
+                          {format(st, 'h:mm a')} – {format(en, 'h:mm a')}
+                        </span>
+                        <span className="text-xs text-gray-400 shrink-0">{s.duration_mins} min</span>
+                        {s.interviewer_name && (
+                          <span className="ml-auto flex items-center gap-1.5 min-w-0">
+                            <Avatar name={s.interviewer_name} className="w-5 h-5 text-[9px]" />
+                            <span className="text-xs text-gray-500 truncate">{s.interviewer_name}</span>
+                          </span>
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
-      {available.length === 0 ? (
-        <p className="text-sm text-gray-400 text-center py-10">
-          {awaitingBooking.length > 0 ? 'Nothing new needs a job right now.' : 'No unpublished availability right now.'}
-        </p>
-      ) : (
-        <>
-          <label className="flex items-center gap-2 text-xs font-medium text-gray-500 mb-2 cursor-pointer select-none">
-            <input type="checkbox" checked={allSelected} onChange={toggleAll} className="rounded border-surface-300" />
-            Select all ({available.length})
-          </label>
-          <div className="max-h-[28rem] overflow-y-auto divide-y divide-surface-100 border border-surface-100 rounded-lg">
-            {Array.from(groups.entries()).map(([day, daySlots]) => (
-              <div key={day}>
-                <div className="bg-surface-50 px-3 py-1.5 text-xs font-semibold text-gray-500 sticky top-0">{day}</div>
-                {daySlots.map((s) => (
-                  <label
-                    key={s.id}
-                    className="flex items-center gap-3 px-3 py-2 hover:bg-surface-50 cursor-pointer text-sm"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(s.id)}
-                      onChange={() => toggle(s.id)}
-                      className="rounded border-surface-300"
-                    />
-                    <span className="font-medium text-gray-800">{format(new Date(s.start_time), 'h:mm a')}</span>
-                    <span className="text-gray-400">{s.duration_mins} min</span>
-                    {s.interviewer_name && (
-                      <span className="ml-auto text-xs text-gray-400 truncate">{s.interviewer_name}</span>
+      {/* ── Publish action card ── */}
+      <div className="space-y-4 lg:sticky lg:top-0">
+        <div className="bg-white rounded-2xl border border-surface-200 p-4">
+          <h3 className="font-display font-semibold text-gray-900 text-sm flex items-center gap-1.5">
+            <Send className="w-4 h-4 text-brand-500" /> Publish to agencies
+          </h3>
+          <p className="text-xs text-gray-500 mt-1 mb-4">
+            Attaching a job and round makes these times bookable by that job’s recruitment partners.
+          </p>
+
+          <div className="space-y-3.5">
+            <label className="block">
+              <span className="block text-xs font-semibold text-gray-600 mb-1.5">Job</span>
+              <select
+                value={jobId}
+                onChange={(e) => setJobId(e.target.value)}
+                className="w-full text-sm border border-surface-300 rounded-lg px-3 py-2.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+              >
+                <option value="">Select a job…</option>
+                {jobsData?.map((job) => (
+                  <option key={job.id} value={job.id}>{job.title}</option>
+                ))}
+              </select>
+            </label>
+            <div>
+              <span className="block text-xs font-semibold text-gray-600 mb-1.5">Round</span>
+              <div className="grid grid-cols-3 gap-1.5">
+                {ROUND_TYPES.map((r) => (
+                  <button
+                    key={r.key}
+                    type="button"
+                    onClick={() => setRoundType(r.key)}
+                    className={cn(
+                      'px-2 py-2 rounded-lg border text-xs font-medium transition-colors',
+                      roundType === r.key
+                        ? 'border-brand-400 bg-brand-50 text-brand-700'
+                        : 'border-surface-200 bg-white text-gray-600 hover:bg-surface-50'
                     )}
-                  </label>
+                  >
+                    {r.label.replace('Technical Round', 'TR')}
+                  </button>
                 ))}
               </div>
-            ))}
+            </div>
           </div>
-        </>
-      )}
 
-      {awaitingBooking.length > 0 && (
-        <div className="mt-6 pt-4 border-t border-surface-200">
-          <p className="text-xs font-medium text-gray-500 mb-2">
-            Published, awaiting a booking ({awaitingBooking.length})
-          </p>
-          <div className="max-h-[16rem] overflow-y-auto divide-y divide-surface-100 border border-surface-100 rounded-lg">
-            {awaitingBooking.map((s) => (
-              <div key={s.id} className="flex items-center gap-3 px-3 py-2 text-sm">
-                <span className="font-medium text-gray-800">{format(new Date(s.start_time), 'EEE, MMM d · h:mm a')}</span>
-                <span className="text-gray-400">{s.duration_mins} min</span>
-                <span className="text-xs font-medium text-brand-700 bg-brand-50 rounded-full px-2 py-0.5">
-                  {s.job_title ?? 'Job'} · {ROUND_MAP[s.round_type]?.label ?? s.round_type}
-                </span>
-                {s.interviewer_name && (
-                  <span className="ml-auto text-xs text-gray-400 truncate">{s.interviewer_name}</span>
-                )}
-                <button
-                  type="button"
-                  disabled={unassigningId === s.id}
-                  onClick={() => onUnassign(s)}
-                  title="No agency has booked this — free it up to publish for a different job"
-                  className="shrink-0 text-xs font-medium text-gray-500 hover:text-brand-600 disabled:opacity-60"
-                >
-                  {unassigningId === s.id ? 'Reusing…' : 'Reuse'}
-                </button>
-              </div>
-            ))}
+          <div className="mt-4 pt-4 border-t border-surface-100">
+            <div className="flex items-baseline justify-between mb-3">
+              <span className="text-xs text-gray-500">Selected</span>
+              <span className="font-display text-lg font-bold text-gray-900">
+                {selectedVisible.length}
+                <span className="text-xs font-medium text-gray-400"> / {available.length}</span>
+              </span>
+            </div>
+            <button
+              disabled={!jobId || selectedVisible.length === 0 || isPending}
+              onClick={handlePublish}
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold bg-brand-500 text-white rounded-xl hover:bg-brand-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {isPending ? (
+                <><Loader2 className="w-4 h-4 animate-spin" /> Publishing…</>
+              ) : (
+                <><Send className="w-4 h-4" /> Publish {selectedVisible.length || ''} slot{selectedVisible.length === 1 ? '' : 's'}</>
+              )}
+            </button>
+            {!jobId && selectedVisible.length > 0 && (
+              <p className="text-[11px] text-amber-600 mt-2 text-center">Pick a job to publish these into.</p>
+            )}
+            {selectedJob && selectedVisible.length > 0 && (
+              <p className="text-[11px] text-gray-400 mt-2 text-center leading-relaxed">
+                {selectedVisible.length} slot{selectedVisible.length === 1 ? '' : 's'} → {selectedJob.title} ·{' '}
+                {ROUND_MAP[roundType]?.label}
+              </p>
+            )}
           </div>
         </div>
-      )}
+
+        {/* Awaiting a booking */}
+        <div className="bg-white rounded-2xl border border-surface-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-surface-200">
+            <h3 className="font-display font-semibold text-gray-900 text-sm flex items-center gap-1.5">
+              <Hourglass className="w-4 h-4 text-amber-500" /> Awaiting a booking
+              {awaitingBooking.length > 0 && (
+                <span className="ml-auto text-xs font-semibold text-amber-700 bg-amber-50 rounded-full px-2 py-0.5">
+                  {awaitingBooking.length}
+                </span>
+              )}
+            </h3>
+          </div>
+          {awaitingBooking.length === 0 ? (
+            <p className="text-xs text-gray-400 text-center py-7 px-4">
+              Nothing published is sitting idle right now.
+            </p>
+          ) : (
+            <div className="max-h-[18rem] overflow-y-auto divide-y divide-surface-100">
+              {awaitingBooking.map((s) => {
+                const st = gridTime(s.start_time);
+                return (
+                  <div key={s.id} className="px-4 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-gray-800 tabular-nums">
+                        {format(st, 'EEE, MMM d · h:mm a')}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={unassigningId === s.id}
+                        onClick={() => onUnassign(s)}
+                        title="No agency has booked this — free it up to publish for a different job"
+                        className="ml-auto shrink-0 inline-flex items-center gap-1 text-[11px] font-medium text-gray-400 hover:text-brand-600 disabled:opacity-60"
+                      >
+                        {unassigningId === s.id ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <RotateCcw className="w-3 h-3" />
+                        )}
+                        {unassigningId === s.id ? 'Freeing…' : 'Free up'}
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                      <span className="text-[11px] font-medium text-brand-700 bg-brand-50 rounded-full px-2 py-0.5 max-w-full truncate">
+                        {s.job_title ?? 'Job'} · {ROUND_MAP[s.round_type]?.label ?? s.round_type}
+                      </span>
+                      {s.interviewer_name && (
+                        <span className="text-[11px] text-gray-400 truncate">{s.interviewer_name}</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -380,9 +757,9 @@ function buildDayLayout(day, slots, startHour, rows) {
   const covered = new Set();
 
   (slots ?? [])
-    .filter((s) => isSameDay(new Date(s.start_time), day))
+    .filter((s) => isSameDay(gridTime(s.start_time), day))
     .forEach((s) => {
-      const st = new Date(s.start_time);
+      const st = gridTime(s.start_time);
       const minutesFromStart = (st.getHours() - startHour) * 60 + st.getMinutes();
       const rowIdx = Math.round(minutesFromStart / SLOT_MINUTES);
       const span = Math.max(1, Math.round(s.duration_mins / SLOT_MINUTES));
@@ -427,10 +804,11 @@ function computeDragStartTimes(day, loRow, hiRow, durationMins, covered, startHo
 }
 
 function WeekGrid({
-  days, slots, editable, startHour, rows, nowTick,
+  days, slots, editable, startHour, rows, nowTick, showFullDay,
   onPublishRange, onSlotClick, onRemoveRange, onCopyDay, copyingDay, onResizeSlot,
 }) {
-  const now = new Date();
+  const now = gridNow();
+  const scrollRef = useRef(null);
 
   // Drag state: which day column, the row range touched so far, and which of
   // three things this drag is doing — painting new slots ('create'), sweeping
@@ -490,6 +868,16 @@ function WeekGrid({
     return () => window.removeEventListener('mousemove', handleMove);
   }, []);
 
+  // Opening the full 24h view otherwise dumps you at midnight, several
+  // screens above anything anyone actually publishes.
+  useEffect(() => {
+    if (!scrollRef.current) return;
+    const target = showFullDay
+      ? ((WORK_START_HOUR - startHour) * 60) / SLOT_MINUTES * ROW_PX
+      : 0;
+    scrollRef.current.scrollTop = target;
+  }, [showFullDay, startHour]);
+
   function startCreateDrag(dayIndex, rowIdx) {
     if (!editable) return;
     setDrag({ dayIndex, startRow: rowIdx, endRow: rowIdx, mode: 'create' });
@@ -531,62 +919,149 @@ function WeekGrid({
   const showNowLine = todayIdx !== -1 && nowRowFloat >= 0 && nowRowFloat <= rows;
   void nowTick; // re-renders this component every tick so the line above stays live
 
+  const hourCount = Math.ceil(rows / 2);
+
   return (
-    <div className="overflow-x-auto select-none">
+    <div
+      ref={scrollRef}
+      className="relative overflow-auto select-none rounded-xl border border-surface-200 bg-white"
+      style={{ maxHeight: 'min(62vh, 40rem)' }}
+    >
       <div
-        className="min-w-[860px] grid relative"
-        style={{ gridTemplateColumns: `64px repeat(${days.length}, 1fr)`, gridTemplateRows: `auto repeat(${rows}, ${ROW_PX}px)` }}
+        className="grid relative"
+        style={{
+          gridTemplateColumns: `${GUTTER_PX}px repeat(${days.length}, minmax(${MIN_COL_PX}px, 1fr))`,
+          gridTemplateRows: `${HEADER_PX}px repeat(${rows}, ${ROW_PX}px)`,
+        }}
       >
-        {showNowLine && (
-          <div
-            style={{ gridRow: `2 / span ${rows}`, gridColumn: todayIdx + 2 }}
-            className="relative pointer-events-none z-20"
-          >
-            <div className="absolute left-0 right-0 border-t-2 border-rose-500" style={{ top: `${nowRowFloat * ROW_PX}px` }}>
-              <span className="absolute -left-1 -top-[5px] w-2 h-2 rounded-full bg-rose-500" />
+        {/* Column washes — today and weekends, behind everything else */}
+        {days.map((day, di) => {
+          const tint = isSameDay(day, now)
+            ? 'bg-brand-50/50'
+            : isWeekend(day)
+            ? 'bg-surface-50/80'
+            : null;
+          if (!tint) return null;
+          return (
+            <div
+              key={`wash-${day.toISOString()}`}
+              style={{ gridRow: `2 / span ${rows}`, gridColumn: di + 2 }}
+              className={cn('pointer-events-none z-0', tint)}
+            />
+          );
+        })}
+
+        {/* Sticky corner */}
+        <div
+          style={{ gridRow: 1, gridColumn: 1 }}
+          className="sticky top-0 left-0 z-[35] bg-white border-b border-r border-surface-200"
+        />
+
+        {/* Day headers */}
+        {days.map((day, di) => {
+          const { covered } = buildDayLayout(day, slots, startHour, rows);
+          const daySlots = (slots ?? []).filter((s) => isSameDay(gridTime(s.start_time), day));
+          const openCount = daySlots.filter((s) => s.status === 'open').length;
+          const bookedCount = daySlots.filter((s) => s.status === 'booked').length;
+          const today = isSameDay(day, now);
+          return (
+            <div
+              key={`head-${day.toISOString()}`}
+              style={{ gridRow: 1, gridColumn: di + 2 }}
+              className={cn(
+                'sticky top-0 z-30 flex flex-col items-center justify-center gap-0.5 px-1 border-b border-surface-200 group/head',
+                today ? 'bg-brand-50' : 'bg-white'
+              )}
+            >
+              <p className={cn('text-[10px] font-semibold uppercase tracking-wider', today ? 'text-brand-500' : 'text-gray-400')}>
+                {format(day, 'EEE')}
+              </p>
+              <div className="flex items-center gap-1.5">
+                <span
+                  className={cn(
+                    'font-display text-sm font-bold w-6 h-6 inline-flex items-center justify-center rounded-full',
+                    today ? 'bg-brand-500 text-white' : 'text-gray-800'
+                  )}
+                >
+                  {format(day, 'd')}
+                </span>
+                {editable && openCount > 0 && covered.size > 0 && (
+                  <button
+                    onClick={() => onCopyDay(day)}
+                    disabled={copyingDay}
+                    title="Copy this day's open slots to the same day next week"
+                    aria-label="Copy this day to next week"
+                    className="opacity-0 group-hover/head:opacity-100 focus:opacity-100 transition-opacity p-0.5 rounded text-gray-400 hover:text-brand-600 disabled:opacity-40"
+                  >
+                    <Copy className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 h-3">
+                {openCount > 0 && (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-brand-600">
+                    <span className={cn('w-1.5 h-1.5 rounded-full', AVAILABLE_COLOR.dot)} />
+                    {openCount}
+                  </span>
+                )}
+                {bookedCount > 0 && (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-emerald-600">
+                    <span className={cn('w-1.5 h-1.5 rounded-full', BOOKED_COLOR.dot)} />
+                    {bookedCount}
+                  </span>
+                )}
+              </div>
             </div>
+          );
+        })}
+
+        {/* Hour ruler — one sticky cell per hour, spanning its two half-hour rows */}
+        {Array.from({ length: hourCount }).map((_, h) => (
+          <div
+            key={`ruler-${h}`}
+            style={{ gridRow: `${h * 2 + 2} / span 2`, gridColumn: 1 }}
+            className="sticky left-0 z-[25] bg-white border-r border-surface-200 border-t border-surface-200 pr-2 pt-1 text-right"
+          >
+            <span className="text-[11px] font-medium text-gray-400 tabular-nums">
+              {format(new Date(2000, 0, 1, startHour + h), 'h a')}
+            </span>
           </div>
+        ))}
+
+        {/* Now indicator — pill in the ruler + line across today's column */}
+        {showNowLine && (
+          <>
+            <div
+              style={{ gridRow: `2 / span ${rows}`, gridColumn: 1 }}
+              className="sticky left-0 z-[26] pointer-events-none"
+            >
+              <span
+                className="absolute right-1 -translate-y-1/2 text-[10px] font-bold text-white bg-rose-500 rounded px-1 py-px tabular-nums"
+                style={{ top: `${nowRowFloat * ROW_PX}px` }}
+              >
+                {format(now, 'h:mm')}
+              </span>
+            </div>
+            <div
+              style={{ gridRow: `2 / span ${rows}`, gridColumn: todayIdx + 2 }}
+              className="relative pointer-events-none z-20"
+            >
+              <div className="absolute left-0 right-0 border-t-2 border-rose-500" style={{ top: `${nowRowFloat * ROW_PX}px` }}>
+                <span className="absolute -left-1 -top-[5px] w-2 h-2 rounded-full bg-rose-500" />
+              </div>
+            </div>
+          </>
         )}
+
         {drag?.mode === 'resize' && (
           <div
             style={{
               gridRow: `${drag.startRow + 2} / span ${drag.previewSpan ?? drag.originalSpan}`,
               gridColumn: drag.dayIndex + 2,
             }}
-            className="m-[1.5px] rounded-md ring-2 ring-brand-500 bg-brand-500/10 pointer-events-none z-10"
+            className="m-[2px] rounded-lg ring-2 ring-brand-500 bg-brand-500/10 pointer-events-none z-10"
           />
         )}
-        <div style={{ gridRow: 1, gridColumn: 1 }} />
-        {days.map((day, di) => {
-          const { covered } = buildDayLayout(day, slots, startHour, rows);
-          const hasOpenSlots = (slots ?? []).some((s) => isSameDay(new Date(s.start_time), day) && s.status === 'open');
-          return (
-            <div key={day.toISOString()} style={{ gridRow: 1, gridColumn: di + 2 }} className="text-center pb-2 px-0.5">
-              <p className="text-xs text-gray-400 font-medium">{format(day, 'EEE')}</p>
-              <p className={`text-sm font-semibold ${isToday(day) ? 'text-brand-600' : 'text-gray-800'}`}>
-                {format(day, 'd')}
-              </p>
-              {editable && hasOpenSlots && covered.size > 0 && (
-                <button
-                  onClick={() => onCopyDay(day)}
-                  disabled={copyingDay}
-                  title="Copy this day's open slots to the same day next week"
-                  className="mt-1 inline-flex items-center gap-0.5 text-[10px] text-gray-400 hover:text-brand-600 disabled:opacity-40"
-                >
-                  <Copy className="w-2.5 h-2.5" /> copy
-                </button>
-              )}
-            </div>
-          );
-        })}
-
-        {Array.from({ length: rows }).map((_, rowIdx) => (
-          <div key={`t-${rowIdx}`} style={{ gridRow: rowIdx + 2, gridColumn: 1 }} className="text-xs text-gray-400 text-right pr-2 -mt-2.5">
-            {rowIdx % 2 === 0
-              ? format(new Date(2000, 0, 1, startHour + Math.floor(rowIdx / 2)), 'h a')
-              : ''}
-          </div>
-        ))}
 
         {days.map((day, di) => {
           const { startRowMap, covered } = buildDayLayout(day, slots, startHour, rows);
@@ -600,6 +1075,7 @@ function WeekGrid({
             const gridColumn = di + 2;
             const isPast = cellTimes[rowIdx] < now;
             const inCreateDrag = dragHere?.mode === 'create' && rowIdx >= dragLo && rowIdx <= dragHi;
+            const isHourLine = rowIdx % 2 === 0;
 
             if (startRowMap.has(rowIdx)) {
               const { slot, span } = startRowMap.get(rowIdx);
@@ -621,11 +1097,17 @@ function WeekGrid({
               // the time range only fits as a second line once the block is
               // at least an hour tall.
               const showTimeRange = span >= 2;
-              const slotEnd = new Date(new Date(slot.start_time).getTime() + slot.duration_mins * 60000);
+              const start = gridTime(slot.start_time);
+              const slotEnd = new Date(start.getTime() + slot.duration_mins * 60000);
               // Every slot is clickable now (opens the detail popover) —
               // booked ones just can't be dragged (real interviews aren't
               // cancelled from this grid), so clicking them is read-only.
               const showResizeHandle = editable && !isBooked && !isPast;
+              const label = isBooked
+                ? (slot.candidate_name ?? 'Booked')
+                : editable
+                ? 'Available'
+                : isUnassigned ? 'Needs a job' : (ROUND_MAP[slot.round_type]?.label ?? slot.round_type);
               return (
                 <button
                   key={`slot-${slot.id}`}
@@ -638,37 +1120,38 @@ function WeekGrid({
                   onMouseEnter={() => enterCell(di, rowIdx, true, slot)}
                   onClick={(e) => { if (!drag) onSlotClick(slot, e.currentTarget); }}
                   style={{ gridRow: `${gridRow} / span ${span}`, gridColumn }}
-                  className={`relative m-[1.5px] rounded-md transition-colors flex flex-col items-start justify-center px-2 py-1 overflow-hidden shadow-sm ${
+                  className={cn(
+                    'relative m-[2px] rounded-lg overflow-hidden flex flex-col items-start justify-center pl-2.5 pr-2 py-1 transition-colors',
                     isPast
-                      ? 'bg-surface-50 cursor-not-allowed shadow-none'
-                      : `${
-                          inRemoveDrag
-                            ? 'bg-rose-200 ring-2 ring-inset ring-rose-400'
-                            : isResizingThis
-                            ? `${color.bg} ring-2 ring-inset ring-brand-500`
-                            : `${color.bg} ${color.hover}`
-                        } cursor-pointer`
-                  }`}
+                      ? 'bg-surface-100/70 cursor-not-allowed'
+                      : inRemoveDrag
+                      ? 'bg-rose-100 ring-2 ring-inset ring-rose-400 cursor-pointer'
+                      : isResizingThis
+                      ? cn(color.bg, 'ring-2 ring-inset ring-brand-500 cursor-pointer')
+                      : cn(color.bg, color.hover, 'shadow-sm cursor-pointer')
+                  )}
                   title={
                     isBooked
                       ? `Booked · ${slot.candidate_name ?? 'candidate'} (${ROUND_MAP[slot.round_type]?.label}, ${slot.duration_mins} min) — click for details`
                       : editable
                       ? `Available · ${slot.duration_mins} min — click for details, drag to remove`
                       : isUnassigned
-                      ? `Not published yet · ${slot.duration_mins} min — click to publish for agencies`
+                      ? `Not published yet · ${slot.duration_mins} min — click to book it for a candidate`
                       : `Open · ${ROUND_MAP[slot.round_type]?.label} · ${slot.duration_mins} min`
                   }
                 >
-                  <span className={`text-[11px] font-semibold leading-tight truncate w-full ${color.text}`}>
-                    {isBooked
-                      ? (slot.candidate_name ?? 'Booked')
-                      : editable
-                      ? 'Available'
-                      : isUnassigned ? 'Unpublished' : (ROUND_MAP[slot.round_type]?.label ?? slot.round_type)}
+                  <span
+                    className={cn(
+                      'absolute left-0 top-0 bottom-0 w-[3px] rounded-l-lg',
+                      isPast ? 'bg-surface-300' : color.bar
+                    )}
+                  />
+                  <span className={cn('text-[11px] font-semibold leading-tight truncate w-full', isPast ? 'text-gray-400' : color.text)}>
+                    {label}
                   </span>
                   {showTimeRange && (
-                    <span className={`text-[10px] leading-tight truncate w-full opacity-75 ${color.text}`}>
-                      {format(new Date(slot.start_time), 'h:mm a')}–{format(slotEnd, 'h:mm a')}
+                    <span className={cn('text-[10px] leading-tight truncate w-full tabular-nums', isPast ? 'text-gray-400' : cn(color.text, 'opacity-70'))}>
+                      {format(start, 'h:mm')}–{format(slotEnd, 'h:mm a')}
                     </span>
                   )}
                   {showResizeHandle && (
@@ -681,7 +1164,7 @@ function WeekGrid({
                       title="Drag up/down to resize (30/60 min)"
                       className="absolute left-1 right-1 bottom-0 h-2.5 cursor-ns-resize flex items-center justify-center group"
                     >
-                      <span className="w-6 h-1 rounded-full bg-black/15 group-hover:bg-black/30" />
+                      <span className="w-6 h-1 rounded-full bg-black/10 group-hover:bg-black/30" />
                     </span>
                   )}
                 </button>
@@ -696,14 +1179,24 @@ function WeekGrid({
                 onMouseDown={(e) => { if (editable && !isPast) { e.preventDefault(); startCreateDrag(di, rowIdx); } }}
                 onMouseEnter={() => enterCell(di, rowIdx, false, null)}
                 style={{ gridRow, gridColumn }}
-                className={`border-t border-l border-surface-100 transition-colors ${
+                className={cn(
+                  'group relative flex items-center justify-center border-l border-l-surface-100 border-t transition-colors',
+                  isHourLine ? 'border-t-surface-200' : 'border-t-surface-100',
                   isPast
-                    ? 'bg-surface-50 cursor-not-allowed'
+                    ? 'bg-surface-100/60 cursor-not-allowed'
                     : editable
-                    ? `cursor-pointer ${inCreateDrag ? 'bg-brand-200 ring-1 ring-inset ring-brand-400' : 'hover:bg-surface-100'}`
+                    ? inCreateDrag
+                      ? 'bg-brand-200/70 ring-1 ring-inset ring-brand-400 cursor-pointer'
+                      : 'cursor-pointer hover:bg-brand-50'
                     : 'cursor-default'
-                }`}
-              />
+                )}
+              >
+                {editable && !isPast && !inCreateDrag && (
+                  <span className="opacity-0 group-hover:opacity-100 text-[10px] font-semibold text-brand-500 tabular-nums pointer-events-none transition-opacity">
+                    + {format(cellTimes[rowIdx], 'h:mm')}
+                  </span>
+                )}
+              </button>
             );
           });
         })}
@@ -719,13 +1212,17 @@ function WeekGrid({
 // make (job/round left null, raw unassigned availability), just fed a
 // pattern-generated start_times list instead of a single drag's worth.
 
-const WEEKDAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+const WEEKDAYS = [
+  { idx: 1, short: 'Mon' }, { idx: 2, short: 'Tue' }, { idx: 3, short: 'Wed' },
+  { idx: 4, short: 'Thu' }, { idx: 5, short: 'Fri' }, { idx: 6, short: 'Sat' },
+  { idx: 0, short: 'Sun' },
+];
 
 function RecurringAvailabilityModal({ onCancel, onSubmit, isPending }) {
   const [weekdays, setWeekdays] = useState(() => new Set([1, 2, 3, 4, 5])); // Mon–Fri by default
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('17:00');
-  const [until, setUntil] = useState(() => format(addDays(new Date(), 28), 'yyyy-MM-dd'));
+  const [until, setUntil] = useState(() => format(addDays(gridNow(), 28), 'yyyy-MM-dd'));
 
   function toggleDay(idx) {
     setWeekdays((prev) => {
@@ -737,209 +1234,274 @@ function RecurringAvailabilityModal({ onCancel, onSubmit, isPending }) {
 
   const valid = weekdays.size > 0 && startTime < endTime && !!until;
 
+  // Same arithmetic the submit handler uses, surfaced up front so nobody has
+  // to publish a pattern to find out how big it was.
+  const estimate = useMemo(() => {
+    if (!valid) return 0;
+    const [sh, sm] = startTime.split(':').map(Number);
+    const [eh, em] = endTime.split(':').map(Number);
+    const perDay = Math.max(0, Math.floor(((eh * 60 + em) - (sh * 60 + sm)) / PUBLISH_DURATION_MINS));
+    const untilDate = new Date(`${until}T23:59:59`);
+    let days = 0;
+    for (let d = gridNow(); d <= untilDate; d = addDays(d, 1)) {
+      if (weekdays.has(d.getDay())) days += 1;
+    }
+    return perDay * days;
+  }, [valid, startTime, endTime, until, weekdays]);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl w-full max-w-sm p-5">
-        <div className="flex items-center justify-between mb-1">
-          <h3 className="text-base font-bold text-gray-900 flex items-center gap-1.5">
-            <Repeat className="w-4 h-4 text-brand-500" /> Repeat weekly
-          </h3>
-          <button onClick={onCancel} className="text-gray-400 hover:text-gray-600">
-            <X className="w-5 h-5" />
-          </button>
+    <Modal
+      onClose={onCancel}
+      title="Repeat weekly"
+      description="Open up the same hours every week, in one go."
+      icon={Repeat}
+      size="md"
+      footer={
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-gray-500">
+            {estimate > 0 ? `≈ ${estimate} slot${estimate === 1 ? '' : 's'}` : 'Nothing to publish yet'}
+          </span>
+          <div className="flex gap-2">
+            <button onClick={onCancel} className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-surface-100 rounded-lg transition-colors">
+              Cancel
+            </button>
+            <button
+              disabled={!valid || isPending}
+              onClick={() => onSubmit({ weekdays, startTime, endTime, until })}
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {isPending ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Publishing…</> : 'Publish pattern'}
+            </button>
+          </div>
         </div>
-        <p className="text-xs text-gray-500 mb-4">
-          Publishes hourly, unassigned availability on each selected day, every week, until the date below.
-        </p>
+      }
+    >
+      <div className="space-y-5">
+        <div>
+          <span className="block text-xs font-semibold text-gray-600 mb-2">Repeat on</span>
+          <div className="flex flex-wrap gap-1.5">
+            {WEEKDAYS.map(({ idx, short }) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => toggleDay(idx)}
+                aria-pressed={weekdays.has(idx)}
+                className={cn(
+                  'w-12 h-9 rounded-lg text-xs font-semibold border transition-colors',
+                  weekdays.has(idx)
+                    ? 'bg-brand-500 border-brand-500 text-white'
+                    : 'bg-white border-surface-200 text-gray-500 hover:bg-surface-50'
+                )}
+              >
+                {short}
+              </button>
+            ))}
+          </div>
+        </div>
 
-        <div className="space-y-3">
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Days</label>
-            <div className="flex gap-1">
-              {WEEKDAY_LABELS.map((label, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => toggleDay(idx)}
-                  className={`w-8 h-8 rounded-full text-xs font-semibold ${
-                    weekdays.has(idx) ? 'bg-brand-500 text-white' : 'bg-surface-100 text-gray-500'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label className="block text-xs font-medium text-gray-500 mb-1">From</label>
-              <input
-                type="time"
-                value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
-                className="w-full text-sm border border-surface-300 rounded-lg px-3 py-2"
-              />
-            </div>
-            <div className="flex-1">
-              <label className="block text-xs font-medium text-gray-500 mb-1">To</label>
-              <input
-                type="time"
-                value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
-                className="w-full text-sm border border-surface-300 rounded-lg px-3 py-2"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Repeat until</label>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block">
+            <span className="block text-xs font-semibold text-gray-600 mb-1.5">From (IST)</span>
             <input
-              type="date"
-              value={until}
-              onChange={(e) => setUntil(e.target.value)}
-              className="w-full text-sm border border-surface-300 rounded-lg px-3 py-2"
+              type="time"
+              value={startTime}
+              onChange={(e) => setStartTime(e.target.value)}
+              className="w-full text-sm border border-surface-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500"
             />
-          </div>
+          </label>
+          <label className="block">
+            <span className="block text-xs font-semibold text-gray-600 mb-1.5">To (IST)</span>
+            <input
+              type="time"
+              value={endTime}
+              onChange={(e) => setEndTime(e.target.value)}
+              className="w-full text-sm border border-surface-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+          </label>
         </div>
 
-        <div className="flex justify-end gap-2 mt-5">
-          <button onClick={onCancel} className="px-4 py-2 text-sm text-gray-600 hover:bg-surface-100 rounded-lg">
-            Cancel
-          </button>
-          <button
-            disabled={!valid || isPending}
-            onClick={() => onSubmit({ weekdays, startTime, endTime, until })}
-            className="px-4 py-2 text-sm font-medium bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-50"
-          >
-            {isPending ? 'Publishing…' : 'Publish pattern'}
-          </button>
+        <label className="block">
+          <span className="block text-xs font-semibold text-gray-600 mb-1.5">Repeat until</span>
+          <input
+            type="date"
+            value={until}
+            onChange={(e) => setUntil(e.target.value)}
+            className="w-full text-sm border border-surface-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500"
+          />
+        </label>
+
+        {!valid && startTime >= endTime && (
+          <p className="text-xs text-rose-600">The end time has to be after the start time.</p>
+        )}
+
+        <div className="flex gap-2.5 text-xs text-gray-500 bg-surface-50 border border-surface-200 rounded-xl p-3">
+          <Sparkles className="w-4 h-4 text-brand-400 shrink-0 mt-px" />
+          <p>
+            Publishes hourly blocks on each selected day. Times that already have a slot are skipped, so running
+            this twice never creates duplicates.
+          </p>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
 // ── Slot detail popover (click-for-details, Teams-style) ───────────────────────
 
+const POPOVER_W = 288;
+const POPOVER_H = 340;
+
 function SlotDetailPopover({ slot, anchorRect, editable, onClose, onRemove, onResize, onReschedule, isBusy }) {
-  const ref = useRef(null);
+  const ref = useClickOutside(onClose, true);
+
+  // The card is positioned off a one-time snapshot of the slot's rect, so any
+  // scroll — the page, or the calendar's own internal scroller — detaches it
+  // from what it is describing. Capture phase is what makes this catch scrolls
+  // inside the grid container as well as on the window.
   useEffect(() => {
-    function onDocMouseDown(e) {
-      if (ref.current && !ref.current.contains(e.target)) onClose();
-    }
-    function onKeyDown(e) {
-      if (e.key === 'Escape') onClose();
-    }
-    document.addEventListener('mousedown', onDocMouseDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', onDocMouseDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
+    window.addEventListener('scroll', onClose, true);
+    return () => window.removeEventListener('scroll', onClose, true);
   }, [onClose]);
 
   const isBooked = slot.status === 'booked';
-  const start = new Date(slot.start_time);
+  const start = gridTime(slot.start_time);
   const end = new Date(start.getTime() + slot.duration_mins * 60000);
 
-  const [rescheduleDate, setRescheduleDate] = useState(() => format(start, 'yyyy-MM-dd'));
-  const [rescheduleTime, setRescheduleTime] = useState(() => format(start, 'HH:mm'));
+  const [rescheduleDate, setRescheduleDate] = useState(() => istDateKey(slot.start_time));
+  const [rescheduleTime, setRescheduleTime] = useState(() => istTimeKey(slot.start_time));
 
   function submitReschedule() {
-    const [h, m] = rescheduleTime.split(':').map(Number);
-    const next = new Date(`${rescheduleDate}T00:00:00`);
-    next.setHours(h, m, 0, 0);
-    onReschedule(next);
+    onReschedule(fromISTDateTime(rescheduleDate, rescheduleTime));
   }
 
-  // Clamp so the popover (fixed ~256px wide) never renders off the right or
-  // bottom edge of the viewport — anchorRect is a raw DOM rect with no idea
-  // how big this card actually is.
-  const top = anchorRect ? Math.min(anchorRect.bottom + 6, window.innerHeight - 340) : 100;
-  const left = anchorRect ? Math.min(anchorRect.left, window.innerWidth - 280) : 100;
+  // Flip above the anchor when there isn't room below, and clamp horizontally
+  // so the card never renders off an edge — anchorRect is a raw DOM rect with
+  // no idea how big this card actually is.
+  const { top, left } = useMemo(() => {
+    if (!anchorRect) return { top: 100, left: 100 };
+    const spaceBelow = window.innerHeight - anchorRect.bottom;
+    const flip = spaceBelow < POPOVER_H && anchorRect.top > spaceBelow;
+    return {
+      top: flip
+        ? Math.max(8, anchorRect.top - POPOVER_H - 6)
+        : Math.min(anchorRect.bottom + 6, window.innerHeight - POPOVER_H - 8),
+      left: Math.max(8, Math.min(anchorRect.left, window.innerWidth - POPOVER_W - 8)),
+    };
+  }, [anchorRect]);
 
   return (
-    <div ref={ref} style={{ top, left }} className="fixed z-50 w-64 bg-white rounded-xl border border-surface-200 shadow-lg p-4">
-      <div className="flex items-start justify-between mb-2">
-        <p className="text-sm font-semibold text-gray-900">
-          {format(start, 'EEE, MMM d')} · {format(start, 'h:mm a')}–{format(end, 'h:mm a')}
-        </p>
-        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 -mt-1 -mr-1">
-          <X className="w-4 h-4" />
-        </button>
-      </div>
-
-      {isBooked ? (
-        <div className="text-xs text-gray-500 space-y-1">
-          <p className="text-emerald-700 font-medium">Booked</p>
-          <p>{slot.candidate_name ?? 'Candidate'}</p>
-          {slot.job_title && (
-            <p>{slot.job_title} · {ROUND_MAP[slot.round_type]?.label ?? slot.round_type}</p>
-          )}
-        </div>
-      ) : (
-        <p className="text-xs text-gray-500 mb-1">
-          {slot.job_id
-            ? `${slot.job_title ?? 'Assigned'} · ${ROUND_MAP[slot.round_type]?.label ?? slot.round_type}`
-            : 'Not yet published for agencies'}
-        </p>
-      )}
-
-      {editable && !isBooked && (
-        <div className="mt-3 pt-3 border-t border-surface-100 space-y-3">
-          <div>
-            <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-1">Duration</p>
-            <div className="flex gap-1.5">
-              {[30, 60].map((mins) => (
-                <button
-                  key={mins}
-                  disabled={isBusy}
-                  onClick={() => onResize(mins)}
-                  className={`flex-1 text-xs font-medium py-1.5 rounded-lg border disabled:opacity-50 ${
-                    slot.duration_mins === mins
-                      ? 'bg-brand-500 text-white border-brand-500'
-                      : 'bg-white text-gray-600 border-surface-300 hover:bg-surface-50'
-                  }`}
-                >
-                  {mins} min
-                </button>
-              ))}
-            </div>
+    <div
+      ref={ref}
+      style={{ top, left, width: POPOVER_W }}
+      className="fixed z-50 bg-white rounded-2xl border border-surface-200 shadow-modal overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+    >
+      <div className={cn('px-4 py-3 border-b border-surface-100', isBooked ? 'bg-emerald-50' : 'bg-brand-50/60')}>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+              {format(start, 'EEEE, MMM d')}
+            </p>
+            <p className="font-display text-sm font-bold text-gray-900 tabular-nums mt-0.5">
+              {format(start, 'h:mm a')} – {format(end, 'h:mm a')}
+              <span className="ml-1 text-[11px] font-medium text-gray-400">IST</span>
+            </p>
           </div>
-
-          <div>
-            <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-1">Reschedule</p>
-            <div className="flex gap-1.5">
-              <input
-                type="date"
-                value={rescheduleDate}
-                onChange={(e) => setRescheduleDate(e.target.value)}
-                className="flex-1 min-w-0 text-xs border border-surface-300 rounded-lg px-2 py-1.5"
-              />
-              <input
-                type="time"
-                value={rescheduleTime}
-                onChange={(e) => setRescheduleTime(e.target.value)}
-                className="w-24 text-xs border border-surface-300 rounded-lg px-2 py-1.5"
-              />
-            </div>
-            <button
-              disabled={isBusy}
-              onClick={submitReschedule}
-              className="mt-1.5 w-full text-xs font-medium text-brand-700 bg-brand-50 border border-brand-200 rounded-lg py-1.5 hover:bg-brand-100 disabled:opacity-50"
-            >
-              Move slot
-            </button>
-          </div>
-
-          <button
-            disabled={isBusy}
-            onClick={() => onRemove(slot.id)}
-            className="w-full flex items-center justify-center gap-1.5 text-xs font-medium text-rose-600 hover:bg-rose-50 rounded-lg py-1.5 disabled:opacity-50"
-          >
-            <Trash2 className="w-3.5 h-3.5" /> Remove slot
+          <button onClick={onClose} aria-label="Close" className="shrink-0 -mt-0.5 -mr-1 w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:bg-white/70 hover:text-gray-600">
+            <X className="w-4 h-4" />
           </button>
         </div>
-      )}
+      </div>
+
+      <div className="px-4 py-3">
+        {isBooked ? (
+          <div className="space-y-2">
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700 bg-emerald-50 rounded-full px-2 py-0.5">
+              <span className={cn('w-1.5 h-1.5 rounded-full', BOOKED_COLOR.dot)} /> Booked
+            </span>
+            <div className="flex items-center gap-2">
+              <Avatar name={slot.candidate_name} className="w-8 h-8 text-xs" />
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-gray-900 truncate">{slot.candidate_name ?? 'Candidate'}</p>
+                {slot.job_title && (
+                  <p className="text-xs text-gray-500 truncate">
+                    {slot.job_title} · {ROUND_MAP[slot.round_type]?.label ?? slot.round_type}
+                  </p>
+                )}
+              </div>
+            </div>
+            <p className="text-[11px] text-gray-400 pt-1">
+              Real interviews aren’t changed from this calendar — manage it from the candidate’s application.
+            </p>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <span className={cn('w-2 h-2 rounded-full shrink-0', slot.job_id ? DEFAULT_GRID_COLOR.dot : UNASSIGNED_COLOR.dot)} />
+            <p className="text-xs text-gray-600">
+              {slot.job_id
+                ? `${slot.job_title ?? 'Assigned'} · ${ROUND_MAP[slot.round_type]?.label ?? slot.round_type}`
+                : 'Free time — not published to agencies yet'}
+            </p>
+          </div>
+        )}
+
+        {editable && !isBooked && (
+          <div className="mt-3.5 pt-3.5 border-t border-surface-100 space-y-3.5">
+            <div>
+              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Duration</p>
+              <div className="grid grid-cols-2 gap-1.5">
+                {[30, 60].map((mins) => (
+                  <button
+                    key={mins}
+                    disabled={isBusy}
+                    onClick={() => onResize(mins)}
+                    className={cn(
+                      'text-xs font-medium py-2 rounded-lg border transition-colors disabled:opacity-50',
+                      slot.duration_mins === mins
+                        ? 'bg-brand-500 text-white border-brand-500'
+                        : 'bg-white text-gray-600 border-surface-200 hover:bg-surface-50'
+                    )}
+                  >
+                    {mins} min
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Move to</p>
+              <div className="flex gap-1.5">
+                <input
+                  type="date"
+                  value={rescheduleDate}
+                  onChange={(e) => setRescheduleDate(e.target.value)}
+                  className="flex-1 min-w-0 text-xs border border-surface-300 rounded-lg px-2 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+                <input
+                  type="time"
+                  value={rescheduleTime}
+                  onChange={(e) => setRescheduleTime(e.target.value)}
+                  className="w-[5.5rem] text-xs border border-surface-300 rounded-lg px-2 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+              <button
+                disabled={isBusy}
+                onClick={submitReschedule}
+                className="mt-1.5 w-full text-xs font-semibold text-brand-700 bg-brand-50 border border-brand-200 rounded-lg py-2 hover:bg-brand-100 disabled:opacity-50 transition-colors"
+              >
+                Move slot
+              </button>
+            </div>
+
+            <button
+              disabled={isBusy}
+              onClick={() => onRemove(slot.id)}
+              className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold text-rose-600 border border-rose-100 hover:bg-rose-50 rounded-lg py-2 disabled:opacity-50 transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Remove this slot
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -947,34 +1509,67 @@ function SlotDetailPopover({ slot, anchorRect, editable, onClose, onRemove, onRe
 // ── Month summary (browse → jump into week) ───────────────────────────────────
 
 function MonthGrid({ month, countsByDay, onDayClick }) {
-  const start = startOfMonth(month);
-  const end = endOfMonth(month);
-  const days = eachDayOfInterval({ start: startOfWeek(start), end: addDays(startOfWeek(end), 41) }).slice(0, 42);
+  const gridStart = startOfWeek(startOfMonth(month));
+  const days = eachDayOfInterval({ start: gridStart, end: addDays(gridStart, 41) });
+  const today = gridNow();
 
   return (
-    <div className="grid grid-cols-7 gap-1">
-      {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
-        <div key={d} className="text-center text-xs font-medium text-gray-400 pb-1">{d}</div>
-      ))}
-      {days.map((day) => {
-        const count = countsByDay.get(dayKeyLocal(day)) ?? 0;
-        return (
-          <button
-            key={day.toISOString()}
-            onClick={() => onDayClick(day)}
-            className={`h-16 rounded-lg border p-1.5 text-left transition-colors ${
-              isSameMonth(day, month) ? 'border-surface-200 hover:border-brand-300' : 'border-surface-100 text-gray-300'
-            }`}
-          >
-            <span className={`text-xs ${isToday(day) ? 'font-bold text-brand-600' : 'text-gray-600'}`}>
-              {format(day, 'd')}
-            </span>
-            {count > 0 && (
-              <p className="text-[10px] mt-1 text-brand-600 font-medium">{count} slot{count !== 1 ? 's' : ''}</p>
-            )}
-          </button>
-        );
-      })}
+    <div className="rounded-xl border border-surface-200 overflow-hidden bg-white">
+      <div className="grid grid-cols-7 bg-surface-50 border-b border-surface-200">
+        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
+          <div key={d} className="text-center text-[10px] font-semibold uppercase tracking-wider text-gray-400 py-2">
+            <span className="hidden sm:inline">{d}</span>
+            <span className="sm:hidden">{d[0]}</span>
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7">
+        {days.map((day) => {
+          const counts = countsByDay.get(dayKeyLocal(day)) ?? { available: 0, booked: 0 };
+          const total = counts.available + counts.booked;
+          const inMonth = isSameMonth(day, month);
+          const isTodayCell = isSameDay(day, today);
+          return (
+            <button
+              key={day.toISOString()}
+              onClick={() => onDayClick(day)}
+              title={total > 0 ? `${counts.available} available · ${counts.booked} booked` : 'No availability'}
+              className={cn(
+                'h-20 sm:h-24 border-b border-r border-surface-100 p-1.5 sm:p-2 text-left transition-colors relative',
+                inMonth ? 'hover:bg-brand-50' : 'bg-surface-50/60',
+                isWeekend(day) && inMonth && 'bg-surface-50/50'
+              )}
+            >
+              <span
+                className={cn(
+                  'inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-semibold',
+                  isTodayCell
+                    ? 'bg-brand-500 text-white'
+                    : inMonth ? 'text-gray-700' : 'text-gray-300'
+                )}
+              >
+                {format(day, 'd')}
+              </span>
+              {total > 0 && (
+                <div className="mt-1 space-y-0.5">
+                  {counts.available > 0 && (
+                    <p className="flex items-center gap-1 text-[10px] font-medium text-brand-700">
+                      <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', AVAILABLE_COLOR.dot)} />
+                      {counts.available} free
+                    </p>
+                  )}
+                  {counts.booked > 0 && (
+                    <p className="flex items-center gap-1 text-[10px] font-medium text-emerald-700">
+                      <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', BOOKED_COLOR.dot)} />
+                      {counts.booked} booked
+                    </p>
+                  )}
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -983,7 +1578,47 @@ function dayKeyLocal(date) {
   return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
 }
 
+// ── Legend ────────────────────────────────────────────────────────────────────
+
+function Legend({ editable }) {
+  const items = editable
+    ? [
+        { swatch: AVAILABLE_COLOR.swatch, label: 'Available' },
+        { swatch: BOOKED_COLOR.swatch, label: 'Booked' },
+      ]
+    : [
+        { swatch: UNASSIGNED_COLOR.swatch, label: 'Needs a job' },
+        ...ROUND_TYPES.map((r) => ({
+          swatch: (GRID_ROUND_COLORS[r.key] ?? DEFAULT_GRID_COLOR).swatch,
+          label: r.label,
+        })),
+        { swatch: BOOKED_COLOR.swatch, label: 'Booked' },
+      ];
+  return (
+    <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5">
+      {items.map(({ swatch, label }) => (
+        <span key={label} className="inline-flex items-center gap-1.5 text-xs text-gray-500">
+          <span className={cn('w-2.5 h-2.5 rounded-sm', swatch)} />
+          {label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
+
+const HR_MODES = [
+  { value: 'own', label: 'My availability', shortLabel: 'Mine', icon: User },
+  { value: 'manage', label: 'Book for an interviewer', shortLabel: 'Book', icon: CalendarCheck },
+  { value: 'publish', label: 'Publish to agencies', shortLabel: 'Publish', icon: Send },
+];
+
+const VIEW_OPTIONS = [
+  { value: 'day', label: 'Day', icon: CalendarDays },
+  { value: 'week', label: 'Week', icon: CalendarRange },
+  { value: 'month', label: 'Month', icon: LayoutGrid },
+];
 
 export default function AvailabilityPage() {
   const { user } = useAuthStore();
@@ -991,9 +1626,9 @@ export default function AvailabilityPage() {
   const isHR = HR_ROLES.includes(user?.role);
 
   const [view, setView] = useState('week'); // 'week' | 'month' | 'day'
-  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
-  const [dayCursor, setDayCursor] = useState(() => new Date());
-  const [monthCursor, setMonthCursor] = useState(() => new Date());
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(gridNow()));
+  const [dayCursor, setDayCursor] = useState(() => gridNow());
+  const [monthCursor, setMonthCursor] = useState(() => gridNow());
   const [selectedInterviewerId, setSelectedInterviewerId] = useState('');
   const [bookingSlot, setBookingSlot] = useState(null);
   const [assigningSlot, setAssigningSlot] = useState(null);
@@ -1002,6 +1637,12 @@ export default function AvailabilityPage() {
   // { slot, anchorRect } | null — the Teams-style click-for-details popover,
   // anchored to the DOM rect of whichever slot button was clicked.
   const [detailPopover, setDetailPopover] = useState(null);
+
+  // A 7-column grid is unreadable on a phone, so narrow screens open on the
+  // single-day view instead of dumping the user into a sideways scroll.
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 640) setView('day');
+  }, []);
 
   // Ticks once a minute purely to force WeekGrid to re-render so its
   // current-time indicator line keeps moving — the grid otherwise only
@@ -1032,15 +1673,20 @@ export default function AvailabilityPage() {
     queryFn: () => interviewSlotsApi.publishableJobs().then((r) => r.data),
   });
 
+  // Everyone who can actually sit on a panel, not just users whose role is
+  // literally "interviewer" — HR managers and admins conduct interviews too
+  // (that's exactly what the "My availability" tab exists for), and the old
+  // role:'interviewer' filter made their calendars unreachable from here.
   const { data: interviewersData } = useQuery({
-    queryKey: ['interviewer-users'],
-    queryFn: () => usersApi.list({ role: 'interviewer' }).then((r) => r.data),
+    queryKey: ['panel-eligible-users'],
+    queryFn: () => usersApi.panelEligible().then((r) => r.data),
     enabled: isHR,
   });
 
   const manageOwnSlots = !isHR || hrMode === 'own';
   const viewingInterviewerId = manageOwnSlots ? user?.id : selectedInterviewerId;
   const editable = manageOwnSlots; // publishing own slots vs. HR just booking someone else's
+  const selectedInterviewer = interviewersData?.find((p) => p.id === selectedInterviewerId);
 
   const { data: slots, isLoading } = useQuery({
     queryKey: ['interview-slots', manageOwnSlots ? 'mine' : viewingInterviewerId],
@@ -1074,24 +1720,40 @@ export default function AvailabilityPage() {
     return (publishableSlots ?? []).filter((s) => s.interviewer_id === selectedInterviewerId);
   }, [publishableSlots, selectedInterviewerId]);
 
-  // The single at-a-glance answer to "what are my slots, what's already
-  // booked" — the whole reason someone opens this page — surfaced as plain
-  // numbers right under the title instead of making the interviewer scan and
-  // count colored cells across the whole calendar themselves.
+  // The single at-a-glance answer to "what's on this calendar" — the whole
+  // reason someone opens this page — surfaced as plain numbers up top instead
+  // of making anyone scan and count colored cells across a whole month.
   const upcomingStats = useMemo(() => {
     const now = new Date();
     const upcoming = (slots ?? []).filter((s) => new Date(s.start_time) >= now);
+    const open = upcoming.filter((s) => s.status === 'open');
+    const soon = upcoming.filter((s) => new Date(s.start_time) <= new Date(now.getTime() + 7 * 86400000));
     return {
-      available: upcoming.filter((s) => s.status === 'open').length,
+      available: open.length,
       booked: upcoming.filter((s) => s.status === 'booked').length,
+      unpublished: open.filter((s) => !s.job_id).length,
+      next7: soon.length,
+      nextSlot: upcoming.sort((a, b) => new Date(a.start_time) - new Date(b.start_time))[0] ?? null,
     };
   }, [slots]);
+
+  const publishStats = useMemo(() => {
+    const now = new Date();
+    const upcoming = (publishPanelSlots ?? []).filter((s) => new Date(s.start_time) >= now && s.status === 'open');
+    return {
+      needsJob: upcoming.filter((s) => !s.job_id).length,
+      awaiting: upcoming.filter((s) => !!s.job_id).length,
+      interviewers: new Set(upcoming.map((s) => s.interviewer_id)).size,
+    };
+  }, [publishPanelSlots]);
 
   const countsByDay = useMemo(() => {
     const map = new Map();
     (slots ?? []).forEach((s) => {
-      const k = dayKeyLocal(new Date(s.start_time));
-      map.set(k, (map.get(k) ?? 0) + 1);
+      const k = dayKeyLocal(gridTime(s.start_time));
+      const cur = map.get(k) ?? { available: 0, booked: 0 };
+      if (s.status === 'booked') cur.booked += 1; else cur.available += 1;
+      map.set(k, cur);
     });
     return map;
   }, [slots]);
@@ -1102,7 +1764,7 @@ export default function AvailabilityPage() {
   const hiddenOutsideWindow = useMemo(() => {
     if (showFullDay) return 0;
     return (slots ?? []).filter((s) => {
-      const st = new Date(s.start_time);
+      const st = gridTime(s.start_time);
       return gridDays.some((d) => isSameDay(d, st)) && (st.getHours() < WORK_START_HOUR || st.getHours() >= WORK_END_HOUR);
     }).length;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1114,7 +1776,7 @@ export default function AvailabilityPage() {
   // out first.
   const unassignedCountThisWeek = useMemo(() => {
     return (slots ?? []).filter((s) => {
-      const st = new Date(s.start_time);
+      const st = gridTime(s.start_time);
       return s.status === 'open' && !s.job_id && gridDays.some((d) => isSameDay(d, st));
     }).length;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1134,12 +1796,14 @@ export default function AvailabilityPage() {
   };
 
   const publishBatchMutation = useMutation({
+    // start_times arrive as IST wall-clock grid Dates; gridToInstant is what
+    // turns each one back into the real UTC instant the API stores.
     mutationFn: ({ jobId, roundType, durationMins, startTimes }) =>
       interviewSlotsApi.publish({
         job_id: jobId,
         round_type: roundType,
         duration_mins: durationMins,
-        start_times: startTimes.map((d) => d.toISOString()),
+        start_times: startTimes.map((d) => gridToInstant(d).toISOString()),
       }),
   });
 
@@ -1271,7 +1935,7 @@ export default function AvailabilityPage() {
       job_id: null,
       job_title: null,
       round_type: null,
-      start_time: st.toISOString(),
+      start_time: gridToInstant(st).toISOString(),
       duration_mins: PUBLISH_DURATION_MINS,
       status: 'open',
       interview_id: null,
@@ -1324,13 +1988,13 @@ export default function AvailabilityPage() {
   // days is the only direction that can never land in the past.
   const [copyingDay, setCopyingDay] = useState(false);
   async function handleCopyDay(day) {
-    const daySlots = (slots ?? []).filter((s) => isSameDay(new Date(s.start_time), day) && s.status === 'open');
+    const daySlots = (slots ?? []).filter((s) => isSameDay(gridTime(s.start_time), day) && s.status === 'open');
     if (daySlots.length === 0) return;
     const targetDay = addDays(day, 7);
 
     const groups = new Map(); // duration_mins -> [Date,...]
     for (const s of daySlots) {
-      const st = new Date(s.start_time);
+      const st = gridTime(s.start_time);
       if (!groups.has(s.duration_mins)) groups.set(s.duration_mins, []);
       const d = new Date(targetDay);
       d.setHours(st.getHours(), st.getMinutes(), 0, 0);
@@ -1350,7 +2014,7 @@ export default function AvailabilityPage() {
       }
       invalidateSlots();
       if (totalCreated === 0) toast.error('Nothing to copy — those times are already taken next week');
-      else toast.success(`Copied to ${format(targetDay, 'EEE, MMM d')} as unassigned: ${totalCreated} slot${totalCreated !== 1 ? 's' : ''}${totalCreated < totalRequested ? ` (${totalRequested - totalCreated} skipped — already occupied)` : ''} — remember to publish for agencies`);
+      else toast.success(`Copied to ${format(targetDay, 'EEE, MMM d')}: ${totalCreated} slot${totalCreated !== 1 ? 's' : ''}${totalCreated < totalRequested ? ` (${totalRequested - totalCreated} skipped — already occupied)` : ''}`);
     } catch (err) {
       toast.error(err.response?.data?.detail ?? 'Could not copy this day');
     } finally {
@@ -1381,6 +2045,8 @@ export default function AvailabilityPage() {
     }
   }
 
+  // `startTime` is a real UTC instant already — the popover builds it from its
+  // IST date/time inputs via fromISTDateTime.
   async function handleRescheduleSlot(slotId, startTime) {
     try {
       await rescheduleMutation.mutateAsync({ slotId, data: { start_time: startTime.toISOString() } });
@@ -1440,10 +2106,10 @@ export default function AvailabilityPage() {
     const [startH, startM] = startTime.split(':').map(Number);
     const [endH, endM] = endTime.split(':').map(Number);
     const untilDate = new Date(`${until}T23:59:59`);
-    const now = new Date();
+    const now = gridNow();
 
     const startTimes = [];
-    for (let day = new Date(); day <= untilDate; day = addDays(day, 1)) {
+    for (let day = gridNow(); day <= untilDate; day = addDays(day, 1)) {
       if (!weekdays.has(day.getDay())) continue;
       for (let h = startH, m = startM; h < endH || (h === endH && m < endM); ) {
         const dt = new Date(day);
@@ -1477,191 +2143,271 @@ export default function AvailabilityPage() {
     }
   }
 
+  // ── Header copy, per mode ──
+  const heading = manageOwnSlots
+    ? 'My Availability'
+    : hrMode === 'publish'
+    ? 'Publish Slots to Agencies'
+    : 'Interviewer Availability';
+  const subheading = manageOwnSlots
+    ? 'Drag across the grid to mark yourself free — HR takes it from there.'
+    : hrMode === 'publish'
+    ? 'Attach a job and round to open availability so recruitment partners can book it.'
+    : 'Browse a panel member’s calendar and book an interview directly for a candidate.';
+
+  const isCalendarMode = hrMode !== 'publish';
+  const needsInterviewerPick = isHR && hrMode === 'manage' && !selectedInterviewerId;
+
+  function goToday() {
+    if (view === 'day') setDayCursor(gridNow());
+    else if (view === 'week') setWeekStart(startOfWeek(gridNow()));
+    else setMonthCursor(gridNow());
+  }
+  function step(dir) {
+    if (view === 'day') setDayCursor((d) => addDays(d, dir));
+    else if (view === 'week') setWeekStart((w) => (dir > 0 ? addWeeks(w, 1) : subWeeks(w, 1)));
+    else setMonthCursor((m) => (dir > 0 ? addMonths(m, 1) : subMonths(m, 1)));
+  }
+  const rangeLabel =
+    view === 'day'
+      ? format(dayCursor, 'EEEE, MMM d, yyyy')
+      : view === 'month'
+      ? format(monthCursor, 'MMMM yyyy')
+      : `${format(weekStart, 'MMM d')} – ${format(addDays(weekStart, 6), 'MMM d, yyyy')}`;
+
   return (
-    <div>
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
-        <div>
-          <h1 className="font-display text-xl font-bold text-gray-900 flex items-center gap-2">
-            <CalendarClock className="w-5 h-5 text-brand-500" />
-            {manageOwnSlots ? 'My Availability' : hrMode === 'publish' ? 'Publish Slots to Agencies' : 'Interviewer Availability'}
-          </h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            {manageOwnSlots
-              ? 'Drag across the grid to mark yourself free — HR takes it from there.'
-              : hrMode === 'publish'
-              ? 'Pick an interviewer and a job, tick as many open slots as you like, and publish them all at once.'
-              : 'Pick an interviewer, then click a slate slot to publish it for agencies (job & round), or book an already-published one directly.'}
-          </p>
-          {manageOwnSlots && !isLoading && (
-            <div className="flex items-center gap-3 mt-2">
-              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-700 bg-brand-50 rounded-full px-2.5 py-1">
-                <span className={`w-1.5 h-1.5 rounded-full ${AVAILABLE_COLOR.dot}`} />
-                {upcomingStats.available} available
-              </span>
-              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 rounded-full px-2.5 py-1">
-                <span className={`w-1.5 h-1.5 rounded-full ${BOOKED_COLOR.dot}`} />
-                {upcomingStats.booked} booked
-              </span>
+    <div className="space-y-4 max-w-[1500px]">
+      {/* ── Header ── */}
+      <div className="bg-white rounded-2xl border border-surface-200 p-4 sm:p-5">
+        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+          <div className="flex items-start gap-3 min-w-0">
+            <span className="w-10 h-10 shrink-0 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center">
+              <CalendarClock className="w-5 h-5" />
+            </span>
+            <div className="min-w-0">
+              <h1 className="font-display text-lg sm:text-xl font-bold text-gray-900 leading-tight">{heading}</h1>
+              <p className="text-sm text-gray-500 mt-0.5">{subheading}</p>
             </div>
+          </div>
+          {isHR && (
+            <Segmented
+              value={hrMode}
+              onChange={setHrMode}
+              options={HR_MODES}
+              className="shrink-0 self-start"
+            />
           )}
         </div>
-        {hrMode !== 'publish' && (
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setView('day')}
-              className={`px-3 py-1.5 text-sm rounded-lg font-medium ${view === 'day' ? 'bg-brand-500 text-white' : 'bg-white border border-surface-200 text-gray-600'}`}
-            >
-              Day
-            </button>
-            <button
-              onClick={() => setView('week')}
-              className={`px-3 py-1.5 text-sm rounded-lg font-medium ${view === 'week' ? 'bg-brand-500 text-white' : 'bg-white border border-surface-200 text-gray-600'}`}
-            >
-              Week
-            </button>
-            <button
-              onClick={() => setView('month')}
-              className={`px-3 py-1.5 text-sm rounded-lg font-medium ${view === 'month' ? 'bg-brand-500 text-white' : 'bg-white border border-surface-200 text-gray-600'}`}
-            >
-              Month
-            </button>
+
+        {/* Stats */}
+        {isCalendarMode ? (
+          (!isHR || viewingInterviewerId) && !isLoading && (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-4 pt-4 border-t border-surface-100">
+              <StatTile label="Upcoming available" value={upcomingStats.available} icon={CalendarCheck} tone="brand" />
+              <StatTile label="Booked interviews" value={upcomingStats.booked} icon={Users} tone="emerald" />
+              {editable ? (
+                <StatTile label="Next 7 days" value={upcomingStats.next7} icon={CalendarRange} tone="violet" />
+              ) : (
+                <StatTile label="Still need a job" value={upcomingStats.unpublished} icon={Hourglass} tone="amber" />
+              )}
+              <StatTile
+                label="Next slot"
+                value={
+                  upcomingStats.nextSlot
+                    ? format(gridTime(upcomingStats.nextSlot.start_time), 'd MMM')
+                    : '—'
+                }
+                hint={
+                  upcomingStats.nextSlot
+                    ? `${format(gridTime(upcomingStats.nextSlot.start_time), 'h:mm a')} IST`
+                    : 'Nothing scheduled'
+                }
+                icon={Clock}
+                tone="slate"
+              />
+            </div>
+          )
+        ) : (
+          !publishableLoading && (
+            <div className="grid grid-cols-3 gap-3 mt-4 pt-4 border-t border-surface-100">
+              <StatTile label="Need a job" value={publishStats.needsJob} icon={Hourglass} tone="amber" />
+              <StatTile label="Awaiting a booking" value={publishStats.awaiting} icon={Send} tone="brand" />
+              <StatTile label="Panel members free" value={publishStats.interviewers} icon={Users} tone="violet" />
+            </div>
+          )
+        )}
+      </div>
+
+      {/* ── Toolbar ── */}
+      <div className="flex flex-col xl:flex-row xl:items-center gap-3">
+        {isHR && (hrMode === 'manage' || hrMode === 'publish') && (
+          <div className="flex items-end gap-2">
+            <InterviewerPicker
+              value={selectedInterviewerId}
+              onChange={setSelectedInterviewerId}
+              people={interviewersData}
+              allLabel={hrMode === 'publish' ? 'All interviewers' : undefined}
+              placeholder="Select an interviewer…"
+            />
+            {hrMode === 'manage' && selectedInterviewerId && (
+              <button
+                onClick={() => requestPublishMutation.mutate(selectedInterviewerId)}
+                disabled={requestPublishMutation.isPending}
+                title="Send a reminder asking them to publish their free interview slots"
+                className="h-[46px] inline-flex items-center gap-1.5 px-3 text-sm font-medium text-brand-700 bg-brand-50 border border-brand-200 rounded-xl hover:bg-brand-100 disabled:opacity-50 transition-colors"
+              >
+                {requestPublishMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <BellRing className="w-4 h-4" />}
+                <span className="hidden sm:inline">{requestPublishMutation.isPending ? 'Sending…' : 'Nudge'}</span>
+              </button>
+            )}
+          </div>
+        )}
+
+        {isCalendarMode && (!isHR || viewingInterviewerId) && (
+          <div className="flex flex-wrap items-center gap-2 xl:ml-auto">
+            <div className="flex items-center gap-1 bg-white border border-surface-200 rounded-xl p-1">
+              <IconButton icon={ChevronLeft} label="Previous" onClick={() => step(-1)} className="border-0 bg-transparent hover:bg-surface-100" />
+              <button
+                onClick={goToday}
+                className="px-2.5 py-1 text-xs font-semibold text-gray-600 hover:text-brand-600 rounded-lg hover:bg-surface-100 transition-colors"
+              >
+                Today
+              </button>
+              <IconButton icon={ChevronRight} label="Next" onClick={() => step(1)} className="border-0 bg-transparent hover:bg-surface-100" />
+            </div>
+            <p className="font-display text-sm font-semibold text-gray-800 tabular-nums px-1 order-last w-full sm:order-none sm:w-auto">
+              {rangeLabel}
+            </p>
+            <Segmented value={view} onChange={setView} options={VIEW_OPTIONS} size="sm" />
+            {view !== 'month' && (
+              <IconButton
+                icon={showFullDay ? Minimize2 : Maximize2}
+                label={showFullDay ? 'Show working hours only' : 'Show the full 24 hours'}
+                active={showFullDay}
+                onClick={() => setShowFullDay((v) => !v)}
+              />
+            )}
+            {editable && (
+              <button
+                onClick={() => setShowRecurringModal(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-brand-700 bg-white border border-brand-200 rounded-xl hover:bg-brand-50 transition-colors"
+              >
+                <Repeat className="w-4 h-4" />
+                <span className="hidden sm:inline">Repeat weekly</span>
+              </button>
+            )}
           </div>
         )}
       </div>
 
-      {isHR && (
-        <div className="flex flex-wrap items-center gap-2 mb-4">
-          <button
-            onClick={() => setHrMode('own')}
-            className={`px-3 py-1.5 text-sm rounded-lg font-medium ${hrMode === 'own' ? 'bg-brand-500 text-white' : 'bg-white border border-surface-200 text-gray-600'}`}
-          >
-            My availability
-          </button>
-          <button
-            onClick={() => setHrMode('manage')}
-            className={`px-3 py-1.5 text-sm rounded-lg font-medium ${hrMode === 'manage' ? 'bg-brand-500 text-white' : 'bg-white border border-surface-200 text-gray-600'}`}
-          >
-            Book for an interviewer
-          </button>
-          <button
-            onClick={() => setHrMode('publish')}
-            className={`px-3 py-1.5 text-sm rounded-lg font-medium ${hrMode === 'publish' ? 'bg-brand-500 text-white' : 'bg-white border border-surface-200 text-gray-600'}`}
-          >
-            Publish slots to agencies
-          </button>
-        </div>
+      {/* ── Publish-to-agencies mode ── */}
+      {isHR && hrMode === 'publish' && (
+        <PublishSlotsPanel
+          slots={publishPanelSlots}
+          jobsData={jobsData}
+          onPublish={handlePublishBatch}
+          isPending={assignBatchMutation.isPending}
+          onUnassign={handleUnassignSlot}
+          unassigningId={unassigningSlotId}
+          isLoading={publishableLoading}
+        />
       )}
 
-      {isHR && (hrMode === 'manage' || hrMode === 'publish') && (
-        <div className="flex flex-wrap items-center gap-2 mb-4">
-          <select
-            value={selectedInterviewerId}
-            onChange={(e) => setSelectedInterviewerId(e.target.value)}
-            className="text-sm border border-surface-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 min-w-[220px]"
-          >
-            <option value="">{hrMode === 'publish' ? 'All interviewers' : 'Select an interviewer…'}</option>
-            {interviewersData?.map((iv) => (
-              <option key={iv.id} value={iv.id}>{iv.full_name}</option>
-            ))}
-          </select>
-          {hrMode === 'manage' && selectedInterviewerId && (
-            <button
-              onClick={() => requestPublishMutation.mutate(selectedInterviewerId)}
-              disabled={requestPublishMutation.isPending}
-              title="Send a reminder asking them to publish their free interview slots"
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-brand-700 bg-brand-50 border border-brand-200 rounded-lg hover:bg-brand-100 disabled:opacity-50"
-            >
-              <BellRing className="w-4 h-4" />
-              {requestPublishMutation.isPending ? 'Sending…' : 'Request availability'}
-            </button>
+      {/* ── HR hasn't chosen whose calendar to look at ── */}
+      {needsInterviewerPick && (
+        <div className="bg-white rounded-2xl border border-surface-200 overflow-hidden">
+          <div className="px-4 sm:px-5 py-4 border-b border-surface-200">
+            <h2 className="font-display font-semibold text-gray-900">Whose calendar do you need?</h2>
+            <p className="text-sm text-gray-500 mt-0.5">
+              Pick someone from the interview panel to see their availability and book a candidate into it.
+            </p>
+          </div>
+          {!interviewersData ? (
+            <div className="flex justify-center py-14"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>
+          ) : interviewersData.length === 0 ? (
+            <EmptyState
+              icon={Users}
+              title="No panel members yet"
+              description="Invite interviewers, HR managers or admins from Settings and their calendars will show up here."
+            />
+          ) : (
+            <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-2.5 p-4 sm:p-5">
+              {interviewersData.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => setSelectedInterviewerId(p.id)}
+                  className="group flex items-center gap-3 p-3 rounded-xl border border-surface-200 bg-white text-left hover:border-brand-300 hover:shadow-card transition-all"
+                >
+                  <Avatar name={p.full_name} className="w-9 h-9 text-xs" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium text-gray-900 truncate">{p.full_name}</span>
+                    <span className="block text-xs text-gray-400 truncate">{p.email}</span>
+                  </span>
+                  <ArrowRight className="w-4 h-4 text-gray-300 group-hover:text-brand-500 shrink-0" />
+                </button>
+              ))}
+            </div>
           )}
         </div>
       )}
 
-      {editable && (
-        <div className="flex items-center gap-2.5 mb-4 bg-surface-50 border border-surface-200 rounded-xl p-3.5">
-          <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${AVAILABLE_COLOR.dot}`} />
-          <span className="text-sm text-gray-600 flex-1">
-            Click an empty cell to mark one hour free, or drag across several at once. Drag across free
-            time again to remove it, or drag a slot's bottom edge to resize it — click any slot for details.
-          </span>
-          <button
-            onClick={() => setShowRecurringModal(true)}
-            className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-brand-700 bg-white border border-brand-200 rounded-lg hover:bg-brand-50"
-          >
-            <Repeat className="w-3.5 h-3.5" /> Repeat weekly…
-          </button>
-        </div>
-      )}
-
-      {isHR && hrMode === 'publish' && (
-        publishableLoading ? (
-          <div className="bg-white rounded-xl border border-surface-200 p-4 flex justify-center py-12">
-            <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
-          </div>
-        ) : (
-          <PublishSlotsPanel
-            slots={publishPanelSlots}
-            jobsData={jobsData}
-            onPublish={handlePublishBatch}
-            isPending={assignBatchMutation.isPending}
-            onUnassign={handleUnassignSlot}
-            unassigningId={unassigningSlotId}
-          />
-        )
-      )}
-
-      {hrMode !== 'publish' && (!isHR || viewingInterviewerId) && (
-        <div className="bg-white rounded-xl border border-surface-200 p-4">
+      {/* ── Calendar ── */}
+      {isCalendarMode && (!isHR || viewingInterviewerId) && (
+        <div className="bg-white rounded-2xl border border-surface-200 p-3 sm:p-4">
           {isLoading ? (
-            <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>
-          ) : view === 'week' || view === 'day' ? (
+            <div className="flex justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>
+          ) : view === 'month' ? (
             <>
-              <div className="flex items-center justify-between mb-3">
-                <button
-                  onClick={() => (view === 'day' ? setDayCursor(addDays(dayCursor, -1)) : setWeekStart(subWeeks(weekStart, 1)))}
-                  className="p-1.5 rounded-lg hover:bg-surface-100"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <div className="flex items-center gap-2">
-                  {view === 'day' && (
-                    <button
-                      onClick={() => setDayCursor(new Date())}
-                      className="text-xs font-medium text-gray-400 hover:text-brand-600"
-                    >
-                      Today
-                    </button>
-                  )}
-                  <p className="text-sm font-semibold text-gray-800">
-                    {view === 'day'
-                      ? format(dayCursor, 'EEEE, MMM d, yyyy')
-                      : `${format(weekStart, 'MMM d')} – ${format(addDays(weekStart, 6), 'MMM d, yyyy')}`}
-                  </p>
-                </div>
-                <button
-                  onClick={() => (view === 'day' ? setDayCursor(addDays(dayCursor, 1)) : setWeekStart(addWeeks(weekStart, 1)))}
-                  className="p-1.5 rounded-lg hover:bg-surface-100"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
+              <MonthGrid
+                month={monthCursor}
+                countsByDay={countsByDay}
+                onDayClick={(day) => { setWeekStart(startOfWeek(day)); setDayCursor(day); setView('week'); }}
+              />
+              <p className="text-xs text-gray-400 mt-3 text-center">Click any day to open that week.</p>
+            </>
+          ) : (
+            <>
+              {/* Context strip: who / how */}
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 mb-3 px-1">
+                {editable ? (
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                    <Hint icon={MousePointerClick}>Drag empty cells to mark yourself free</Hint>
+                    <Hint icon={Eraser}>Drag over free time to clear it</Hint>
+                    <Hint icon={MoveVertical}>Drag a slot’s bottom edge to resize</Hint>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Avatar name={selectedInterviewer?.full_name} />
+                    <span className="text-sm text-gray-600 truncate">
+                      <span className="font-medium text-gray-800">{selectedInterviewer?.full_name}</span>
+                      <span className="text-gray-400"> · click an open slot to book a candidate</span>
+                    </span>
+                  </div>
+                )}
+                <span className="text-[11px] font-medium text-gray-400 shrink-0">All times IST</span>
               </div>
 
               {!editable && unassignedCountThisWeek > 0 && (
-                <div className="w-full mb-3 flex items-center gap-1.5 text-xs font-medium text-slate-700 bg-slate-100 border border-slate-200 rounded-lg py-2 px-3">
-                  <span className={`w-2 h-2 rounded-full shrink-0 ${UNASSIGNED_COLOR.dot}`} />
-                  {unassignedCountThisWeek} slot{unassignedCountThisWeek !== 1 ? 's' : ''} not yet published for agencies —
-                  click a slate-colored slot below to pick its job &amp; round.
+                <div className="mb-3 flex items-start gap-2 text-xs font-medium text-slate-700 bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-3">
+                  <span className={cn('w-2 h-2 rounded-full shrink-0 mt-1', UNASSIGNED_COLOR.dot)} />
+                  <span>
+                    {unassignedCountThisWeek} slot{unassignedCountThisWeek !== 1 ? 's' : ''} here {unassignedCountThisWeek !== 1 ? 'have' : 'has'} no
+                    job attached yet. Click one to book it for a candidate, or use{' '}
+                    <button onClick={() => setHrMode('publish')} className="underline underline-offset-2 hover:text-brand-600">
+                      Publish to agencies
+                    </button>{' '}
+                    to open it up to recruitment partners.
+                  </span>
                 </div>
               )}
 
               {hiddenOutsideWindow > 0 && (
                 <button
                   onClick={() => setShowFullDay(true)}
-                  className="w-full mb-3 flex items-center justify-center gap-1.5 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg py-2 hover:bg-amber-100"
+                  className="w-full mb-3 flex items-center justify-center gap-1.5 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-xl py-2.5 hover:bg-amber-100 transition-colors"
                 >
-                  <Maximize2 className="w-3 h-3" />
-                  {hiddenOutsideWindow} slot{hiddenOutsideWindow !== 1 ? 's' : ''} hidden outside 8 AM–8 PM — show full day
+                  <Maximize2 className="w-3.5 h-3.5" />
+                  {hiddenOutsideWindow} slot{hiddenOutsideWindow !== 1 ? 's' : ''} sit outside 8 AM–8 PM — show the full day
                 </button>
               )}
 
@@ -1672,6 +2418,7 @@ export default function AvailabilityPage() {
                 startHour={startHour}
                 rows={rows}
                 nowTick={nowTick}
+                showFullDay={showFullDay}
                 onPublishRange={handlePublishRange}
                 onSlotClick={handleSlotClick}
                 onRemoveRange={handleRemoveRange}
@@ -1680,63 +2427,14 @@ export default function AvailabilityPage() {
                 onResizeSlot={handleResizeSlot}
               />
 
-              <div className="flex flex-wrap items-center justify-between gap-2 mt-3">
-                <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
-                  {editable ? (
-                    <>
-                      <span className="flex items-center gap-1.5">
-                        <span className={`w-3 h-3 rounded inline-block ${AVAILABLE_COLOR.bg}`} />
-                        Available
-                      </span>
-                      <span className="flex items-center gap-1.5">
-                        <span className={`w-3 h-3 rounded inline-block ${BOOKED_COLOR.bg}`} />
-                        Booked
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="flex items-center gap-1.5">
-                        <span className={`w-3 h-3 rounded inline-block ${UNASSIGNED_COLOR.bg}`} />
-                        Unassigned
-                      </span>
-                      {ROUND_TYPES.map((r) => (
-                        <span key={r.key} className="flex items-center gap-1.5">
-                          <span className={`w-3 h-3 rounded inline-block ${(GRID_ROUND_COLORS[r.key] ?? DEFAULT_GRID_COLOR).bg}`} />
-                          {r.label}
-                        </span>
-                      ))}
-                      <span className="flex items-center gap-1.5">
-                        <span className={`w-3 h-3 rounded inline-block ${BOOKED_COLOR.bg}`} />
-                        Booked
-                      </span>
-                    </>
-                  )}
-                </div>
-                <button
-                  onClick={() => setShowFullDay((v) => !v)}
-                  className="flex items-center gap-1 text-xs text-gray-400 hover:text-brand-600"
-                >
-                  {showFullDay ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
-                  {showFullDay ? 'Show working hours only' : 'Show full day'}
-                </button>
+              <div className="flex flex-wrap items-center justify-between gap-3 mt-3 px-1">
+                <Legend editable={editable} />
+                {editable && (slots ?? []).length === 0 && (
+                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600">
+                    <Sparkles className="w-3.5 h-3.5" /> Nothing published yet — drag the grid to get started
+                  </span>
+                )}
               </div>
-            </>
-          ) : (
-            <>
-              <div className="flex items-center justify-between mb-3">
-                <button onClick={() => setMonthCursor(subWeeks(monthCursor, 4))} className="p-1.5 rounded-lg hover:bg-surface-100">
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <p className="text-sm font-semibold text-gray-800">{format(monthCursor, 'MMMM yyyy')}</p>
-                <button onClick={() => setMonthCursor(addWeeks(monthCursor, 4))} className="p-1.5 rounded-lg hover:bg-surface-100">
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-              <MonthGrid
-                month={monthCursor}
-                countsByDay={countsByDay}
-                onDayClick={(day) => { setWeekStart(startOfWeek(day)); setView('week'); }}
-              />
             </>
           )}
         </div>
@@ -1745,6 +2443,7 @@ export default function AvailabilityPage() {
       {bookingSlot && (
         <ApplicationPickerModal
           jobId={bookingSlot.job_id}
+          slot={bookingSlot}
           isPending={bookMutation.isPending || bookUnassignedMutation.isPending}
           onCancel={() => setBookingSlot(null)}
           onPick={(applicationId) =>

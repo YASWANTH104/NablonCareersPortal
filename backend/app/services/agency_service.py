@@ -308,7 +308,10 @@ async def get_all_agency_portals(
         raise HTTPException(404, "Agency portal not found")
 
     rows = (await db.execute(
-        select(JobAgencyAssignment, Job.title.label("job_title"))
+        # slug as well as title: the portal builds the agency's own trackable
+        # apply link (/agency-apply/{slug}?ref={ref_token}) from it, so a
+        # candidate who applies themselves is still attributed to this agency.
+        select(JobAgencyAssignment, Job.title.label("job_title"), Job.slug.label("job_slug"))
         .join(Job, Job.id == JobAgencyAssignment.job_id)
         .where(JobAgencyAssignment.agency_id == agency.id)
         .order_by(JobAgencyAssignment.created_at.desc())
@@ -325,7 +328,7 @@ async def get_all_agency_portals(
 
     assignments_data = []
     total_submitted = total_hired = total_in_progress = total_rejected = 0
-    for assignment, job_title in rows:
+    for assignment, job_title, job_slug in rows:
         stage_map = stage_by_job.get(assignment.job_id, {})
         count = sum(stage_map.values())
         hired = stage_map.get("hired", 0)
@@ -340,6 +343,7 @@ async def get_all_agency_portals(
             "assignment_id": str(assignment.id),
             "job_id": str(assignment.job_id),
             "job_title": job_title,
+            "job_slug": job_slug,
             "ref_token": assignment.ref_token,
             "max_submissions": assignment.max_submissions,
             "expires_at": assignment.expires_at.isoformat() if assignment.expires_at else None,
