@@ -12,7 +12,7 @@ import { agenciesApi } from '@/api/agencies';
 import CandidateIntakeForm from '@/components/shared/CandidateIntakeForm';
 import CopyLink from '@/components/shared/CopyLink';
 import PipelineFunnel, { QuotaMeter } from '@/components/shared/PipelineFunnel';
-import { ROUND_MAP } from '@/constants/interviewRounds';
+import { ROUND_TYPES, ROUND_MAP, ROUND_ELIGIBLE_STAGE, isBookableForRound } from '@/constants/interviewRounds';
 import { toIST, formatIST } from '@/utils/formatters';
 import { Modal, EmptyState } from '@/components/ui';
 import { cn } from '@/lib/utils';
@@ -148,9 +148,77 @@ function SubmitCandidateModal({ portalToken, assignmentId, jobTitle, onClose }) 
 
 // ── Book a slot ───────────────────────────────────────────────────────────────
 
+function RoundBadge({ roundType, className }) {
+  const round = ROUND_MAP[roundType];
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border whitespace-nowrap',
+        round?.accent?.badge ?? 'bg-surface-100 text-gray-600 border-surface-200',
+        className
+      )}
+    >
+      <span className={cn('w-1.5 h-1.5 rounded-full', round?.accent?.dot ?? 'bg-gray-400')} />
+      {round?.label ?? roundType}
+    </span>
+  );
+}
+
 function BookSlotModal({ slot, candidates, onCancel, onPick, isPending }) {
   const [selectedId, setSelectedId] = useState(null);
-  const bookable = candidates.filter((c) => !TERMINAL_STAGES.has(c.stage));
+  const round = ROUND_MAP[slot.round_type];
+  const requiredStage = ROUND_ELIGIBLE_STAGE[slot.round_type];
+
+  // Split into four disjoint buckets that add up to the full list, so the
+  // empty state can name the actual problem ("nobody has reached this stage"
+  // and "everyone is already booked" need completely different answers) and
+  // the hidden-count breakdown below always reconciles.
+  const { eligible, wrongStage, alreadyBooked } = useMemo(() => {
+    const buckets = { eligible: [], wrongStage: [], alreadyBooked: [], closed: [] };
+    for (const c of candidates) {
+      if (TERMINAL_STAGES.has(c.stage)) buckets.closed.push(c);
+      else if (c.stage !== requiredStage) buckets.wrongStage.push(c);
+      else if ((c.booked_rounds ?? []).includes(slot.round_type)) buckets.alreadyBooked.push(c);
+      else buckets.eligible.push(c);
+    }
+    return buckets;
+  }, [candidates, slot.round_type, requiredStage]);
+
+  const emptyCopy = () => {
+    if (candidates.length === 0) {
+      return {
+        title: 'No candidates submitted yet',
+        description: 'Submit a candidate for this role first, then you can book them an interview.',
+      };
+    }
+    // Only claim "everyone is booked" when the booked group is the whole
+    // reason the list is empty — i.e. nobody is merely at the wrong stage.
+    if (alreadyBooked.length > 0 && wrongStage.length === 0) {
+      const n = alreadyBooked.length;
+      return {
+        title: 'Everyone is already booked for this round',
+        description: `${n} candidate${n !== 1 ? 's' : ''} at this stage already ${n !== 1 ? 'have' : 'has'} a ${round?.label ?? slot.round_type} scheduled. If one needs to move, ask the hiring team to cancel it first — the name comes back here as soon as they do.`,
+      };
+    }
+    return {
+      title: `Nobody is at the ${STAGE_LABELS[requiredStage] ?? requiredStage} stage`,
+      description: `This is a ${round?.label ?? slot.round_type} slot, so only candidates the hiring team has moved to ${STAGE_LABELS[requiredStage] ?? requiredStage} can take it. You’ll see names here once they progress.`,
+    };
+  };
+
+  // The parent's candidate query polls every 20s, so someone selected here can
+  // be booked elsewhere or moved stage while this modal sits open. Without
+  // this the row vanishes from the list but selectedId still points at them
+  // and "Confirm booking" stays enabled, sending a booking the gate rejects.
+  useEffect(() => {
+    if (selectedId && !eligible.some((c) => c.application_id === selectedId)) {
+      setSelectedId(null);
+    }
+  }, [eligible, selectedId]);
+
+  // Closed candidates are excluded: an agency doesn't need "3 hidden" to
+  // include people they already know were rejected.
+  const hidden = wrongStage.length + alreadyBooked.length;
 
   return (
     <Modal
@@ -175,7 +243,7 @@ function BookSlotModal({ slot, candidates, onCancel, onPick, isPending }) {
         </div>
       }
     >
-      <div className="flex items-center gap-3 rounded-xl bg-brand-50/60 border border-brand-100 p-3.5 mb-5">
+      <div className="flex items-center gap-3 rounded-xl bg-brand-50/60 border border-brand-100 p-3.5 mb-4">
         <div className="text-center shrink-0 px-3 py-1.5 rounded-lg bg-white border border-brand-100">
           <p className="text-[10px] font-bold uppercase tracking-wider text-brand-500">
             {formatIST(slot.start_time, 'MMM')}
@@ -188,27 +256,27 @@ function BookSlotModal({ slot, candidates, onCancel, onPick, isPending }) {
           <p className="font-display text-base font-bold text-gray-900 tabular-nums">
             {formatIST(slot.start_time, 'h:mm a')} <span className="text-xs font-medium text-gray-400">IST</span>
           </p>
-          <p className="text-xs text-gray-500 mt-0.5">
-            {ROUND_MAP[slot.round_type]?.label ?? slot.round_type} · {slot.duration_mins} minutes
-          </p>
+          <div className="flex items-center gap-2 mt-1.5">
+            <RoundBadge roundType={slot.round_type} />
+            <span className="text-xs text-gray-500">{slot.duration_mins} minutes</span>
+          </div>
         </div>
       </div>
 
-      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Who is this for?</p>
-      {bookable.length === 0 ? (
-        <EmptyState
-          compact
-          icon={Users}
-          title={candidates.length === 0 ? 'No candidates submitted yet' : 'Nobody is still in progress'}
-          description={
-            candidates.length === 0
-              ? 'Submit a candidate for this role first, then you can book them an interview.'
-              : 'Everyone you’ve submitted for this role has already been closed out.'
-          }
-        />
+      <div className="flex items-baseline justify-between gap-2 mb-2">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Who is this for?</p>
+        {eligible.length > 0 && (
+          <p className="text-[11px] text-gray-400">
+            {eligible.length} eligible
+          </p>
+        )}
+      </div>
+
+      {eligible.length === 0 ? (
+        <EmptyState compact icon={Users} {...emptyCopy()} />
       ) : (
         <div className="max-h-64 overflow-y-auto space-y-1.5 -mx-1 px-1">
-          {bookable.map((c) => (
+          {eligible.map((c) => (
             <button
               key={c.application_id}
               disabled={isPending}
@@ -230,6 +298,25 @@ function BookSlotModal({ slot, candidates, onCancel, onPick, isPending }) {
               {selectedId === c.application_id && <Check className="w-4 h-4 text-brand-500 shrink-0" />}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Why a name they expected to see isn't here. Without this the list just
+          looks broken to an agency that submitted ten people and sees two. */}
+      {hidden > 0 && (
+        <div className="flex gap-2 text-[11px] text-gray-500 bg-surface-50 border border-surface-200 rounded-xl p-2.5 mt-3">
+          <Info className="w-3.5 h-3.5 shrink-0 mt-px text-gray-400" />
+          <p>
+            {hidden} other candidate{hidden !== 1 ? 's' : ''} hidden
+            {alreadyBooked.length > 0 && (
+              <> — {alreadyBooked.length} already {alreadyBooked.length !== 1 ? 'have' : 'has'} this round booked</>
+            )}
+            {alreadyBooked.length > 0 && wrongStage.length > 0 && ','}
+            {wrongStage.length > 0 && (
+              <> {alreadyBooked.length > 0 ? '' : '— '}{wrongStage.length} {wrongStage.length !== 1 ? 'are' : 'is'} not at the {STAGE_LABELS[requiredStage] ?? requiredStage} stage</>
+            )}
+            . Cancelled interviews put a name straight back on this list.
+          </p>
         </div>
       )}
     </Modal>
@@ -271,9 +358,42 @@ function groupSlotsByDay(slots) {
   return groups;
 }
 
+// Rounds are the top-level split now, above days. An agency looking at a flat
+// list of times had no way to tell an HR screening call apart from a TR2 except
+// by reading the small print under each chip — and they were booking the wrong
+// one. Round first, then day, then time.
+function groupSlotsByRound(slots) {
+  const byRound = new Map();
+  (slots ?? []).forEach((slot) => {
+    if (!byRound.has(slot.round_type)) byRound.set(slot.round_type, []);
+    byRound.get(slot.round_type).push(slot);
+  });
+  // Pipeline order (screening → tr1 → tr2 → hr), not whatever order the API
+  // happened to return, so the tabs read like the hiring process itself.
+  return ROUND_TYPES
+    .filter((r) => byRound.has(r.key))
+    .map((r) => ({
+      ...r,
+      slots: byRound.get(r.key),
+      count: byRound.get(r.key).reduce((sum, x) => sum + x.available_count, 0),
+    }))
+    .concat(
+      // Defensive: a round_type the frontend doesn't know about still shows up
+      // rather than silently vanishing from the agency's list.
+      [...byRound.keys()]
+        .filter((k) => !ROUND_MAP[k])
+        .map((k) => ({
+          key: k, label: k, short: k, accent: null, blurb: null,
+          slots: byRound.get(k),
+          count: byRound.get(k).reduce((sum, x) => sum + x.available_count, 0),
+        }))
+    );
+}
+
 function SlotPicker({ portalToken, assignmentId, candidates, disabled }) {
   const queryClient = useQueryClient();
   const [bookingSlot, setBookingSlot] = useState(null);
+  const [activeRound, setActiveRound] = useState(null);
   const [activeDay, setActiveDay] = useState(null);
 
   const { data: slots, isLoading } = useQuery({
@@ -286,14 +406,34 @@ function SlotPicker({ portalToken, assignmentId, candidates, disabled }) {
     refetchInterval: 20000,
   });
 
-  const days = useMemo(() => groupSlotsByDay(slots), [slots]);
+  const rounds = useMemo(() => groupSlotsByRound(slots), [slots]);
 
-  // Keep the selected day valid across refetches: if the day someone is looking
-  // at empties out, fall back to the first one that still has slots.
+  // Keep the selected round valid across refetches, same rule as the day tabs:
+  // if the round someone is looking at empties out, fall back to the first one
+  // that still has slots rather than showing a blank panel.
+  useEffect(() => {
+    if (rounds.length === 0) { setActiveRound(null); return; }
+    if (!activeRound || !rounds.some((r) => r.key === activeRound)) setActiveRound(rounds[0].key);
+  }, [rounds, activeRound]);
+
+  const activeRoundGroup = rounds.find((r) => r.key === activeRound) ?? rounds[0] ?? null;
+  const days = useMemo(
+    () => groupSlotsByDay(activeRoundGroup?.slots),
+    [activeRoundGroup]
+  );
+
   useEffect(() => {
     if (days.length === 0) { setActiveDay(null); return; }
     if (!activeDay || !days.some((d) => d.key === activeDay)) setActiveDay(days[0].key);
   }, [days, activeDay]);
+
+  // How many of this agency's own candidates can actually take the selected
+  // round right now. Shown up front so an agency isn't clicking through times
+  // only to find an empty candidate list waiting at the end.
+  const eligibleForRound = useMemo(
+    () => (candidates ?? []).filter((c) => isBookableForRound(c, activeRoundGroup?.key)),
+    [candidates, activeRoundGroup]
+  );
 
   const bookMutation = useMutation({
     mutationFn: (applicationId) =>
@@ -307,12 +447,18 @@ function SlotPicker({ portalToken, assignmentId, candidates, disabled }) {
       toast.success('Interview booked — we’ve emailed the details across.');
       setBookingSlot(null);
       queryClient.invalidateQueries({ queryKey: ['agency-portal-slots', portalToken, assignmentId] });
+      // Refetching the assignment is what refreshes booked_rounds, i.e. what
+      // takes the candidate just booked back out of this round's list.
       queryClient.invalidateQueries({ queryKey: ['agency-portal-assignment', portalToken, assignmentId] });
     },
     onError: (err) => {
       toast.error(err.response?.data?.detail ?? 'That slot was just taken — please pick another.');
       setBookingSlot(null);
       queryClient.invalidateQueries({ queryKey: ['agency-portal-slots', portalToken, assignmentId] });
+      // The round gate can reject a booking from a stale page (candidate moved
+      // stage, or got booked elsewhere) — pull fresh candidate state too, so the
+      // list they retry from is the corrected one.
+      queryClient.invalidateQueries({ queryKey: ['agency-portal-assignment', portalToken, assignmentId] });
     },
   });
 
@@ -334,7 +480,7 @@ function SlotPicker({ portalToken, assignmentId, candidates, disabled }) {
     );
   }
 
-  if (days.length === 0) {
+  if (rounds.length === 0 || !activeRoundGroup) {
     return (
       <div>
         <SectionTitle icon={CalendarClock} title="Book an interview" />
@@ -369,7 +515,57 @@ function SlotPicker({ portalToken, assignmentId, candidates, disabled }) {
       />
 
       <div className="bg-white border border-surface-200 rounded-2xl overflow-hidden">
-        {/* Day tabs */}
+        {/* ── Round tabs ──
+            The top-level split. Each round is its own colour end to end (tab,
+            chips, badge in the confirm modal) so "which round am I booking"
+            is never a question an agency has to answer from small print. */}
+        <div className="flex gap-2 overflow-x-auto p-3 border-b border-surface-100">
+          {rounds.map((r) => {
+            const isActive = r.key === activeRoundGroup.key;
+            return (
+              <button
+                key={r.key}
+                onClick={() => setActiveRound(r.key)}
+                aria-pressed={isActive}
+                className={cn(
+                  'shrink-0 inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border text-left transition-all',
+                  isActive
+                    ? (r.accent?.tab ?? 'bg-brand-500 border-brand-500 text-white') + ' shadow-sm'
+                    : 'bg-white border-surface-200 text-gray-600 hover:border-surface-300'
+                )}
+              >
+                {!isActive && <span className={cn('w-2 h-2 rounded-full', r.accent?.dot ?? 'bg-gray-400')} />}
+                <span className="text-xs font-semibold whitespace-nowrap">{r.label}</span>
+                <span className={cn(
+                  'text-[10px] font-bold px-1.5 py-0.5 rounded-full',
+                  isActive ? 'bg-white/25' : 'bg-surface-100 text-gray-500'
+                )}>
+                  {r.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Who this round is actually for — the eligibility rule stated plainly
+            rather than discovered by finding an empty candidate list. */}
+        <div className={cn(
+          'flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2.5 border-b border-surface-100 text-[11px]',
+          'bg-surface-50/70'
+        )}>
+          <Info className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+          <span className="text-gray-600">
+            {activeRoundGroup.blurb ?? `Slots for ${activeRoundGroup.label}.`}
+          </span>
+          <span className={cn(
+            'font-semibold',
+            eligibleForRound.length > 0 ? 'text-gray-700' : 'text-amber-700'
+          )}>
+            {eligibleForRound.length} of your candidate{eligibleForRound.length !== 1 ? 's' : ''} can be booked.
+          </span>
+        </div>
+
+        {/* Day tabs, scoped to the selected round */}
         <div className="flex gap-2 overflow-x-auto p-3 border-b border-surface-100 bg-surface-50/60">
           {days.map((d) => {
             const isActive = d.key === active.key;
@@ -395,27 +591,36 @@ function SlotPicker({ portalToken, assignmentId, candidates, disabled }) {
           })}
         </div>
 
-        {/* Time chips for the selected day */}
+        {/* Time chips for the selected round + day */}
         <div className="p-4">
-          <p className="font-display text-sm font-semibold text-gray-900 mb-3">{active.long}</p>
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <p className="font-display text-sm font-semibold text-gray-900">{active.long}</p>
+            <RoundBadge roundType={activeRoundGroup.key} />
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {active.slots.map((s, i) => (
               <button
                 key={`${s.start_time}-${s.round_type}-${i}`}
                 onClick={() => setBookingSlot(s)}
                 style={{ animationDelay: `${Math.min(i, 10) * 25}ms` }}
-                className="group px-3 py-2.5 rounded-xl border border-surface-200 bg-white text-left hover:border-brand-400 hover:bg-brand-50/50 hover:-translate-y-px transition-all animate-in fade-in duration-300 fill-mode-both"
+                className={cn(
+                  'group px-3 py-2.5 rounded-xl border bg-white text-left hover:-translate-y-px transition-all animate-in fade-in duration-300 fill-mode-both',
+                  activeRoundGroup.accent?.chip ?? 'border-surface-200 hover:border-brand-400 hover:bg-brand-50/50'
+                )}
               >
                 <span className="flex items-baseline justify-between gap-1">
-                  <span className="font-display text-sm font-bold text-gray-900 tabular-nums group-hover:text-brand-700 transition-colors">
+                  <span className="font-display text-sm font-bold text-gray-900 tabular-nums">
                     {formatIST(s.start_time, 'h:mm a')}
                   </span>
                   {s.available_count > 1 && (
                     <span className="text-[10px] font-semibold text-gray-400">×{s.available_count}</span>
                   )}
                 </span>
-                <span className="block text-[11px] text-gray-500 truncate mt-0.5">
-                  {ROUND_MAP[s.round_type]?.label ?? s.round_type} · {s.duration_mins}m
+                <span className="flex items-center gap-1.5 mt-1">
+                  <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', activeRoundGroup.accent?.dot ?? 'bg-gray-400')} />
+                  <span className="text-[11px] text-gray-500 truncate">
+                    {activeRoundGroup.short ?? activeRoundGroup.label} · {s.duration_mins}m
+                  </span>
                 </span>
               </button>
             ))}
@@ -456,6 +661,12 @@ function RoleDetail({ portalToken, assignment, onBack }) {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['agency-portal-assignment', portalToken, assignment.assignment_id],
     queryFn: () => agenciesApi.portalAssignment(portalToken, assignment.assignment_id).then((r) => r.data),
+    // Polled for the same reason the slot list is: this payload carries each
+    // candidate's stage and booked_rounds, so when the hiring team cancels an
+    // interview the freed slot and the candidate's name have to come back
+    // together. Without this the slot would reappear on its own poll while the
+    // candidate stayed hidden until a manual reload.
+    refetchInterval: 20000,
   });
 
   const candidates = data?.candidates ?? [];
@@ -671,7 +882,24 @@ function RoleDetail({ portalToken, assignment, onBack }) {
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        {/* Rounds this candidate already has scheduled. Same
+                            colours as the booking tabs, so "why can't I book
+                            them again" answers itself here rather than in the
+                            modal. Disappears when an interview is cancelled. */}
+                        {(c.booked_rounds ?? []).map((rt) => (
+                          <span
+                            key={rt}
+                            title={`${ROUND_MAP[rt]?.label ?? rt} already booked`}
+                            className={cn(
+                              'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border whitespace-nowrap',
+                              ROUND_MAP[rt]?.accent?.badge ?? 'bg-surface-100 text-gray-600 border-surface-200'
+                            )}
+                          >
+                            <CalendarClock className="w-2.5 h-2.5" />
+                            {ROUND_MAP[rt]?.short ?? rt}
+                          </span>
+                        ))}
                         <StageBadge stage={c.stage} />
                         <span className="text-[11px] text-gray-400 hidden sm:block whitespace-nowrap">
                           moved {formatDistanceToNow(new Date(c.stage_updated_at), { addSuffix: true })}

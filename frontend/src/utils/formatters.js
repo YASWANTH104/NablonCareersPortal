@@ -56,9 +56,33 @@ export function istInputValueToUTCISOString(localValue) {
 export function toIST(date) {
   if (date == null) return null;
   const d = typeof date === 'string' ? parseISO(date) : (date instanceof Date ? date : new Date(date));
-  const istMs = d.getTime() + IST_OFFSET_MS;
-  const tzOffsetMin = new Date(istMs).getTimezoneOffset();
-  return new Date(istMs + tzOffsetMin * 60000);
+  if (Number.isNaN(d.getTime())) return null;
+
+  // Read the IST wall-clock fields off the instant, then build a local Date
+  // carrying exactly those fields — so getHours()/getDate() return IST values.
+  //
+  // This used to shift by IST_OFFSET_MS and then correct by
+  // new Date(istMs).getTimezoneOffset(). That samples the viewer's UTC offset
+  // at a *different* instant from the one it then applies it to (they differ by
+  // the offset itself, 5-10 hours), so any time within that window of the
+  // viewer's own DST transition came out an hour wrong. A viewer in New York
+  // saw 2026-10-31T23:00Z as 03:30 instead of 04:30 IST. Building from fields
+  // has no such window: the engine resolves the local offset for the exact
+  // wall-clock time being constructed.
+  const shifted = new Date(d.getTime() + IST_OFFSET_MS);
+  const out = new Date(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate(),
+    shifted.getUTCHours(),
+    shifted.getUTCMinutes(),
+    shifted.getUTCSeconds(),
+    shifted.getUTCMilliseconds(),
+  );
+  // new Date(yy, ...) maps 0-99 onto 1900-1999; irrelevant for real data but
+  // cheap to be exact about.
+  out.setFullYear(shifted.getUTCFullYear());
+  return out;
 }
 
 export function formatIST(date, fmt = 'h:mm a') {
@@ -82,6 +106,20 @@ export function istTimeKey(date) {
 
 // Inverse of istDateKey/istTimeKey: given a yyyy-MM-dd and an HH:mm that
 // together represent an IST wall-clock moment, return the real UTC instant.
+// Inverse of toIST(): takes a Date that carries IST wall-clock fields in the
+// viewer's local space and returns the real UTC instant it stands for. Needed
+// wherever an IST-space Date has to leave the browser — a range boundary sent
+// to the API, say — because .toISOString() on an IST-space Date is off by the
+// viewer's own UTC offset.
+export function istToInstant(d) {
+  if (d == null) return null;
+  const p2 = (n) => String(n).padStart(2, '0');
+  return fromISTDateTime(
+    `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`,
+    `${p2(d.getHours())}:${p2(d.getMinutes())}`,
+  );
+}
+
 export function fromISTDateTime(dateStr, timeStr) {
   return new Date(istInputValueToUTCISOString(`${dateStr}T${timeStr}`));
 }

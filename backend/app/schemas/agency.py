@@ -60,6 +60,10 @@ class AgencyPortalCandidate(BaseModel):
     stage: str
     applied_at: datetime
     stage_updated_at: datetime
+    # Rounds this candidate already has a live (non-cancelled) interview for.
+    # The portal hides them from those rounds' booking lists; cancelling the
+    # interview drops the round out of here and the name comes back on its own.
+    booked_rounds: list[str] = []
 
 
 class AgencyPortalResponse(BaseModel):

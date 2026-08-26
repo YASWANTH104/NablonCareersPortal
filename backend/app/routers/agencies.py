@@ -10,7 +10,9 @@ from app.schemas.agency import (
     JobAgencyAssignmentCreate, JobAgencyAssignmentUpdate, JobAgencyAssignmentResponse,
     AgencyPortalResponse,
 )
-from app.schemas.interview_slot import AvailableSlotGroup, SlotResponse, AgencySlotBookRequest
+from app.schemas.interview_slot import (
+    AvailableSlotGroup, AgencySlotBookRequest, AgencyBookingConfirmation,
+)
 from app.services import agency_service, interview_slot_service
 
 router = APIRouter(tags=["agencies"])
@@ -193,12 +195,19 @@ async def agency_available_slots(
     assignment_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
 ):
-    """Anonymized — never reveals which interviewer a slot belongs to."""
-    _agency, assignment = await agency_service.validate_portal_assignment(db, portal_token, assignment_id)
+    """Anonymized — never reveals which interviewer a slot belongs to.
+
+    validate_portal_access, not validate_portal_assignment: the submission
+    quota caps how many candidates may be submitted, not whether the ones
+    already submitted can be scheduled."""
+    _agency, assignment = await agency_service.validate_portal_access(db, portal_token, assignment_id)
     return await interview_slot_service.get_available_slots_for_job(db, assignment.job_id)
 
 
-@router.post("/agency-portal/{portal_token}/assignments/{assignment_id}/slots/book", response_model=SlotResponse)
+@router.post(
+    "/agency-portal/{portal_token}/assignments/{assignment_id}/slots/book",
+    response_model=AgencyBookingConfirmation,
+)
 async def agency_book_slot(
     portal_token: str,
     assignment_id: uuid.UUID,
@@ -207,7 +216,8 @@ async def agency_book_slot(
 ):
     from app.models.application import Application
 
-    agency, assignment = await agency_service.validate_portal_assignment(db, portal_token, assignment_id)
+    # Booking is not a submission — see agency_available_slots above.
+    agency, assignment = await agency_service.validate_portal_access(db, portal_token, assignment_id)
 
     application = await db.get(Application, data.application_id)
     if not application or application.agency_id != agency.id or application.job_id != assignment.job_id:

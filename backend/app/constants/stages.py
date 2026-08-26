@@ -32,6 +32,11 @@ STAGE_LABELS = {
     "offer_drop": "Offer Drop",
 }
 
+# Stages an application never comes back from. Nothing may be scheduled for a
+# candidate sitting in one of these — the frontends already grey them out, but
+# the rule belongs here so every booking path gets it.
+TERMINAL_STAGES = {"rejected", "withdrawn", "interview_drop", "offer_drop", "hired"}
+
 # Stages that require a reason (category + optional free-text note) on transition.
 REASON_REQUIRED_STAGES = {"rejected", "interview_drop", "offer_drop"}
 
@@ -57,11 +62,61 @@ DROP_REASON_CATEGORIES = [
 # get a generic email with no feedback content, regardless of category.
 FEEDBACK_ELIGIBLE_STAGES = {"tr1", "tr2", "hr"}
 
-# Stages a single Interview row can be attributed to (via ApplicationStageHistory
-# timestamps — Interview has no stage field of its own) that must NEVER contribute
-# feedback to a rejection summary, even when the rejection itself is from tr1/tr2/hr.
+# Rounds/stages a single Interview row can be attributed to that must NEVER
+# contribute feedback to a candidate-facing rejection summary, even when the
+# rejection itself is from tr1/tr2/hr. Screening is here on purpose: HR
+# screening-call notes are internal. They DO feed forward to whoever runs the
+# next round (interview_service._get_previous_rounds) — a rejected candidate
+# just never sees them, only the real rounds they actually sat.
+#
+# Attribution now prefers interviews.round_type; the ApplicationStageHistory
+# inference in tasks/email_tasks.py is only the fallback for rows without one.
 # Deliberately a denylist rather than an allowlist of {"tr1","tr2","hr"}: some
 # ApplicationStageHistory rows predate the interview_1/interview_2/interview_3/
 # final_interview -> tr1/tr2/hr rename and still carry the old names, which a
 # tr1/tr2/hr allowlist would misclassify as non-interview and wrongly strip.
 FEEDBACK_EXCLUDED_INTERVIEW_STAGES = {"applied", "screening", "assessment"}
+
+
+# ── Interview slot rounds ────────────────────────────────────────────────────
+# A published InterviewSlot carries a round_type from this tuple. It is a
+# strict subset of the pipeline stage vocabulary above (same strings, so a
+# slot's round and the stage it belongs to never drift apart) — "screening"
+# here is the HR screening call, booked while the application sits at the
+# "screening" stage.
+SLOT_ROUND_TYPES = ("screening", "tr1", "tr2", "hr")
+
+# Which application stage a candidate must be sitting at to be booked into a
+# slot of a given round. Deliberately strict 1:1 rather than "this stage or
+# anything that legally transitions into it": publishing a screening-call slot
+# and having a tr2 candidate booked into it is exactly the confusion this map
+# exists to stop. HR advances the stage first, then the round becomes bookable.
+ROUND_ELIGIBLE_STAGE = {
+    "screening": "screening",
+    "tr1": "tr1",
+    "tr2": "tr2",
+    "hr": "hr",
+}
+
+# Where each round sits in the pipeline. This — not Interview.round_number — is
+# what orders rounds relative to each other, because round_number is unreliable:
+# it defaults to 1 on every manually scheduled interview, so a manually booked
+# HR screening call and a TR1 both land on 1. Feeding previous-round context
+# forward (screening notes -> TR1 -> TR2 -> HR) has to use this map.
+ROUND_ORDER = {
+    "screening": 0,
+    "tr1": 1,
+    "tr2": 2,
+    "hr": 3,
+}
+
+# Round labels as an agency sees them in their portal. Same wording as
+# STAGE_LABELS for tr1/tr2, but "HR Screening Call" vs "HR Interview" is the
+# distinction agencies kept collapsing — both are "HR", only one is the first
+# conversation, so they are never labelled the same string.
+ROUND_LABELS = {
+    "screening": "HR Screening Call",
+    "tr1": "Technical Round 1",
+    "tr2": "Technical Round 2",
+    "hr": "HR Interview",
+}

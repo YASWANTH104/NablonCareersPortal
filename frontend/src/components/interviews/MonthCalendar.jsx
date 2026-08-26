@@ -5,6 +5,7 @@ import {
 } from 'date-fns';
 import { groupByDayKey, dayKey, statusStyle } from './calendarUtils';
 import { toIST } from '@/utils/formatters';
+import { interviewRoundLabel } from '@/constants/interviewRounds';
 
 const WEEK_STARTS_ON = 1; // Monday — interviews cluster in the work week
 const MAX_CHIPS = 3;
@@ -24,7 +25,7 @@ function DayChip({ interview, onSelect }) {
         {format(toIST(interview.scheduled_at), 'h:mm')}
       </span>
       <span className="text-[11px] truncate">
-        {interview.candidate_name ?? interview.title ?? `Round ${interview.round_number}`}
+        {interview.candidate_name ?? interviewRoundLabel(interview)}
       </span>
     </button>
   );

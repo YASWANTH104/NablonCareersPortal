@@ -8,6 +8,9 @@ from sqlalchemy import select, update, and_, func
 from app.models.interview_slot import InterviewSlot
 from app.schemas.interview import InterviewCreate, PanelistCreate
 from app.schemas.interview_slot import SlotResponse, AvailableSlotGroup
+from app.constants.stages import (
+    ROUND_ELIGIBLE_STAGE, ROUND_LABELS, ROUND_ORDER, STAGE_LABELS, TERMINAL_STAGES,
+)
 
 # CC'd on every candidate/interviewer email that results from booking a
 # published slot (HR direct-book or agency self-book) — a standing ask to
@@ -15,8 +18,13 @@ from app.schemas.interview_slot import SlotResponse, AvailableSlotGroup
 # scheduled the regular manual way.
 SLOT_BOOKING_CC = ["sneha.vangada@nablon.ai"]
 
-ROUND_TO_NUMBER = {"tr1": 1, "tr2": 2, "hr": 3}
-ROUND_TO_INTERVIEW_TYPE = {"tr1": "technical", "tr2": "technical", "hr": "hr"}
+# Screening is round 0 so it sorts below TR1. This is also what interview_service
+# uses (via ROUND_ORDER) to feed a round's notes forward as previous-round
+# context, so an HR screening call reads as prior context for TR1.
+ROUND_TO_NUMBER = ROUND_ORDER
+ROUND_TO_INTERVIEW_TYPE = {
+    "screening": "phone", "tr1": "technical", "tr2": "technical", "hr": "hr",
+}
 SLOT_CONFLICT_MESSAGE = "This slot is no longer available — please pick another."
 # On-demand, HR-triggered nudge ("please go publish your free slots"), not an
 # automated sweep — so the cooldown is enforced synchronously against the
@@ -75,8 +83,23 @@ async def publish_slots(
     )).all()
     existing_intervals = [(st, st + timedelta(minutes=dur)) for st, dur in existing]
 
+    now = datetime.now(timezone.utc)
     created = []
     for st in start_times:
+        # Normalise first: SlotPublishRequest accepts an offset-less datetime, and
+        # comparing that against timestamptz values from the DB raises
+        # TypeError (offset-naive vs offset-aware) — a 500, but only for an
+        # interviewer who already had at least one slot, which is why it never
+        # showed up in a first-run test. Same assumed-UTC handling as
+        # reschedule_slot.
+        if st.tzinfo is None:
+            st = st.replace(tzinfo=timezone.utc)
+        # And no publishing into the past. reschedule_slot already refused this;
+        # publish didn't, so "copy this day to next week" run from a day that
+        # has already passed silently created dead slots that then sat in the
+        # overlap set blocking the real times.
+        if st < now:
+            continue
         new_end = st + timedelta(minutes=duration_mins)
         if any(st < e_end and new_end > e_start for e_start, e_end in existing_intervals):
             continue
@@ -219,11 +242,32 @@ async def assign_slots_batch(
     return [_to_response(s, job_title=job.title) for s in updated]
 
 
-async def _slots_for_interviewer(db: AsyncSession, interviewer_id: uuid.UUID) -> list[SlotResponse]:
+# How far either side of today an interviewer's calendar is loaded. This query
+# used to have no window at all, so it returned every slot that interviewer had
+# ever had — an unbounded set that grows forever (8 slots/day is ~2,000 rows a
+# year), all serialised on every page load and every interviewer switch, to
+# render one visible week. The window is deliberately far wider than the grid
+# ever shows: nobody publishes availability a year out, and slots from more
+# than a quarter ago are history, not something you schedule against.
+SLOT_WINDOW_PAST = timedelta(days=90)
+SLOT_WINDOW_FUTURE = timedelta(days=365)
+
+
+async def _slots_for_interviewer(
+    db: AsyncSession,
+    interviewer_id: uuid.UUID,
+    *,
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+) -> list[SlotResponse]:
     from app.models.job import Job
     from app.models.interview import Interview
     from app.models.application import Application
     from app.models.user import User
+
+    now = datetime.now(timezone.utc)
+    window_start = date_from or (now - SLOT_WINDOW_PAST)
+    window_end = date_to or (now + SLOT_WINDOW_FUTURE)
 
     # outerjoin, not join: an interviewer's own calendar must still show
     # slots they've published that HR hasn't assigned a job to yet — an
@@ -231,7 +275,11 @@ async def _slots_for_interviewer(db: AsyncSession, interviewer_id: uuid.UUID) ->
     rows = (await db.execute(
         select(InterviewSlot, Job.title)
         .outerjoin(Job, Job.id == InterviewSlot.job_id)
-        .where(InterviewSlot.interviewer_id == interviewer_id)
+        .where(
+            InterviewSlot.interviewer_id == interviewer_id,
+            InterviewSlot.start_time >= window_start,
+            InterviewSlot.start_time <= window_end,
+        )
         .order_by(InterviewSlot.start_time)
     )).all()
 
@@ -254,12 +302,16 @@ async def _slots_for_interviewer(db: AsyncSession, interviewer_id: uuid.UUID) ->
     ]
 
 
-async def get_my_slots(db: AsyncSession, interviewer_id: uuid.UUID) -> list[SlotResponse]:
-    return await _slots_for_interviewer(db, interviewer_id)
+async def get_my_slots(
+    db: AsyncSession, interviewer_id: uuid.UUID, *, date_from=None, date_to=None
+) -> list[SlotResponse]:
+    return await _slots_for_interviewer(db, interviewer_id, date_from=date_from, date_to=date_to)
 
 
-async def get_interviewer_slots_for_hr(db: AsyncSession, interviewer_id: uuid.UUID) -> list[SlotResponse]:
-    return await _slots_for_interviewer(db, interviewer_id)
+async def get_interviewer_slots_for_hr(
+    db: AsyncSession, interviewer_id: uuid.UUID, *, date_from=None, date_to=None
+) -> list[SlotResponse]:
+    return await _slots_for_interviewer(db, interviewer_id, date_from=date_from, date_to=date_to)
 
 
 async def request_publish_reminder(
@@ -395,6 +447,136 @@ async def get_job_slots_for_hr(db: AsyncSession, job_id: uuid.UUID) -> list[Slot
     ]
 
 
+# ── Round eligibility ────────────────────────────────────────────────────────
+#
+# Two independent rules decide whether a given candidate may be booked into a
+# given round. Both are enforced here in the service, not only filtered in the
+# UI: the agency portal is a public token-auth surface, so a stale page or a
+# hand-rolled request must not be able to slip a booking past the rule.
+#
+#   1. Stage gate — the application must be sitting at exactly the stage the
+#      round belongs to (ROUND_ELIGIBLE_STAGE). A screening-call slot is only
+#      bookable by someone at "screening"; a TR2 candidate can't take it.
+#   2. Duplicate gate — one live interview per round, per application. Booking
+#      a screening call removes that candidate from the screening list; the
+#      booking is "live" until it's cancelled, at which point cancel_interview
+#      reopens the slot AND this rule stops matching, so the name comes back on
+#      its own. Nothing needs to be un-done by hand.
+#
+# "Live" is deliberately status != "cancelled" rather than status ==
+# "scheduled": a completed or no-show round has still happened, and offering it
+# again is the double-booking this is here to prevent. Cancellation is the one
+# action that genuinely undoes a booking, which is exactly what was asked for.
+
+BLOCKING_INTERVIEW_STATUSES_EXCLUDED = ("cancelled",)
+
+
+def _round_label(round_type: str) -> str:
+    return ROUND_LABELS.get(round_type, round_type)
+
+
+async def get_booked_rounds(
+    db: AsyncSession, application_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, set[str]]:
+    """{application_id: {round_type, ...}} for every round each application
+    already has a live interview in. One query for the whole list — the agency
+    portal needs this for every candidate it shows, so a per-candidate query
+    would be N round trips on a page that already polls."""
+    from app.models.interview import Interview
+
+    if not application_ids:
+        return {}
+
+    rows = (await db.execute(
+        select(Interview.application_id, Interview.round_type).where(
+            Interview.application_id.in_(application_ids),
+            Interview.round_type.is_not(None),
+            Interview.status.not_in(BLOCKING_INTERVIEW_STATUSES_EXCLUDED),
+        )
+    )).all()
+
+    booked: dict[uuid.UUID, set[str]] = {}
+    for app_id, round_type in rows:
+        booked.setdefault(app_id, set()).add(round_type)
+    return booked
+
+
+async def get_booked_rounds_for_job(db: AsyncSession, job_id: uuid.UUID) -> dict[str, list[str]]:
+    """{application_id: [round_type, ...]} for every application on a job, so
+    HR's candidate pickers can hide someone who already has that round booked
+    instead of letting the click fail on the gate. Keyed by str because this
+    goes straight out as JSON."""
+    from app.models.application import Application
+
+    app_ids = (await db.execute(
+        select(Application.id).where(Application.job_id == job_id)
+    )).scalars().all()
+
+    booked = await get_booked_rounds(db, list(app_ids))
+    return {str(app_id): sorted(rounds) for app_id, rounds in booked.items()}
+
+
+async def assert_round_bookable(
+    db: AsyncSession, *, application_id: uuid.UUID, round_type: str,
+    enforce_stage_gate: bool = True,
+) -> None:
+    """Raises 400 if this candidate may not be booked into this round. Called
+    before the slot is claimed, so a rejected booking never consumes a slot.
+
+    `enforce_stage_gate=False` is HR's opt-in override and relaxes the STAGE
+    rule only. The duplicate rule below is never skipped: creating a second
+    live interview for a round a candidate is already booked into is a mistake
+    regardless of who does it, and there is no flow that legitimately wants it
+    (moving a round is cancel-then-rebook, which frees the slot too).
+    """
+    from app.models.application import Application
+
+    # Row lock, not db.get(): the duplicate check below is read-then-write, and
+    # two bookings for the SAME candidate into two DIFFERENT slots never contend
+    # on the slot claim (different rows, SKIP LOCKED) — so without this both
+    # would read "no live tr1", both would succeed, and the candidate ends up
+    # with two live interviews for one round. Two agency staff sharing a portal
+    # link and clicking at once is the ordinary case, not a rare race.
+    #
+    # Lock order is application-then-slot on every booking path (this always
+    # runs before the claiming UPDATE), so the paths can't deadlock each other.
+    application = (await db.execute(
+        select(Application).where(Application.id == application_id).with_for_update()
+    )).scalar_one_or_none()
+    if not application:
+        raise HTTPException(404, "Candidate not found")
+
+    # A closed application is never bookable, by anyone — the stage override is
+    # for candidates who haven't reached a round yet, not for ones who are out.
+    if application.stage in TERMINAL_STAGES:
+        raise HTTPException(
+            400,
+            f"{STAGE_LABELS.get(application.stage, application.stage)} candidates "
+            f"can't be booked into an interview.",
+        )
+
+    required_stage = ROUND_ELIGIBLE_STAGE.get(round_type)
+    if required_stage is None:
+        raise HTTPException(400, f"Unknown interview round '{round_type}'")
+
+    if enforce_stage_gate and application.stage != required_stage:
+        raise HTTPException(
+            400,
+            f"This slot is for {_round_label(round_type)}, and this candidate is at "
+            f"the {STAGE_LABELS.get(application.stage, application.stage)} stage. "
+            f"Only candidates at the "
+            f"{STAGE_LABELS.get(required_stage, required_stage)} stage can be booked into it.",
+        )
+
+    booked = await get_booked_rounds(db, [application_id])
+    if round_type in booked.get(application_id, set()):
+        raise HTTPException(
+            400,
+            f"This candidate is already booked for {_round_label(round_type)}. "
+            f"Cancel that interview first if it needs to move.",
+        )
+
+
 async def book_slot(
     db: AsyncSession,
     *,
@@ -406,6 +588,7 @@ async def book_slot(
     duration_mins: Optional[int] = None,
     booked_by_agency_id: Optional[uuid.UUID] = None,
     booked_by_user_id: Optional[uuid.UUID] = None,
+    enforce_stage_gate: bool = True,
 ) -> SlotResponse:
     """Atomically claims one open slot matching the given criteria, then
     creates a real Interview for it via the existing scheduling pipeline.
@@ -419,6 +602,27 @@ async def book_slot(
     rollback undoes the slot claim too — never wrap this call in a try/except
     that swallows it.
     """
+    # Round eligibility runs BEFORE the claim, never after: a rejected booking
+    # must not first flip a slot to "booked" and rely on the rollback to put it
+    # back. With slot_id the round isn't known from the arguments, so it's read
+    # off the slot row first.
+    gate_round = round_type
+    if gate_round is None and slot_id is not None:
+        # A scalar read, deliberately not db.get(): loading the ORM object here
+        # would put it in the identity map immediately before the claiming
+        # UPDATE...RETURNING below hands back the same row, and whether that
+        # instance then reflects the new status depends on session-
+        # synchronization behaviour we don't need to depend on. The round is
+        # all this needs, so fetch only the round.
+        gate_round = (await db.execute(
+            select(InterviewSlot.round_type).where(InterviewSlot.id == slot_id)
+        )).scalar_one_or_none()
+    if gate_round:
+        await assert_round_bookable(
+            db, application_id=application_id, round_type=gate_round,
+            enforce_stage_gate=enforce_stage_gate,
+        )
+
     # Hard floor, not just a list-filtering concern: even if the caller's
     # slot list was fetched a moment ago while still upcoming, the clock may
     # have passed start_time by the time this claim actually runs — never let
@@ -473,6 +677,7 @@ async def book_unassigned_slot(
     round_type: str,
     application_id: uuid.UUID,
     booked_by_user_id: uuid.UUID,
+    enforce_stage_gate: bool = True,
 ) -> SlotResponse:
     """HR's "Book for an interviewer" direct-booking path for a slot the
     interviewer published but nobody has assigned a job to yet — picking the
@@ -491,6 +696,11 @@ async def book_unassigned_slot(
     job = await db.get(Job, job_id)
     if not job:
         raise HTTPException(404, "Job not found")
+
+    await assert_round_bookable(
+        db, application_id=application_id, round_type=round_type,
+        enforce_stage_gate=enforce_stage_gate,
+    )
 
     claim_stmt = (
         update(InterviewSlot)
@@ -526,13 +736,32 @@ async def _finalize_booking(
     job_title: Optional[str] = None,
 ) -> SlotResponse:
     """Shared tail of both booking paths above: the slot row is already
-    claimed (status="booked", job_id/round_type set) — this just creates the
-    real Interview for it and records who booked it."""
+    claimed (status="booked", job_id/round_type set) — this creates the real
+    Interview for it and records who booked it.
+
+    The claim, the Interview and the slot->interview link all commit together,
+    exactly once. Previously create_interview() committed and then this function
+    committed again, so a failure in between (connection reset, timeout, worker
+    killed) left a durable slot at status="booked" with interview_id NULL —
+    unreachable by unpublish/unassign/reschedule (all require "open") and
+    invisible to cancel_interview (which finds slots by interview_id), i.e.
+    permanently unusable without manual SQL.
+    """
     from app.services import interview_service
 
     interview_data = InterviewCreate(
         application_id=application_id,
         round_number=ROUND_TO_NUMBER[slot.round_type],
+        # The slot is the authority on which round this is — without it the
+        # interview would be attributed by the application's current stage,
+        # which is the same thing today but stops being so the moment HR moves
+        # the candidate on before the interview happens.
+        round_type=slot.round_type,
+        # Without a title the emails and calendar UI fall back to
+        # f"Round {round_number}" — which renders a screening call as
+        # "Round 0 – Round 0" to the candidate, and every other slot booking as
+        # "Round 1 – Round 1". The round already has a human name; use it.
+        title=ROUND_LABELS[slot.round_type],
         interview_type=ROUND_TO_INTERVIEW_TYPE[slot.round_type],
         scheduled_at=slot.start_time,
         duration_mins=slot.duration_mins,
@@ -540,20 +769,33 @@ async def _finalize_booking(
     )
     interview = await interview_service.create_interview(
         db, interview_data, created_by=booked_by_user_id, cc_emails=SLOT_BOOKING_CC,
+        defer_commit=True,
+        # assert_round_bookable already ran (under an application row lock)
+        # before the slot was claimed — no need to repeat the query.
+        check_round=False,
     )
 
     slot.interview_id = interview.id
     slot.booked_by_agency_id = booked_by_agency_id
     slot.booked_by_user_id = booked_by_user_id
-    await db.commit()  # see unassign_slot above — no refresh needed
+    await db.commit()  # the one commit for claim + interview + link
+
+    # Only now — a queued Celery task can start before this function returns, and
+    # emailing a candidate about a booking that then rolled back is not something
+    # you can take back.
+    interview_service.dispatch_interview_created_tasks(
+        interview, SLOT_BOOKING_CC, has_panelists=True,
+    )
 
     return _to_response(slot, job_title=job_title)
 
 
 def _to_response(slot: InterviewSlot, job_title=None, interviewer_name=None, candidate_name=None) -> SlotResponse:
-    # Anonymization for agencies is structural, not a hidden-field trick here —
-    # the agency-facing aggregate uses AvailableSlotGroup, a schema with no
-    # interviewer field at all, and never calls this function.
+    # This DOES carry interviewer_id, and the agency booking endpoint does reach
+    # it (via book_slot). Anonymisation for agencies is enforced at the route's
+    # response_model — AvailableSlotGroup for listing, AgencyBookingConfirmation
+    # for booking, neither of which has an interviewer field. Don't hand a raw
+    # SlotResponse to an agency-facing route.
     return SlotResponse(
         id=slot.id,
         job_id=slot.job_id,

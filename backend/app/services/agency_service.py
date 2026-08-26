@@ -223,6 +223,14 @@ async def get_agency_portal(
         .order_by(Application.applied_at.desc())
     )).all()
 
+    # One batched lookup for the whole list rather than a query per candidate —
+    # this drives the "already booked, don't show them again" rule in the
+    # portal's booking modal, so every row needs it on every poll.
+    from app.services import interview_slot_service
+    booked_by_app = await interview_slot_service.get_booked_rounds(
+        db, [app.id for app, _ in rows]
+    )
+
     candidates = [
         AgencyPortalCandidate(
             application_id=app.id,
@@ -230,6 +238,7 @@ async def get_agency_portal(
             stage=app.stage,
             applied_at=app.applied_at,
             stage_updated_at=app.stage_updated_at,
+            booked_rounds=sorted(booked_by_app.get(app.id, set())),
         )
         for app, full_name in rows
     ]
@@ -245,15 +254,21 @@ async def get_agency_portal(
     )
 
 
-async def validate_portal_assignment(
+async def validate_portal_access(
     db: AsyncSession,
     portal_token: str,
     assignment_id: uuid.UUID,
 ) -> tuple[Agency, JobAgencyAssignment]:
-    """Resolve and validate an agency portal token + assignment for submission:
-    active agency, assignment belongs to it, not expired, quota not exhausted."""
-    from app.models.application import Application
+    """Everything validate_portal_assignment checks EXCEPT the submission quota:
+    active agency, assignment belongs to it, not expired.
 
+    Used by the interview-slot endpoints. max_submissions caps how many
+    candidates an agency may SUBMIT — it must not also stop them scheduling
+    interviews for candidates they already submitted. An agency that filled its
+    quota is exactly the one with people waiting on a screening call, and
+    quota-gating the slot list made the portal report "no interview times open
+    yet" when the real reason was the quota.
+    """
     agency = (await db.execute(
         select(Agency).where(Agency.portal_token == portal_token, Agency.is_active == True)
     )).scalar_one_or_none()
@@ -271,6 +286,20 @@ async def validate_portal_assignment(
             expires = expires.replace(tzinfo=timezone.utc)
         if expires < now:
             raise HTTPException(400, "This job assignment has expired")
+
+    return agency, assignment
+
+
+async def validate_portal_assignment(
+    db: AsyncSession,
+    portal_token: str,
+    assignment_id: uuid.UUID,
+) -> tuple[Agency, JobAgencyAssignment]:
+    """Resolve and validate an agency portal token + assignment for submission:
+    active agency, assignment belongs to it, not expired, quota not exhausted."""
+    from app.models.application import Application
+
+    agency, assignment = await validate_portal_access(db, portal_token, assignment_id)
 
     if assignment.max_submissions:
         count = (await db.execute(

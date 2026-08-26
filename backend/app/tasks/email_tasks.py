@@ -2,6 +2,7 @@ from app.tasks.celery_app import celery_app
 import asyncio
 import uuid
 import logging
+from app.utils.rounds import round_display_label
 from contextlib import asynccontextmanager
 
 logger = logging.getLogger(__name__)
@@ -99,6 +100,31 @@ def send_stage_update_email(self, application_id: str, new_stage: str, from_stag
         raise self.retry(exc=exc)
 
 
+def stage_at(stage_history_rows, ts):
+    """The pipeline stage an application was sitting at as of `ts`, given its
+    stage history in ascending created_at order.
+
+    Fallback only — interviews.round_type is the authority on which round an
+    interview belonged to. This is for rows that predate that column.
+
+    Rows whose to_stage starts with "_" are skipped: application_stage_history
+    doubles as the notes table, where a note is stored as a row with
+    to_stage = "_note". Letting one win resolved the stage to "_note", which is
+    not in FEEDBACK_EXCLUDED_INTERVIEW_STAGES — so a note written shortly before
+    a screening call was enough to leak that call's feedback into a
+    candidate-facing rejection email.
+    """
+    effective = "applied"
+    for to_stage, changed_at in stage_history_rows:
+        if to_stage.startswith("_"):
+            continue
+        if changed_at <= ts:
+            effective = to_stage
+        else:
+            break
+    return effective
+
+
 async def _send_stage_update_email_async(application_id: str, new_stage: str, from_stage: str):
     if new_stage != "rejected":
         logger.info(f"Stage update email skipped (non-rejection): app={application_id}, stage={new_stage}")
@@ -122,14 +148,6 @@ async def _send_stage_update_email_async(application_id: str, new_stage: str, fr
     # picked. Applied/screening/assessment/offer rejections always get the
     # generic version, with no feedback content.
     show_feedback = from_stage in FEEDBACK_ELIGIBLE_STAGES
-
-    _ROUND_LABELS = {
-        "screening": "Screening",
-        "assessment": "Assessment",
-        "tr1": "Technical Round 1",
-        "tr2": "Technical Round 2",
-        "hr": "HR Interview",
-    }
 
     async with _task_session() as db:
         row = (await db.execute(
@@ -159,13 +177,7 @@ async def _send_stage_update_email_async(application_id: str, new_stage: str, fr
         )).all()
 
         def _stage_at(ts):
-            effective = "applied"
-            for to_stage, changed_at in stage_history_rows:
-                if changed_at <= ts:
-                    effective = to_stage
-                else:
-                    break
-            return effective
+            return stage_at(stage_history_rows, ts)
 
         # Collect all interviews + all feedback across every round
         all_interviews = (await db.execute(
@@ -179,7 +191,11 @@ async def _send_stage_update_email_async(application_id: str, new_stage: str, fr
         last_interview = None
 
         for interview in all_interviews:
-            interview_stage = _stage_at(interview.created_at)
+            # interviews.round_type is the authority on which round this was.
+            # _stage_at is only a fallback for rows that predate that column or
+            # were scheduled outside a round — it infers from stage history,
+            # which is guesswork by comparison.
+            interview_stage = interview.round_type or _stage_at(interview.created_at)
 
             feedback_rows = (await db.execute(
                 select(InterviewFeedback)
@@ -187,12 +203,18 @@ async def _send_stage_update_email_async(application_id: str, new_stage: str, fr
                 .order_by(InterviewFeedback.created_at.asc())
             )).scalars().all()
 
-            # Only actual interview-round feedback ever goes into the candidate-facing
-            # summary — screening/applied/assessment round feedback is internal only.
-            if interview_stage not in FEEDBACK_EXCLUDED_INTERVIEW_STAGES:
+            # A rejected candidate only ever sees feedback from rounds they
+            # actually sat: real interview rounds (tr1/tr2/hr), and only ones
+            # that went ahead. HR screening-call notes are internal — they feed
+            # forward to the next interviewer (interview_service._get_previous_rounds)
+            # but never reach the candidate. A cancelled round didn't happen, so
+            # any feedback hanging off it isn't the candidate's to receive either.
+            is_real_round = interview_stage not in FEEDBACK_EXCLUDED_INTERVIEW_STAGES
+            went_ahead = interview.status != "cancelled"
+            if is_real_round and went_ahead:
                 for fb in feedback_rows:
                     raw_feedbacks.append({
-                        "round_label": interview.title or _ROUND_LABELS.get(interview_stage, f"Round {interview.round_number}"),
+                        "round_label": round_display_label(interview),
                         "overall_rating": fb.overall_rating,
                         "technical_score": fb.technical_score,
                         "communication_score": fb.communication_score,
@@ -323,7 +345,7 @@ async def _send_screening_request_email_async(application_id: str):
     from app.models.job import Job
     from app.models.screening import ScreeningResponse
     from app.services.email_service import send_email
-    from app.services.screening_service import REQUEST_EXPIRY_HOURS
+    from app.services.screening_service import REQUEST_EXPIRY_DAYS, REQUEST_EXPIRY_HOURS
     from app.config import settings
     from sqlalchemy import select
 
@@ -361,6 +383,7 @@ async def _send_screening_request_email_async(application_id: str):
                 "job_title": job_title,
                 "screening_url": screening_url,
                 "expires_hours": REQUEST_EXPIRY_HOURS,
+                "expires_days": REQUEST_EXPIRY_DAYS,
             },
         )
 
@@ -685,6 +708,34 @@ def _interview_scheduled_str(interview) -> str:
     return format_ist(interview.scheduled_at)
 
 
+class AllRecipientsFailed(Exception):
+    """Every send in a batch failed — safe to retry, since nobody got anything."""
+
+
+async def _send_batch(sends) -> None:
+    """Send a batch of emails, isolating per-recipient failures.
+
+    `sends` is an iterable of (label, coroutine-factory). Each is awaited on its
+    own; one bad address no longer aborts the batch and forces a whole-task
+    retry, which was re-emailing everyone who had already received it (up to 4x
+    for a 3-retry task).
+
+    Retrying is only correct when NOTHING was delivered — that means a broker or
+    ACS-wide outage rather than one bad recipient — so this raises only in that
+    case and otherwise logs the individual failures.
+    """
+    sent = failed = 0
+    for label, factory in sends:
+        try:
+            await factory()
+            sent += 1
+        except Exception as exc:
+            failed += 1
+            logger.error(f"Email send failed for {label}: {exc}")
+    if failed and not sent:
+        raise AllRecipientsFailed(f"all {failed} recipient(s) failed")
+
+
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def send_interview_scheduled_notifications(self, interview_id: str, cc_emails: list[str] | None = None):
     try:
@@ -718,7 +769,12 @@ async def _send_interview_scheduled_async(interview_id: str, cc_emails: list[str
         email_ctx = {
             "job_title": job_title,
             "round_number": interview.round_number,
-            "title": interview.title or f"Round {interview.round_number}",
+            # What the template actually prints. round_number/title stay in the
+            # context for any other template that still reads them, but the
+            # round line is rendered from this alone — "Round 0 – ..." must
+            # never reach a candidate.
+            "round_label": round_display_label(interview),
+            "title": round_display_label(interview),
             "interview_type": interview.interview_type,
             "scheduled_at": _interview_scheduled_str(interview),
             "duration_mins": interview.duration_mins,
@@ -726,14 +782,15 @@ async def _send_interview_scheduled_async(interview_id: str, cc_emails: list[str
             "location": interview.location or "",
         }
 
+        sends = []
         if candidate:
-            await send_email(
-                to_email=candidate.email,
+            sends.append((candidate.email, lambda c=candidate: send_email(
+                to_email=c.email,
                 subject=f"Interview Scheduled – {job_title}",
                 template_name="interview_scheduled",
-                context={"full_name": candidate.full_name, "role": "candidate", **email_ctx},
+                context={"full_name": c.full_name, "role": "candidate", **email_ctx},
                 cc_email=cc_emails,
-            )
+            )))
 
         panelists = (await db.execute(
             select(InterviewPanelist).where(InterviewPanelist.interview_id == iv_uuid)
@@ -741,19 +798,20 @@ async def _send_interview_scheduled_async(interview_id: str, cc_emails: list[str
         for p in panelists:
             interviewer = await db.get(User, p.user_id)
             if interviewer:
-                await send_email(
-                    to_email=interviewer.email,
+                sends.append((interviewer.email, lambda i=interviewer: send_email(
+                    to_email=i.email,
                     subject=f"Interview Assigned – {job_title}",
                     template_name="interview_scheduled",
                     context={
-                        "full_name": interviewer.full_name,
+                        "full_name": i.full_name,
                         "role": "interviewer",
                         "candidate_name": candidate.full_name if candidate else "",
                         **email_ctx,
                     },
                     cc_email=cc_emails,
-                )
+                )))
 
+        await _send_batch(sends)
         logger.info(f"Interview scheduled notifications sent: interview={interview_id}")
 
 
@@ -790,7 +848,12 @@ async def _send_interview_rescheduled_async(interview_id: str):
         email_ctx = {
             "job_title": job.title if job else "the position",
             "round_number": interview.round_number,
-            "title": interview.title or f"Round {interview.round_number}",
+            # What the template actually prints. round_number/title stay in the
+            # context for any other template that still reads them, but the
+            # round line is rendered from this alone — "Round 0 – ..." must
+            # never reach a candidate.
+            "round_label": round_display_label(interview),
+            "title": round_display_label(interview),
             "interview_type": interview.interview_type,
             "scheduled_at": _interview_scheduled_str(interview),
             "duration_mins": interview.duration_mins,
@@ -860,7 +923,12 @@ async def _send_interview_cancelled_async(interview_id: str):
         email_ctx = {
             "job_title": job.title if job else "the position",
             "round_number": interview.round_number,
-            "title": interview.title or f"Round {interview.round_number}",
+            # What the template actually prints. round_number/title stay in the
+            # context for any other template that still reads them, but the
+            # round line is rendered from this alone — "Round 0 – ..." must
+            # never reach a candidate.
+            "round_label": round_display_label(interview),
+            "title": round_display_label(interview),
             "interview_type": interview.interview_type,
             "scheduled_at": _interview_scheduled_str(interview),
         }

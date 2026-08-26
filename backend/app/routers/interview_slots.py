@@ -125,6 +125,19 @@ async def job_slots(
     return await interview_slot_service.get_job_slots_for_hr(db, job_id)
 
 
+@router.get("/booked-rounds/{job_id}")
+async def booked_rounds_for_job(
+    job_id: uuid.UUID,
+    _=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Which rounds each candidate on this job already has a live interview for.
+    Feeds the "don't offer a round they're already booked into" filter in HR's
+    booking pickers — the same rule assert_round_bookable enforces, so the UI
+    and the gate agree instead of the click failing with a 400."""
+    return await interview_slot_service.get_booked_rounds_for_job(db, job_id)
+
+
 @router.post("/book", response_model=SlotResponse)
 async def book_slot(
     data: SlotBookRequest,
@@ -136,6 +149,7 @@ async def book_slot(
         application_id=data.application_id,
         slot_id=data.slot_id,
         booked_by_user_id=user.id,
+        enforce_stage_gate=not data.override_stage_gate,
     )
 
 
@@ -152,4 +166,5 @@ async def book_unassigned_slot(
         round_type=data.round_type,
         application_id=data.application_id,
         booked_by_user_id=user.id,
+        enforce_stage_gate=not data.override_stage_gate,
     )

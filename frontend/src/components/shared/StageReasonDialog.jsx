@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Loader2, XCircle, UserMinus } from 'lucide-react';
 import { DROP_REASON_CATEGORIES, STAGE_MAP } from '@/constants/pipelineStages';
+import { interviewRoundLabel } from '@/constants/interviewRounds';
 
 // Reusable reason-capture dialog for any transition into a "closed with a
 // reason" stage (rejected / interview_drop / offer_drop). For `rejected` it
@@ -62,7 +63,7 @@ export default function StageReasonDialog({
                   <div key={iv.id} className="border border-surface-200 rounded-xl overflow-hidden">
                     <div className="bg-surface-50 px-4 py-2.5 flex items-center justify-between">
                       <span className="text-sm font-semibold text-gray-800">
-                        Round {iv.round_number}{iv.title ? ` — ${iv.title}` : ''}
+                        {interviewRoundLabel(iv)}
                       </span>
                       <span className="text-xs text-gray-400">{iv.feedback.length} response{iv.feedback.length !== 1 ? 's' : ''}</span>
                     </div>
@@ -94,7 +95,7 @@ export default function StageReasonDialog({
                 ))}
                 {noFeedback.map((iv) => (
                   <div key={iv.id} className="border border-dashed border-surface-300 rounded-xl px-4 py-3 text-sm text-gray-400">
-                    Round {iv.round_number}{iv.title ? ` — ${iv.title}` : ''}: no feedback submitted yet
+                    {interviewRoundLabel(iv)}: no feedback submitted yet
                   </div>
                 ))}
               </>

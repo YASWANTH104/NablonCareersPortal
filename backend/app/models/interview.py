@@ -14,6 +14,14 @@ class Interview(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     application_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("applications.id"), nullable=False)
     round_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # screening | tr1 | tr2 | hr — the pipeline round this interview belongs to,
+    # from app/constants/stages.py's SLOT_ROUND_TYPES. round_number alone can't
+    # answer that: it defaults to 1 for every manually scheduled interview, so a
+    # screening call and a TR1 are indistinguishable by number. Set explicitly on
+    # slot bookings (from the slot's own round_type) and inferred from the
+    # application's stage otherwise. NULL means "not attributable to a round" —
+    # legacy rows, or an interview scheduled at applied/assessment/offer.
+    round_type: Mapped[str | None] = mapped_column(String(20))
     title: Mapped[str | None] = mapped_column(String(255))
     interview_type: Mapped[str | None] = mapped_column(String(30))
     # video | phone | onsite | technical | hr | panel
