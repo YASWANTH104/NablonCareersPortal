@@ -17,6 +17,7 @@ import { offersApi } from '@/api/offers';
 import client from '@/api/client';
 import { ResumeVersionsModal } from '@/components/shared/ResumeVersions';
 import { FREE_TEXT_MAX } from '@/constants/fieldLimits';
+import { interviewRoundLabel } from '@/constants/interviewRounds';
 
 const STAGE_CONFIG = {
   applied:         { label: 'Applied',          color: 'bg-blue-100 text-blue-700' },
@@ -796,7 +797,7 @@ function SelfFeedbackModal({ interview, onClose }) {
     });
   };
 
-  const interviewTitle = interview.title || `Round ${interview.round_number}`;
+  const interviewTitle = interviewRoundLabel(interview);
   const interviewDate = format(toIST(interview.scheduled_at), 'dd MMM yyyy');
 
   return (
@@ -944,7 +945,7 @@ function InterviewsPanel({ applicationId }) {
               <Calendar className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
               <div className="min-w-0">
                 <p className="text-sm font-medium text-gray-800 truncate">
-                  {iv.title || `Round ${iv.round_number}`}
+                  {interviewRoundLabel(iv)}
                   {iv.interview_type && <span className="ml-1.5 text-xs text-gray-400">({TYPE_LABELS[iv.interview_type] ?? iv.interview_type})</span>}
                 </p>
                 <p className="text-xs text-gray-400">{format(toIST(iv.scheduled_at), 'dd MMM yyyy, h:mm a')} IST</p>

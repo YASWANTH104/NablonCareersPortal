@@ -137,6 +137,7 @@ async def get_interview(
     user=Depends(require_roles(*_HR_AND_INTERVIEWER)),
     db: AsyncSession = Depends(get_db),
 ):
+    await interview_service.assert_can_view_interview(db, interview_id, user)
     return await interview_service.get_interview(db, interview_id)
 
 
@@ -199,6 +200,7 @@ async def get_feedback(
     user=Depends(require_roles(*_HR_AND_INTERVIEWER)),
     db: AsyncSession = Depends(get_db),
 ):
+    await interview_service.assert_can_view_interview(db, interview_id, user)
     return await interview_service.get_feedback(db, interview_id)
 
 

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import {
-  format, isToday, isTomorrow, isThisWeek, isSameDay,
+  format, isSameDay, isSameWeek,
   startOfMonth, endOfMonth, startOfWeek, endOfWeek, startOfDay,
   addMonths, addWeeks, addDays,
 } from 'date-fns';
@@ -15,7 +15,7 @@ import {
 import { interviewsApi } from '@/api/interviews';
 import { useAuthStore } from '@/store/authStore';
 import { HR_ROLES, ROLES } from '@/utils/permissions';
-import { toIST } from '@/utils/formatters';
+import { toIST, istToInstant } from '@/utils/formatters';
 import MonthCalendar from '@/components/interviews/MonthCalendar';
 import WeekCalendar from '@/components/interviews/WeekCalendar';
 import InterviewCard from '@/components/interviews/InterviewCard';
@@ -59,11 +59,21 @@ function rangeFor(view, cursor) {
   return null;
 }
 
+// Interviews are bucketed on the IST wall clock, so "now" has to live in the
+// same space. Using the viewer's raw local now meant a viewer in New York at
+// 22:00 on Aug 26 (07:30 IST on Aug 27) had "Today" mean Aug 26 to the grid and
+// Aug 27 to the data — real interviews simply didn't appear. Mirrors
+// AvailabilityPage's gridNow(), which already solved this.
+const istNow = () => toIST(new Date());
+
 function dateGroupLabel(dateStr) {
   const d = toIST(dateStr);
-  if (isToday(d)) return 'Today';
-  if (isTomorrow(d)) return 'Tomorrow';
-  if (isThisWeek(d, { weekStartsOn: WEEK_STARTS_ON })) return format(d, 'EEEE');
+  const now = istNow();
+  // isToday/isTomorrow/isThisWeek compare against the viewer's local now, which
+  // is the wrong space for an IST-shifted date — compare against IST now.
+  if (isSameDay(d, now)) return 'Today';
+  if (isSameDay(d, addDays(now, 1))) return 'Tomorrow';
+  if (isSameWeek(d, now, { weekStartsOn: WEEK_STARTS_ON })) return format(d, 'EEEE');
   return format(d, 'MMMM d, yyyy');
 }
 
@@ -107,8 +117,8 @@ export default function InterviewsPage() {
   // the calendar views are HR's scheduling tool, not what an interviewer needs first.
   const [view, setView] = useState(() => localStorage.getItem(VIEW_KEY) ?? (isInterviewer ? 'list' : 'month'));
   const [fullDay, setFullDay] = useState(() => localStorage.getItem(FULL_DAY_KEY) === '1');
-  const [cursor, setCursor] = useState(() => new Date());
-  const [selectedDay, setSelectedDay] = useState(() => startOfDay(new Date()));
+  const [cursor, setCursor] = useState(() => istNow());
+  const [selectedDay, setSelectedDay] = useState(() => startOfDay(istNow()));
   const [scope, setScope] = useState('all');
   const [statusFilter, setStatusFilter] = useState(() => (isInterviewer ? 'scheduled' : ''));
   const [page, setPage] = useState(1);
@@ -142,8 +152,10 @@ export default function InterviewsPage() {
       const params = { status: statusFilter || undefined };
       if (range) {
         // Calendar views render a fixed window, so pull it whole instead of paging.
-        params.date_from = range.from.toISOString();
-        params.date_to = range.to.toISOString();
+        // range.from/to are IST-space Dates (cursor is istNow()-derived), so
+        // .toISOString() on them would be off by the viewer's own UTC offset.
+        params.date_from = istToInstant(range.from).toISOString();
+        params.date_to = istToInstant(range.to).toISOString();
         params.limit = 500;
       } else {
         params.page = page;
@@ -152,7 +164,10 @@ export default function InterviewsPage() {
       const fn = effectiveScope === 'mine' ? interviewsApi.mine : interviewsApi.list;
       return fn(params).then((r) => r.data);
     },
-    keepPreviousData: true,
+    // v5 spelling — the bare `keepPreviousData: true` flag was a v4
+    // option and is silently ignored on v5, so every week/month step
+    // dropped to the loading skeleton instead of holding the last view.
+    placeholderData: keepPreviousData,
   });
 
   const interviews = useMemo(() => data?.items ?? [], [data]);
@@ -192,7 +207,7 @@ export default function InterviewsPage() {
   };
 
   const goToday = () => {
-    const today = new Date();
+    const today = istNow();
     setCursor(today);
     setSelectedDay(startOfDay(today));
   };

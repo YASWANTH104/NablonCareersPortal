@@ -13,6 +13,8 @@ from app.schemas.interview import (
     CandidateInterviewSummary,
 )
 from app.utils.timezone import format_ist
+from app.constants.stages import ROUND_ELIGIBLE_STAGE, ROUND_LABELS, ROUND_ORDER
+from app.utils.rounds import round_display_label
 
 _HR_ROLES = ("hr_manager", "admin", "super_admin")
 
@@ -30,20 +32,52 @@ async def _users_by_id(db: AsyncSession, user_ids: set) -> dict:
     return {u.id: u for u in users}
 
 
+def _round_index(interview) -> int:
+    """Where an interview sits in the pipeline, for ordering rounds against each
+    other. Prefers round_type (screening=0, tr1=1, tr2=2, hr=3) and only falls
+    back to round_number for rows that have none — legacy interviews, or ones
+    scheduled at a non-round stage.
+
+    round_number alone is not usable for this: it defaults to 1 on every
+    manually scheduled interview, so a manually booked screening call and a TR1
+    both sit on 1 and neither would ever be prior context for the other.
+    """
+    round_type = getattr(interview, "round_type", None)
+    if round_type and round_type in ROUND_ORDER:
+        return ROUND_ORDER[round_type]
+    return interview.round_number
+
+
 async def _get_previous_rounds(
     db: AsyncSession,
     application_id: uuid.UUID,
     current_round: int,
 ) -> list[dict]:
-    """Feedback from all completed rounds prior to current_round for the same application."""
-    if current_round <= 1:
+    """Feedback from every earlier round of the same application, newest-last.
+
+    This is INTERNAL context for whoever runs the next round — an interviewer
+    picking up a TR1 sees what came out of the HR screening call. It is not the
+    candidate-facing summary; that one is built in tasks/email_tasks.py and
+    deliberately excludes screening (see FEEDBACK_EXCLUDED_INTERVIEW_STAGES).
+
+    Ordering is by _round_index, not by round_number, so screening (index 0)
+    counts as prior to TR1 (index 1). Filtering happens in Python because the
+    index depends on round_type, which SQL can't order on directly.
+    """
+    if current_round <= ROUND_ORDER["screening"]:
         return []
-    prior = (await db.execute(
+    everything = (await db.execute(
         select(Interview).where(
             Interview.application_id == application_id,
-            Interview.round_number < current_round,
-        ).order_by(Interview.round_number)
+            # A cancelled round never happened — it contributes no feedback and
+            # would just show up as an empty heading in the panel.
+            Interview.status != "cancelled",
+        )
     )).scalars().all()
+    prior = sorted(
+        (iv for iv in everything if _round_index(iv) < current_round),
+        key=_round_index,
+    )
     if not prior:
         return []
     prior_ids = [iv.id for iv in prior]
@@ -55,7 +89,8 @@ async def _get_previous_rounds(
         fb_by.setdefault(f.interview_id, []).append(f)
     users_by_id = await _users_by_id(db, {f.submitted_by for f in all_fb})
     return [
-        {"round_number": iv.round_number, "interview_title": iv.title,
+        {"round_number": iv.round_number, "round_type": iv.round_type,
+         "interview_title": iv.title or ROUND_LABELS.get(iv.round_type),
          "feedback": [_feedback_to_dict(f, users_by_id) for f in fb_by.get(iv.id, [])]}
         for iv in prior
     ]
@@ -63,8 +98,11 @@ async def _get_previous_rounds(
 
 async def _batch_previous_rounds(db: AsyncSession, rows: list) -> dict:
     """Batch version of _get_previous_rounds for list views. Returns {interview_id: [entries]}."""
-    needs_prev = [(row[0].application_id, row[0].round_number, row[0].id)
-                  for row in rows if row[0].round_number > 1]
+    # Keyed on _round_index, not round_number — see _get_previous_rounds. A TR1
+    # (index 1) has a prior round now that screening is index 0, so the old
+    # `round_number > 1` filter would have skipped exactly the case this is for.
+    needs_prev = [(row[0].application_id, _round_index(row[0]), row[0].id)
+                  for row in rows if _round_index(row[0]) > ROUND_ORDER["screening"]]
     if not needs_prev:
         return {}
 
@@ -72,6 +110,7 @@ async def _batch_previous_rounds(db: AsyncSession, rows: list) -> dict:
     all_ivs = (await db.execute(
         select(Interview).where(
             Interview.application_id.in_(app_ids),
+            Interview.status != "cancelled",  # see _get_previous_rounds
         )
     )).scalars().all()
 
@@ -91,15 +130,112 @@ async def _batch_previous_rounds(db: AsyncSession, rows: list) -> dict:
     result = {}
     for app_id, current_round, interview_id in needs_prev:
         prior = sorted(
-            [iv for iv in ivs_by_app.get(app_id, []) if iv.round_number < current_round],
-            key=lambda x: x.round_number,
+            [iv for iv in ivs_by_app.get(app_id, []) if _round_index(iv) < current_round],
+            key=_round_index,
         )
         result[interview_id] = [
-            {"round_number": iv.round_number, "interview_title": iv.title,
+            {"round_number": iv.round_number, "round_type": iv.round_type,
+             "interview_title": iv.title or ROUND_LABELS.get(iv.round_type),
              "feedback": [_feedback_to_dict(f, users_by_id) for f in fb_by.get(iv.id, [])]}
             for iv in prior
         ]
     return result
+
+
+async def _lock_people(db: AsyncSession, user_ids) -> None:
+    """Take a row lock on everyone whose calendar is about to be checked.
+
+    Without this, "is this interviewer free?" was a plain SELECT followed by an
+    INSERT, with nothing in between to stop a second request doing the same
+    thing concurrently: both read "free", both insert, and the interviewer is
+    double-booked with the 409 never firing. The database has no constraint
+    that would catch it — an exclusion constraint can't express "per
+    interviewer" here, because the time lives on `interviews` while the
+    interviewer lives on `interview_panelists`.
+
+    Locking the users row is what serialises the two requests. It only works
+    because the lock is taken BEFORE the conflict query: the session runs at
+    Postgres's default READ COMMITTED, so once the first transaction commits
+    and releases the lock, the second takes a fresh snapshot for its next
+    statement and does see the interview that was just written. Reversing the
+    order would put the read on a snapshot from before the commit and miss it.
+
+    Interviewers AND the candidate are locked together in one sorted pass, not
+    in two steps. They all live in `users`, and a person can be an interviewer on
+    one interview and the candidate on another, so locking panelists-then-
+    candidate would let two transactions take the same two rows in opposite
+    order. One sorted set makes the order global.
+
+    Sorting is what prevents the deadlock: two panels that overlap — {A,B} and
+    {B,A} — would otherwise each hold what the other waits on. Released
+    automatically when the transaction ends.
+
+    Lock order across the whole booking stack is
+    applications -> interview_slots -> users, and every write path takes them in
+    that order (book_slot gates on the application, claims the slot, then lands
+    here). update_interview is the one path that takes users before touching a
+    slot row, which is safe only because it can only ever touch a *booked* slot
+    while book_slot only ever claims an *open* one — the two can never want the
+    same slot. Keep that in mind before adding a slot write anywhere else.
+    """
+    from app.models.user import User
+
+    for uid in sorted({u for u in user_ids if u}, key=str):
+        await db.execute(select(User.id).where(User.id == uid).with_for_update())
+
+
+async def _check_candidate_conflict(
+    db: AsyncSession,
+    application_id: uuid.UUID,
+    scheduled_at,
+    duration_mins: int,
+    exclude_interview_id: Optional[uuid.UUID] = None,
+    lock: bool = True,
+) -> Optional[str]:
+    """Is this candidate already sitting in another interview at this time?
+
+    Checked per PERSON, not per application: the same candidate can have live
+    applications on two different jobs, and nothing stopped both being scheduled
+    for the same instant — the panelist check only ever looked at interviewers.
+    A single application could also take, say, a tr1 slot and an hr slot at the
+    same moment via the stage override.
+
+    Locks the candidate's user row first for the same reason _lock_people does:
+    without it this is read-then-write and two concurrent bookings both see
+    "free". Callers that already locked via _lock_people pass lock=False so the
+    whole participant set is taken in one sorted pass. Returns the clashing time
+    as a string, or None.
+    """
+    from app.models.application import Application
+    from app.models.user import User
+
+    application = await db.get(Application, application_id)
+    if not application:
+        return None
+
+    if lock:
+        await db.execute(
+            select(User.id).where(User.id == application.applicant_id).with_for_update()
+        )
+
+    new_end = scheduled_at + timedelta(minutes=duration_mins or 60)
+    stmt = (
+        select(Interview.scheduled_at)
+        .join(Application, Application.id == Interview.application_id)
+        .where(
+            Application.applicant_id == application.applicant_id,
+            Interview.status.in_(["scheduled", "rescheduled"]),
+            Interview.scheduled_at < new_end,
+            Interview.scheduled_at + func.make_interval(
+                0, 0, 0, 0, 0, func.coalesce(Interview.duration_mins, 60)
+            ) > scheduled_at,
+        )
+    )
+    if exclude_interview_id:
+        stmt = stmt.where(Interview.id != exclude_interview_id)
+
+    clash = (await db.execute(stmt.limit(1))).scalar_one_or_none()
+    return format_ist(clash) if clash else None
 
 
 async def _check_panelist_conflicts(
@@ -108,12 +244,21 @@ async def _check_panelist_conflicts(
     scheduled_at,
     duration_mins: int,
     exclude_interview_id: Optional[uuid.UUID] = None,
+    lock: bool = True,
 ) -> list[str]:
-    """Return names of panelists who already have an overlapping scheduled interview."""
+    """Return names of panelists who already have an overlapping scheduled interview.
+
+    `lock` defaults to True because every caller so far is about to write. A
+    read-only "is this time free?" preview should pass lock=False — holding row
+    locks for a preview would block real scheduling for no reason.
+    """
     from app.models.user import User
 
     if not panelist_ids:
         return []
+
+    if lock:
+        await _lock_people(db, panelist_ids)
 
     new_end = scheduled_at + timedelta(minutes=duration_mins or 60)
     stmt = (
@@ -363,6 +508,7 @@ def _interview_to_response(
         "id": interview.id,
         "application_id": interview.application_id,
         "round_number": interview.round_number,
+        "round_type": interview.round_type,
         "title": interview.title,
         "interview_type": interview.interview_type,
         "scheduled_at": interview.scheduled_at,
@@ -391,18 +537,85 @@ async def create_interview(
     data: InterviewCreate,
     created_by: Optional[uuid.UUID] = None,
     cc_emails: Optional[list[str]] = None,
+    defer_commit: bool = False,
+    check_round: bool = True,
 ) -> InterviewResponse:
+    """Creates an interview and (by default) commits it.
+
+    `defer_commit=True` is for callers that must land the interview and their
+    own related rows in ONE transaction — slot booking, where the slot's
+    interview_id has to be written atomically with the interview itself.
+    Committing here and letting the caller commit again left a window where a
+    crash produced a slot stuck at status='booked' with interview_id NULL, and
+    nothing can move a slot that isn't 'open' — it was unrecoverable without
+    manual SQL. Deferred callers MUST call dispatch_interview_created_tasks()
+    after their commit; notification emails are held back until then so a
+    rolled-back booking can't email anyone.
+    """
+    # Slot bookings pass round_type through explicitly (the slot itself is the
+    # authority). Manual scheduling doesn't, so fall back to the stage the
+    # application is sitting at right now — the same attribution the rejection
+    # summary already uses. Anything outside the four round stages stays NULL
+    # rather than being forced into a round it doesn't belong to; the booking
+    # gates read this column, so a wrong guess here would hide a candidate from
+    # a round they're genuinely available for.
+    round_type = data.round_type
+    if round_type is None:
+        from app.models.application import Application as _App
+        _app_row = await db.get(_App, data.application_id)
+        if _app_row is not None and _app_row.stage in ROUND_ELIGIBLE_STAGE:
+            round_type = _app_row.stage
+
+    # Slot bookings gate before claiming the slot and pass check_round=False so
+    # the work isn't repeated. Everything else — HR scheduling by hand — arrives
+    # here ungated, and used to be able to create a second live TR1 for someone
+    # who already had one, which is the exact state the booking gate exists to
+    # prevent. The STAGE rule stays a slot-booking concern (HR legitimately
+    # schedules ahead of a stage move); the duplicate rule applies to everyone.
+    if check_round and round_type:
+        from app.services.interview_slot_service import get_booked_rounds
+        from app.constants.stages import ROUND_LABELS as _RL
+        booked = await get_booked_rounds(db, [data.application_id])
+        if round_type in booked.get(data.application_id, set()):
+            raise HTTPException(
+                400,
+                f"This candidate already has a live {_RL.get(round_type, round_type)} "
+                f"interview. Cancel it first if it needs to move.",
+            )
+
+    # One sorted lock over every person involved — interviewers and candidate —
+    # before either calendar is read. See _lock_people: splitting this into two
+    # steps would let two transactions grab the same two users rows in opposite
+    # order whenever someone is an interviewer here and a candidate there.
+    from app.models.application import Application as _AppModel
+    _app_for_lock = await db.get(_AppModel, data.application_id)
+    await _lock_people(
+        db,
+        [p.user_id for p in data.panelists]
+        + ([_app_for_lock.applicant_id] if _app_for_lock else []),
+    )
+
     if data.panelists:
         conflicts = await _check_panelist_conflicts(
-            db, [p.user_id for p in data.panelists], data.scheduled_at, data.duration_mins
+            db, [p.user_id for p in data.panelists], data.scheduled_at, data.duration_mins,
+            lock=False,
         )
         if conflicts:
             names = ", ".join(conflicts)
             raise HTTPException(409, f"Scheduling conflict: {names} already has an interview at this time slot")
 
+    clash_at = await _check_candidate_conflict(
+        db, data.application_id, data.scheduled_at, data.duration_mins, lock=False,
+    )
+    if clash_at:
+        raise HTTPException(
+            409, f"This candidate already has an interview at {clash_at}.",
+        )
+
     interview = Interview(
         application_id=data.application_id,
         round_number=data.round_number,
+        round_type=round_type,
         title=data.title,
         interview_type=data.interview_type,
         scheduled_at=data.scheduled_at,
@@ -455,18 +668,37 @@ async def create_interview(
     except Exception:
         pass
 
-    await db.commit()
-    await db.refresh(interview)
+    if defer_commit:
+        # Flush, don't commit: interview.id is assigned so the caller can link
+        # to it, but nothing is durable until the caller's single commit.
+        await db.flush()
+    else:
+        await db.commit()
+        await db.refresh(interview)
+        dispatch_interview_created_tasks(interview, cc_emails, has_panelists=bool(panelists))
 
-    # Emails (including real ACS sends, which can take several seconds each) run
-    # out-of-request via Celery — sending them inline here was why scheduling an
-    # interview with panelists could take 10-20+ seconds before the API responded.
-    # If HR didn't supply their own meeting_link, auto-create a Teams meeting
-    # (also async — a Graph token fetch + event create is the same class of slow
-    # external call). That task fires the scheduled-notification email itself once
-    # it's done (or immediately, if Graph isn't configured), so only one path runs.
+    users_by_id = await _users_by_id(db, {p.user_id for p in panelists})
+    return _interview_to_response(interview, panelists, [], users_by_id=users_by_id)
+
+
+def dispatch_interview_created_tasks(
+    interview, cc_emails: Optional[list[str]] = None, *, has_panelists: bool = True
+) -> None:
+    """Queue the post-create side effects. Call this only AFTER the transaction
+    that created the interview has committed — a queued Celery task can start
+    running before this process returns, and emailing a candidate about an
+    interview that then rolls back is not recoverable.
+
+    Emails (including real ACS sends, several seconds each) run out-of-request
+    via Celery — sending them inline was why scheduling an interview with
+    panelists took 10-20+ seconds before the API responded. If HR didn't supply
+    a meeting_link, auto-create a Teams meeting (also async — a Graph token
+    fetch + event create is the same class of slow external call). That task
+    fires the scheduled-notification email itself once done (or immediately, if
+    Graph isn't configured), so only one path runs.
+    """
     try:
-        if not interview.meeting_link and panelists:
+        if not interview.meeting_link and has_panelists:
             from app.tasks.calendar_tasks import create_teams_meeting_task
             create_teams_meeting_task.delay(str(interview.id), cc_emails=cc_emails)
         else:
@@ -474,9 +706,6 @@ async def create_interview(
             send_interview_scheduled_notifications.delay(str(interview.id), cc_emails=cc_emails)
     except Exception:
         pass
-
-    users_by_id = await _users_by_id(db, {p.user_id for p in panelists})
-    return _interview_to_response(interview, panelists, [], users_by_id=users_by_id)
 
 
 async def list_my_interviews(
@@ -572,6 +801,41 @@ async def list_my_interviews(
         ))
 
     return {"items": items, "total": total, "page": page, "limit": limit, "pages": max(1, -(-total // limit))}
+
+
+async def assert_can_view_interview(db: AsyncSession, interview_id: uuid.UUID, current_user) -> None:
+    """Same visibility rule list_interviews applies, for the single-interview
+    routes — which enforced only "has an HR-or-interviewer role" and so let any
+    interviewer read any interview by id: candidate name and email, notes, every
+    panelist's feedback, and previous_rounds_feedback (which now carries the
+    internal HR screening-call notes) for applications they have nothing to do
+    with. HR/admin see everything; the job's hiring manager sees its interviews;
+    a plain interviewer only sees ones they're a panelist on.
+    """
+    from app.models.application import Application
+    from app.services import job_service
+
+    if current_user is None:
+        raise HTTPException(403, "Not authorized")
+    if current_user.role in ("hr_manager", "admin", "super_admin"):
+        return
+
+    interview = await db.get(Interview, interview_id)
+    if not interview:
+        raise HTTPException(404, "Interview not found")
+
+    target_app = await db.get(Application, interview.application_id)
+    if target_app is not None and await job_service.is_hiring_manager(
+        db, target_app.job_id, current_user.id
+    ):
+        return
+
+    if current_user.role == "interviewer" and await is_panelist_for_application(
+        db, interview.application_id, current_user.id
+    ):
+        return
+
+    raise HTTPException(403, "Not authorized")
 
 
 async def list_interviews(
@@ -718,7 +982,7 @@ async def get_interview(db: AsyncSession, interview_id: uuid.UUID) -> InterviewR
         select(InterviewFeedback).where(InterviewFeedback.interview_id == interview_id)
     )).scalars().all()
 
-    prev_rounds = await _get_previous_rounds(db, interview.application_id, interview.round_number)
+    prev_rounds = await _get_previous_rounds(db, interview.application_id, _round_index(interview))
     users_by_id = await _users_by_id(
         db, {p.user_id for p in panelists} | {f.submitted_by for f in feedback}
     )
@@ -739,6 +1003,17 @@ async def update_interview(
     if not interview:
         raise HTTPException(404, "Interview not found")
 
+    # A cancelled interview is finished. Editing one used to bring it back to
+    # life with no slot behind it: cancel -> the slot reopens -> someone else
+    # books that slot -> HR reschedules the old interview from a stale tab, and
+    # now two live interviews exist for one slot's time.
+    if interview.status == "cancelled":
+        raise HTTPException(
+            400, "This interview was cancelled. Schedule a new one instead of editing it.",
+        )
+    if interview.status == "completed" and "scheduled_at" in data.model_dump(exclude_unset=True):
+        raise HTTPException(400, "A completed interview can't be rescheduled.")
+
     update_data = data.model_dump(exclude_unset=True)
     old_scheduled_at = interview.scheduled_at
 
@@ -749,15 +1024,48 @@ async def update_interview(
         panelist_ids = [p.user_id for p in (await db.execute(
             select(InterviewPanelist).where(InterviewPanelist.interview_id == interview_id)
         )).scalars().all()]
+        # Same single sorted lock over everyone involved as create_interview.
+        from app.models.application import Application as _AppModel
+        _app_for_lock = await db.get(_AppModel, interview.application_id)
+        await _lock_people(
+            db, panelist_ids + ([_app_for_lock.applicant_id] if _app_for_lock else []),
+        )
+
         conflicts = await _check_panelist_conflicts(
-            db, panelist_ids, new_scheduled_at, new_duration, exclude_interview_id=interview_id
+            db, panelist_ids, new_scheduled_at, new_duration,
+            exclude_interview_id=interview_id, lock=False,
         )
         if conflicts:
             names = ", ".join(conflicts)
             raise HTTPException(409, f"Scheduling conflict: {names} already has an interview at this time slot")
 
+        # Rescheduling can move an interview onto another of this candidate's
+        # interviews just as easily as onto an interviewer's.
+        clash_at = await _check_candidate_conflict(
+            db, interview.application_id, new_scheduled_at, new_duration,
+            exclude_interview_id=interview_id, lock=False,
+        )
+        if clash_at:
+            raise HTTPException(
+                409, f"This candidate already has an interview at {clash_at}.",
+            )
+
     for field, val in update_data.items():
         setattr(interview, field, val)
+
+    # Keep the slot in step with the interview it produced. Without this the
+    # interviewer's availability grid showed the OLD time as "Booked" (with no
+    # way to free it — unpublish/unassign/reschedule_slot all require "open")
+    # and the NEW time as unreserved, so the same slot could be published and
+    # booked again. Committed together with the interview edit.
+    if "scheduled_at" in update_data or "duration_mins" in update_data:
+        from app.models.interview_slot import InterviewSlot
+        slot = (await db.execute(
+            select(InterviewSlot).where(InterviewSlot.interview_id == interview_id)
+        )).scalar_one_or_none()
+        if slot:
+            slot.start_time = interview.scheduled_at
+            slot.duration_mins = interview.duration_mins
 
     await db.commit()
     await db.refresh(interview)
@@ -824,12 +1132,22 @@ async def cancel_interview(db: AsyncSession, interview_id: uuid.UUID) -> None:
     if not interview:
         raise HTTPException(404, "Interview not found")
 
+    # Idempotent: cancelling twice used to re-send every cancellation email and
+    # re-queue the Teams delete. The UI makes this easy to hit — the cancel
+    # mutation has no error handler, so a failed first click looks like nothing
+    # happened and people click again.
+    if interview.status == "cancelled":
+        return
+
     scheduled_str = format_ist(interview.scheduled_at)
     interview.status = "cancelled"
-    await db.commit()
 
     # If this interview came from a published interviewer slot, cancelling it
     # returns that capacity to the pool rather than losing it permanently.
+    # Same transaction as the status change: committing them separately meant a
+    # failure in between left the interview cancelled but the slot still
+    # "booked" against it — and no endpoint can move a slot that isn't "open",
+    # so that interviewer's time was gone for good.
     from app.models.interview_slot import InterviewSlot
     slot = (await db.execute(
         select(InterviewSlot).where(InterviewSlot.interview_id == interview_id)
@@ -839,7 +1157,8 @@ async def cancel_interview(db: AsyncSession, interview_id: uuid.UUID) -> None:
         slot.interview_id = None
         slot.booked_by_agency_id = None
         slot.booked_by_user_id = None
-        await db.commit()
+
+    await db.commit()
 
     try:
         from app.models.notification import Notification
@@ -935,7 +1254,7 @@ async def send_feedback_request_emails(db: AsyncSession, interview: Interview) -
                 "full_name": interviewer.full_name,
                 "candidate_name": candidate.full_name if candidate else "the candidate",
                 "job_title": job.title if job else "the position",
-                "interview_title": interview.title or f"Round {interview.round_number}",
+                "interview_title": round_display_label(interview),
                 "feedback_url": f"{settings.FRONTEND_URL}/interviews/feedback/{panelist.feedback_token}",
             },
         )
@@ -1040,7 +1359,7 @@ async def get_feedback_context_by_token(db: AsyncSession, token: str) -> dict:
 
     return {
         "interview_id": str(interview.id),
-        "interview_title": interview.title or f"Round {interview.round_number}",
+        "interview_title": round_display_label(interview),
         "round_number": interview.round_number,
         "interview_type": interview.interview_type,
         "scheduled_at": interview.scheduled_at,
@@ -1284,6 +1603,7 @@ async def list_candidate_interviews(
             "id": r.id,
             "application_id": r.application_id,
             "round_number": r.round_number,
+            "round_type": r.round_type,
             "title": r.title,
             "interview_type": r.interview_type,
             "scheduled_at": r.scheduled_at,

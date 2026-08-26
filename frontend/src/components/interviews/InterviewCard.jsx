@@ -6,9 +6,12 @@ import {
 } from 'lucide-react';
 import { statusStyle, typeIcon, isActive, interviewRange } from './calendarUtils';
 import { InterviewFeedbackCard, InlineFeedbackForm } from './feedback';
+import { interviewRoundLabel, roundContextHeading } from '@/constants/interviewRounds';
+
 
 /** Agenda-list row for a single interview: time rail on the left, details in the
     middle, actions on the right, with feedback expanding underneath. */
+
 export default function InterviewCard({
   interview, onCandidateClick, canComplete, canCancel, onComplete, onReschedule, onRefetch,
 }) {
@@ -46,7 +49,7 @@ export default function InterviewCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-sm font-semibold text-gray-900 truncate">
-              {interview.title || `Round ${interview.round_number}`}
+              {interviewRoundLabel(interview)}
             </p>
             <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${style.badge}`}>
               {style.label}
@@ -148,10 +151,10 @@ export default function InterviewCard({
           </button>
           {showPrevRounds && (
             <div className="mt-3 space-y-4">
-              {interview.previous_rounds_feedback.map((round) => (
-                <div key={round.round_number}>
+              {interview.previous_rounds_feedback.map((round, i) => (
+                <div key={`prev-${i}`}>
                   <p className="text-xs font-semibold text-gray-500 mb-2">
-                    Round {round.round_number}{round.interview_title ? ` — ${round.interview_title}` : ''}
+                    {roundContextHeading(round)}
                   </p>
                   {round.feedback.length === 0 ? (
                     <p className="text-xs text-gray-400 italic">No feedback submitted yet</p>

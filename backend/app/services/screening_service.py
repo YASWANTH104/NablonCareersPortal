@@ -36,7 +36,13 @@ from app.models.screening import ScreeningResponse
 
 logger = logging.getLogger(__name__)
 
-REQUEST_EXPIRY_HOURS = 48
+# Raised from 2 days to 7 (2026-08-26). The questionnaire goes out the moment
+# an application lands at "applied", so a candidate who applies on a Friday
+# evening was previously losing most of the window to a weekend they never saw
+# the email in. Kept in days as the source of truth — the candidate-facing
+# email reads in days, and an hours figure past 48 stops being legible.
+REQUEST_EXPIRY_DAYS = 7
+REQUEST_EXPIRY_HOURS = REQUEST_EXPIRY_DAYS * 24
 CGPA_HARD_MIN = 7.5
 
 # Third hard gate, applied after the composite score is computed (college tier

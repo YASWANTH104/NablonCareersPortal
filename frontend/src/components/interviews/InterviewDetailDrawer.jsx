@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import { statusStyle, typeIcon, isActive, interviewRange } from './calendarUtils';
 import { InterviewFeedbackCard, InlineFeedbackForm } from './feedback';
+import { interviewRoundLabel, roundContextHeading } from '@/constants/interviewRounds';
+
 
 function DetailRow({ icon: Icon, label, children }) {
   return (
@@ -44,7 +46,7 @@ export default function InterviewDetailDrawer({
               {style.label}
             </span>
             <h2 className="font-display font-bold text-gray-900 text-base mt-1.5 truncate">
-              {interview.title || `Round ${interview.round_number}`}
+              {interviewRoundLabel(interview)}
             </h2>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-surface-100 text-gray-500 flex-shrink-0">
@@ -87,7 +89,7 @@ export default function InterviewDetailDrawer({
               <DetailRow icon={TypeIcon} label="Format">
                 <span className="capitalize">{interview.interview_type || 'Interview'}</span>
                 {interview.round_number != null && (
-                  <span className="text-gray-400"> · Round {interview.round_number}</span>
+                  <span className="text-gray-400"> · {interviewRoundLabel(interview)}</span>
                 )}
               </DetailRow>
 
@@ -162,10 +164,10 @@ export default function InterviewDetailDrawer({
                   <History className="w-3.5 h-3.5" /> Previous rounds
                 </p>
                 <div className="space-y-4">
-                  {interview.previous_rounds_feedback.map((round) => (
-                    <div key={round.round_number}>
+                  {interview.previous_rounds_feedback.map((round, i) => (
+                    <div key={`prev-${i}`}>
                       <p className="text-xs font-semibold text-gray-500 mb-2">
-                        Round {round.round_number}{round.interview_title ? ` — ${round.interview_title}` : ''}
+                        {roundContextHeading(round)}
                       </p>
                       {round.feedback.length === 0 ? (
                         <p className="text-xs text-gray-400 italic">No feedback submitted yet</p>

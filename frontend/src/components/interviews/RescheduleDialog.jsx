@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { RefreshCw, Loader2 } from 'lucide-react';
 import { interviewsApi } from '@/api/interviews';
 import { utcToISTInputValue, istInputValueToUTCISOString } from '@/utils/formatters';
+import { interviewRoundLabel } from '@/constants/interviewRounds';
 
 const DURATION_OPTIONS = [
   { value: 30, label: '30 min' },
@@ -83,7 +84,7 @@ export default function RescheduleDialog({ interview, onClose, onSuccess }) {
           <h3 className="font-display font-bold text-gray-900">Reschedule Interview</h3>
         </div>
         <p className="text-xs text-gray-500 mb-5 pl-6">
-          {interview.title || `Round ${interview.round_number}`}
+          {interviewRoundLabel(interview)}
         </p>
         <form onSubmit={handleSubmit((v) => updateMut.mutate(v))} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

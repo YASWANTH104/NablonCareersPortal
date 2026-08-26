@@ -24,7 +24,7 @@ import { usersApi } from '@/api/users';
 import { documentsApi } from '@/api/documents';
 import { screeningApi } from '@/api/screening';
 import { interviewSlotsApi } from '@/api/interviewSlots';
-import { ROUND_MAP } from '@/constants/interviewRounds';
+import { ROUND_MAP, ROUND_ELIGIBLE_STAGE, interviewRoundLabel } from '@/constants/interviewRounds';
 import ResumeVersions, { resolveFileUrl } from '@/components/shared/ResumeVersions';
 import { InlineFeedbackForm, InterviewFeedbackCard } from '@/components/interviews/feedback';
 import { FREE_TEXT_MAX } from '@/constants/fieldLimits';
@@ -143,13 +143,22 @@ const scheduleSchema = z.object({
   refineMeetingDetails(values, ctx);
 });
 
-// A slot's round_type (tr1/tr2/hr) is what book_slot() turns into the new
-// interview's round_number — mirrors backend/app/services/interview_slot_service.py's
-// ROUND_TO_NUMBER exactly, so filtering here lines up with what actually gets created.
-const ROUND_TYPE_TO_NUMBER = { tr1: 1, tr2: 2, hr: 3 };
+// Filtering here is by round_type, never by round_number. Two reasons the old
+// number mapping was wrong once screening arrived: screening books as round 0,
+// and a *manually* scheduled screening call still gets round_number 1 (the
+// schedule form's minimum), which collides with TR1 and would wrongly hide
+// every TR1 slot. round_type is the round; the number is just ordering.
 
-function PublishedSlotPicker({ jobId, applicationId, bookedRoundNumbers, onClose, onSuccess }) {
+function PublishedSlotPicker({
+  jobId, applicationId, bookedRoundTypes, applicationStage, onClose, onSuccess,
+}) {
   const queryClient = useQueryClient();
+  // Same opt-in escape hatch as the Availability page: HR sometimes books a
+  // round before formally moving the stage, so the gate is a default here, not
+  // a wall. It only ever relaxes the STAGE rule — a round this candidate
+  // already has booked stays hidden either way, because booking it twice is a
+  // mistake regardless of who is doing it.
+  const [ignoreStage, setIgnoreStage] = useState(false);
 
   const { data: allSlots, isLoading } = useQuery({
     queryKey: ['interview-slots-for-job', jobId],
@@ -167,10 +176,23 @@ function PublishedSlotPicker({ jobId, applicationId, bookedRoundNumbers, onClose
   // slots shouldn't keep showing up as bookable here: booking a second
   // interviewer's tr1 slot after tr1 is already locked in would just create
   // a duplicate round, not a real next step.
-  const slots = (allSlots ?? []).filter((s) => !bookedRoundNumbers.has(ROUND_TYPE_TO_NUMBER[s.round_type]));
+  // Rounds this candidate already has a live interview for are never bookable
+  // again from here, matching the backend's duplicate gate.
+  const notBooked = (allSlots ?? []).filter((s) => !bookedRoundTypes.has(s.round_type));
+  // ...and the stage gate on top, unless HR has explicitly opted out of it.
+  const eligible = notBooked.filter((s) => ROUND_ELIGIBLE_STAGE[s.round_type] === applicationStage);
+  const slots = ignoreStage ? notBooked : eligible;
+  const stageHidden = notBooked.length - eligible.length;
 
   const bookMutation = useMutation({
-    mutationFn: (slotId) => interviewSlotsApi.book({ slot_id: slotId, application_id: applicationId }),
+    mutationFn: (slotId) =>
+      interviewSlotsApi.book({
+        slot_id: slotId,
+        application_id: applicationId,
+        // Only sent when this specific slot needs it, so the backend keeps
+        // enforcing the gate for every ordinary booking.
+        override_stage_gate: ignoreStage,
+      }),
     onSuccess: () => {
       toast.success('Interview scheduled');
       // Booking here also affects HR's Availability page (the slot moves to
@@ -198,14 +220,46 @@ function PublishedSlotPicker({ jobId, applicationId, bookedRoundNumbers, onClose
 
   if (slots.length === 0) {
     return (
-      <p className="text-sm text-gray-400 text-center py-10">
-        Every round with published availability already has an interview scheduled for this candidate.
-      </p>
+      <div className="py-8 text-center space-y-3">
+        <p className="text-sm text-gray-400">
+          {notBooked.length === 0
+            ? 'Every round with published availability already has an interview scheduled for this candidate.'
+            : `No published slots match this candidate's stage (${STAGE_MAP[applicationStage]?.label ?? applicationStage}).`}
+        </p>
+        {stageHidden > 0 && (
+          <button
+            type="button"
+            onClick={() => setIgnoreStage(true)}
+            className="text-xs font-semibold text-brand-600 hover:text-brand-700"
+          >
+            Show {stageHidden} slot{stageHidden !== 1 ? 's' : ''} from other rounds anyway
+          </button>
+        )}
+      </div>
     );
   }
 
   return (
     <div className="space-y-2">
+      {stageHidden > 0 && (
+        <label className="flex items-start gap-2 text-[11px] text-gray-600 bg-surface-50 border border-surface-200 rounded-lg p-2.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={ignoreStage}
+            onChange={(e) => setIgnoreStage(e.target.checked)}
+            className="mt-0.5 accent-brand-500"
+          />
+          <span>
+            Show {stageHidden} slot{stageHidden !== 1 ? 's' : ''} for rounds this candidate
+            hasn’t reached yet.
+            {ignoreStage && (
+              <span className="block text-amber-700 font-medium mt-0.5">
+                Booking one overrides the stage rule for this interview only.
+              </span>
+            )}
+          </span>
+        </label>
+      )}
       {slots.map((s) => (
         <div key={s.id} className="flex items-center justify-between gap-3 bg-surface-50 rounded-lg px-4 py-3">
           <div>
@@ -229,7 +283,10 @@ function PublishedSlotPicker({ jobId, applicationId, bookedRoundNumbers, onClose
   );
 }
 
-function ScheduleInterviewDialog({ applicationId, jobId, defaultRoundNumber = 1, bookedRoundNumbers, onClose, onSuccess }) {
+function ScheduleInterviewDialog({
+  applicationId, jobId, defaultRoundNumber = 1,
+  bookedRoundTypes, applicationStage, onClose, onSuccess,
+}) {
   const [mode, setMode] = useState('manual'); // 'manual' | 'published'
   const [panelists, setPanelists] = useState([]);
   const [panelistSearch, setPanelistSearch] = useState('');
@@ -430,7 +487,8 @@ function ScheduleInterviewDialog({ applicationId, jobId, defaultRoundNumber = 1,
             <PublishedSlotPicker
               jobId={jobId}
               applicationId={applicationId}
-              bookedRoundNumbers={bookedRoundNumbers}
+              bookedRoundTypes={bookedRoundTypes}
+              applicationStage={applicationStage}
               onClose={onClose}
               onSuccess={onSuccess}
             />
@@ -1519,8 +1577,18 @@ export default function ApplicationDetailPage() {
     mutationFn: (interviewId) => interviewsApi.cancel(interviewId),
     onSuccess: () => {
       refetchInterviews();
+      // Cancelling frees the slot AND clears the candidate's booked round.
+      // Refetching interviews alone left both caches stale for the full
+      // staleTime, so HR who cancelled a TR1 to move it immediately saw
+      // "already booked for Technical Round 1 — cancel that interview to free
+      // them up" against the interview they had just cancelled.
+      queryClient.invalidateQueries({ queryKey: ['interview-slots'] });
+      queryClient.invalidateQueries({ queryKey: ['interview-slots-publishable'] });
+      queryClient.invalidateQueries({ queryKey: ['interview-slots-for-job'] });
+      queryClient.invalidateQueries({ queryKey: ['interview-slots-booked-rounds'] });
       toast.success('Interview cancelled');
     },
+    onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to cancel interview'),
   });
 
   const cancelAssessmentMutation = useMutation({
@@ -2012,7 +2080,7 @@ export default function ApplicationDetailPage() {
                       </div>
                       <div>
                         <p className="text-sm font-semibold text-gray-900">
-                          {interview.title || `Round ${interview.round_number}`}
+                          {interviewRoundLabel(interview)}
                         </p>
                         <p className="text-xs text-gray-500 capitalize">{interview.interview_type}</p>
                       </div>
@@ -2252,7 +2320,7 @@ export default function ApplicationDetailPage() {
               return (
                 <div key={interview.id} className="bg-white rounded-xl border border-surface-200 p-5 space-y-3">
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                    {interview.title || `Round ${interview.round_number}`}
+                    {interviewRoundLabel(interview)}
                   </p>
                   {interview.feedback?.map((fb) => (
                     <InterviewFeedbackCard key={fb.id} fb={fb} />
@@ -2801,13 +2869,17 @@ export default function ApplicationDetailPage() {
           defaultRoundNumber={
             (interviewsData?.items ?? []).reduce((max, iv) => Math.max(max, iv.round_number), 0) + 1
           }
-          bookedRoundNumbers={
+          // Rounds (not round numbers) this candidate already has a live
+          // interview for — the same rule the backend gate applies, so the
+          // slot list here can't offer a booking the API would reject.
+          bookedRoundTypes={
             new Set(
               (interviewsData?.items ?? [])
-                .filter((iv) => iv.status !== 'cancelled')
-                .map((iv) => iv.round_number)
+                .filter((iv) => iv.status !== 'cancelled' && iv.round_type)
+                .map((iv) => iv.round_type)
             )
           }
+          applicationStage={app?.stage}
           onClose={() => setShowScheduleDialog(false)}
           onSuccess={() => refetchInterviews()}
         />

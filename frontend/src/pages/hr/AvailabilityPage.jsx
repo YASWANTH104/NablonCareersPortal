@@ -16,7 +16,7 @@ import { applicationsApi } from '@/api/applications';
 import { usersApi } from '@/api/users';
 import { useAuthStore } from '@/store/authStore';
 import { HR_ROLES } from '@/utils/permissions';
-import { ROUND_TYPES, ROUND_MAP } from '@/constants/interviewRounds';
+import { ROUND_TYPES, ROUND_MAP, ROUND_ELIGIBLE_STAGE } from '@/constants/interviewRounds';
 import { toIST, fromISTDateTime, istDateKey, istTimeKey } from '@/utils/formatters';
 import { Modal, Segmented, StatTile, EmptyState } from '@/components/ui';
 import { cn } from '@/lib/utils';
@@ -57,6 +57,29 @@ const RESIZE_MAX_SPAN = Math.round(60 / SLOT_MINUTES);
 // "IST wall-clock" space: `gridTime` converts an instant in, `gridToInstant`
 // converts a grid Date back out, and nothing else touches raw start_time.
 const pad2 = (n) => String(n).padStart(2, '0');
+// Local, matching how DashboardPage/ReportsPage each keep their own — there is
+// no shared stage-label constant in this codebase yet, and introducing one
+// here would mean touching five unrelated pages.
+// Mirrors backend/app/constants/stages.py's TERMINAL_STAGES.
+const TERMINAL_STAGES = new Set([
+  'rejected', 'withdrawn', 'interview_drop', 'offer_drop', 'hired',
+]);
+
+const STAGE_LABELS = {
+  applied: 'Applied',
+  screening: 'Screening',
+  assessment: 'Assessment',
+  tr1: 'Technical Round 1',
+  tr2: 'Technical Round 2',
+  hr: 'HR Interview',
+  offer: 'Offer Extended',
+  hired: 'Hired',
+  rejected: 'Application Closed',
+  withdrawn: 'Withdrawn',
+  interview_drop: 'Interview Drop',
+  offer_drop: 'Offer Drop',
+};
+
 const gridTime = (instant) => toIST(instant);
 const gridNow = () => toIST(new Date());
 function gridToInstant(d) {
@@ -72,6 +95,7 @@ function gridToInstant(d) {
 // glance). "Booked" always wins and stays emerald regardless of round, so the
 // existing open/booked mental model never breaks.
 const GRID_ROUND_COLORS = {
+  screening: { bg: 'bg-purple-50', bar: 'bg-purple-400', hover: 'hover:bg-purple-100', text: 'text-purple-900', dot: 'bg-purple-400', swatch: 'bg-purple-200' },
   tr1: { bg: 'bg-sky-50', bar: 'bg-sky-400', hover: 'hover:bg-sky-100', text: 'text-sky-900', dot: 'bg-sky-400', swatch: 'bg-sky-200' },
   tr2: { bg: 'bg-teal-50', bar: 'bg-teal-400', hover: 'hover:bg-teal-100', text: 'text-teal-900', dot: 'bg-teal-400', swatch: 'bg-teal-200' },
   hr: { bg: 'bg-violet-50', bar: 'bg-violet-400', hover: 'hover:bg-violet-100', text: 'text-violet-900', dot: 'bg-violet-400', swatch: 'bg-violet-200' },
@@ -284,15 +308,66 @@ function InterviewerPicker({ value, onChange, people, allLabel, placeholder }) {
 
 // ── Application picker (HR booking a slot) ────────────────────────────────────
 
-function ApplicationPickerModal({ jobId, slot, onCancel, onPick, isPending }) {
+function ApplicationPickerModal({ jobId, slot, roundType, onCancel, onPick, isPending }) {
   const [search, setSearch] = useState('');
+  // HR is the authority on the internal pipeline and does sometimes book a
+  // round before formally moving the stage, so the STAGE rule is a default
+  // here rather than a wall — unlike the agency portal, where it's absolute.
+  // Ticking this sends override_stage_gate. It does not (and must not) relax
+  // the duplicate-round rule; those candidates are filtered out above and
+  // stay out until their interview is cancelled.
+  const [showIneligible, setShowIneligible] = useState(false);
+
   const { data, isLoading } = useQuery({
     queryKey: ['availability-job-applications', jobId, search],
     queryFn: () =>
       applicationsApi.list({ job_id: jobId, search: search || undefined, limit: 50 }).then((r) => r.data),
   });
+  // Which rounds each candidate already has a live interview for. The
+  // applications list doesn't carry this, and without it the picker would
+  // happily offer someone the backend then rejects with a 400.
+  const { data: bookedRounds } = useQuery({
+    queryKey: ['interview-slots-booked-rounds', jobId],
+    queryFn: () => interviewSlotsApi.bookedRounds(jobId).then((r) => r.data),
+    enabled: !!jobId,
+  });
+
   const applications = data?.items ?? [];
   const start = slot ? gridTime(slot.start_time) : null;
+  const round = roundType ? ROUND_MAP[roundType] : null;
+  const requiredStage = roundType ? ROUND_ELIGIBLE_STAGE[roundType] : null;
+
+  // Already booked for THIS round — never offered, and never overridable.
+  // Unlike the stage rule, a duplicate round is a mistake for HR too; moving
+  // an interview means cancelling it, which frees the slot and puts the
+  // candidate back in this list on its own.
+  const alreadyBooked = useMemo(() => {
+    if (!roundType || !bookedRounds) return new Set();
+    return new Set(
+      Object.entries(bookedRounds)
+        .filter(([, rounds]) => (rounds ?? []).includes(roundType))
+        .map(([appId]) => appId)
+    );
+  }, [bookedRounds, roundType]);
+
+  // Closed candidates are never bookable — not even behind the stage override,
+  // which exists for people who haven't reached a round yet, not for people who
+  // are out. Without this, ticking the override listed rejected candidates and
+  // booking one sent a real Teams invite and "Interview Scheduled" email to
+  // someone rejected weeks ago. The backend refuses them too.
+  const bookable = useMemo(
+    () => applications.filter(
+      (a) => !alreadyBooked.has(String(a.id)) && !TERMINAL_STAGES.has(a.stage)
+    ),
+    [applications, alreadyBooked]
+  );
+  const eligible = useMemo(
+    () => (requiredStage ? bookable.filter((a) => a.stage === requiredStage) : bookable),
+    [bookable, requiredStage]
+  );
+  const visible = showIneligible ? bookable : eligible;
+  const hiddenCount = bookable.length - eligible.length;
+  const bookedCount = applications.length - bookable.length;
 
   return (
     <Modal
@@ -306,6 +381,21 @@ function ApplicationPickerModal({ jobId, slot, onCancel, onPick, isPending }) {
       icon={CalendarCheck}
       size="md"
     >
+      {round && (
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <span className={cn(
+            'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border',
+            round.accent?.badge ?? 'bg-surface-100 text-gray-600 border-surface-200'
+          )}>
+            <span className={cn('w-1.5 h-1.5 rounded-full', round.accent?.dot ?? 'bg-gray-400')} />
+            {round.label}
+          </span>
+          <span className="text-[11px] text-gray-500">
+            normally booked from the {STAGE_LABELS[requiredStage] ?? requiredStage} stage
+          </span>
+        </div>
+      )}
+
       <div className="relative mb-3">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
         <input
@@ -316,39 +406,83 @@ function ApplicationPickerModal({ jobId, slot, onCancel, onPick, isPending }) {
           className="w-full pl-9 pr-3 py-2.5 border border-surface-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
         />
       </div>
+
+      {bookedCount > 0 && (
+        <p className="text-[11px] text-gray-500 bg-surface-50 border border-surface-200 rounded-xl p-2.5 mb-3">
+          {bookedCount} candidate{bookedCount !== 1 ? 's' : ''} hidden — already booked for{' '}
+          {round?.label ?? roundType}. Cancel that interview to free them up.
+        </p>
+      )}
+
+      {requiredStage && hiddenCount > 0 && (
+        <label className="flex items-start gap-2 text-[11px] text-gray-600 bg-surface-50 border border-surface-200 rounded-xl p-2.5 mb-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showIneligible}
+            onChange={(e) => setShowIneligible(e.target.checked)}
+            className="mt-0.5 accent-brand-500"
+          />
+          <span>
+            Show {hiddenCount} candidate{hiddenCount !== 1 ? 's' : ''} not at the{' '}
+            {STAGE_LABELS[requiredStage] ?? requiredStage} stage.
+            {showIneligible && (
+              <span className="block text-amber-700 font-medium mt-0.5">
+                Booking one of these overrides the round rule for this interview only.
+              </span>
+            )}
+          </span>
+        </label>
+      )}
+
       <div className="max-h-72 overflow-y-auto -mx-1 px-1">
         {isLoading ? (
           <div className="flex justify-center py-10"><Loader2 className="w-5 h-5 animate-spin text-gray-400" /></div>
-        ) : applications.length === 0 ? (
+        ) : visible.length === 0 ? (
           <EmptyState
             compact
             icon={Users}
-            title={search ? 'No matching candidates' : 'No candidates in this pipeline yet'}
+            title={
+              search
+                ? 'No matching candidates'
+                : requiredStage && applications.length > 0
+                ? `Nobody is at the ${STAGE_LABELS[requiredStage] ?? requiredStage} stage`
+                : 'No candidates in this pipeline yet'
+            }
             description={
               search
                 ? 'Try a different name or email.'
+                : requiredStage && applications.length > 0
+                ? 'Move a candidate to this stage first, or tick the box above to book one anyway.'
                 : 'Once someone applies to this job they will show up here, ready to book.'
             }
           />
         ) : (
           <div className="space-y-1">
-            {applications.map((app) => (
-              <button
-                key={app.id}
-                disabled={isPending}
-                onClick={() => onPick(app.id)}
-                className="w-full flex items-center gap-3 text-left px-2.5 py-2 rounded-xl border border-transparent hover:border-brand-200 hover:bg-brand-50/50 disabled:opacity-50 transition-colors group"
-              >
-                <Avatar name={app.applicant?.full_name} className="w-8 h-8 text-xs" />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium text-gray-900 truncate">
-                    {app.applicant?.full_name ?? 'Unknown'}
+            {visible.map((app) => {
+              const ineligible = requiredStage ? app.stage !== requiredStage : false;
+              return (
+                <button
+                  key={app.id}
+                  disabled={isPending}
+                  onClick={() => onPick(app.id, { override: ineligible })}
+                  className="w-full flex items-center gap-3 text-left px-2.5 py-2 rounded-xl border border-transparent hover:border-brand-200 hover:bg-brand-50/50 disabled:opacity-50 transition-colors group"
+                >
+                  <Avatar name={app.applicant?.full_name} className="w-8 h-8 text-xs" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium text-gray-900 truncate">
+                      {app.applicant?.full_name ?? 'Unknown'}
+                    </span>
+                    <span className="block text-xs text-gray-400 truncate">{app.applicant?.email}</span>
                   </span>
-                  <span className="block text-xs text-gray-400 truncate">{app.applicant?.email}</span>
-                </span>
-                <ArrowRight className="w-4 h-4 text-gray-300 group-hover:text-brand-500 shrink-0" />
-              </button>
-            ))}
+                  {ineligible && (
+                    <span className="shrink-0 text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 whitespace-nowrap">
+                      {STAGE_LABELS[app.stage] ?? app.stage}
+                    </span>
+                  )}
+                  <ArrowRight className="w-4 h-4 text-gray-300 group-hover:text-brand-500 shrink-0" />
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -413,7 +547,7 @@ function PickJobRoundForBookingModal({ slot, jobsData, onCancel, onContinue }) {
         </label>
         <div>
           <span className="block text-xs font-semibold text-gray-600 mb-1.5">Round</span>
-          <div className="grid grid-cols-3 gap-1.5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
             {ROUND_TYPES.map((r) => (
               <button
                 key={r.key}
@@ -426,7 +560,7 @@ function PickJobRoundForBookingModal({ slot, jobsData, onCancel, onContinue }) {
                     : 'border-surface-200 bg-white text-gray-600 hover:bg-surface-50'
                 )}
               >
-                {r.label.replace('Technical Round', 'TR')}
+                {r.short}
               </button>
             ))}
           </div>
@@ -635,7 +769,7 @@ function PublishSlotsPanel({
             </label>
             <div>
               <span className="block text-xs font-semibold text-gray-600 mb-1.5">Round</span>
-              <div className="grid grid-cols-3 gap-1.5">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                 {ROUND_TYPES.map((r) => (
                   <button
                     key={r.key}
@@ -648,7 +782,7 @@ function PublishSlotsPanel({
                         : 'border-surface-200 bg-white text-gray-600 hover:bg-surface-50'
                     )}
                   >
-                    {r.label.replace('Technical Round', 'TR')}
+                    {r.short}
                   </button>
                 ))}
               </div>
@@ -1793,6 +1927,9 @@ export default function AvailabilityPage() {
     // published slot" picker on that page, keyed by job id.
     queryClient.invalidateQueries({ queryKey: ['application-interviews'] });
     queryClient.invalidateQueries({ queryKey: ['interview-slots-for-job'] });
+    // The booking just added a round to some candidate's booked set — refresh
+    // it so the picker hides them next time instead of offering a duplicate.
+    queryClient.invalidateQueries({ queryKey: ['interview-slots-booked-rounds'] });
   };
 
   const publishBatchMutation = useMutation({
@@ -1854,7 +1991,10 @@ export default function AvailabilityPage() {
   });
 
   const bookMutation = useMutation({
-    mutationFn: ({ slotId, applicationId }) => interviewSlotsApi.book({ slot_id: slotId, application_id: applicationId }),
+    mutationFn: ({ slotId, applicationId, override }) =>
+      interviewSlotsApi.book({
+        slot_id: slotId, application_id: applicationId, override_stage_gate: !!override,
+      }),
     onSuccess: () => {
       invalidateSlots();
       setBookingSlot(null);
@@ -1870,8 +2010,11 @@ export default function AvailabilityPage() {
   // in the same flow, claimed atomically on the backend, so the slot never
   // sits in an agency-visible "assigned but open" state along the way.
   const bookUnassignedMutation = useMutation({
-    mutationFn: ({ slotId, jobId, roundType, applicationId }) =>
-      interviewSlotsApi.bookUnassigned({ slot_id: slotId, job_id: jobId, round_type: roundType, application_id: applicationId }),
+    mutationFn: ({ slotId, jobId, roundType, applicationId, override }) =>
+      interviewSlotsApi.bookUnassigned({
+        slot_id: slotId, job_id: jobId, round_type: roundType,
+        application_id: applicationId, override_stage_gate: !!override,
+      }),
     onSuccess: () => {
       invalidateSlots();
       setBookingSlot(null);
@@ -2444,14 +2587,16 @@ export default function AvailabilityPage() {
         <ApplicationPickerModal
           jobId={bookingSlot.job_id}
           slot={bookingSlot}
+          roundType={bookingSlot.round_type}
           isPending={bookMutation.isPending || bookUnassignedMutation.isPending}
           onCancel={() => setBookingSlot(null)}
-          onPick={(applicationId) =>
+          onPick={(applicationId, { override } = {}) =>
             bookingSlot.__unassigned
               ? bookUnassignedMutation.mutate({
-                  slotId: bookingSlot.id, jobId: bookingSlot.job_id, roundType: bookingSlot.round_type, applicationId,
+                  slotId: bookingSlot.id, jobId: bookingSlot.job_id,
+                  roundType: bookingSlot.round_type, applicationId, override,
                 })
-              : bookMutation.mutate({ slotId: bookingSlot.id, applicationId })
+              : bookMutation.mutate({ slotId: bookingSlot.id, applicationId, override })
           }
         />
       )}

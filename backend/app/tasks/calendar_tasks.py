@@ -21,15 +21,34 @@ def _task_session():
     return _shared()
 
 
+def _notify_only_when_exhausted(task, send_task, interview_id, **kwargs) -> bool:
+    """Fire the fallback notification only on the LAST attempt.
+
+    These tasks used to send the notification and *then* retry. The retry re-ran
+    the whole async body, which ends by sending the same notification again — so
+    a task that failed twice emailed the candidate and every panelist three
+    times. The invite still has to go out if Graph never recovers, so it's sent
+    once, when there are no attempts left.
+
+    Returns True when the caller should give up instead of retrying.
+    """
+    if task.request.retries >= task.max_retries:
+        send_task.delay(interview_id, **kwargs)
+        return True
+    return False
+
+
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=30)
 def create_teams_meeting_task(self, interview_id: str, cc_emails: list[str] | None = None):
     try:
         asyncio.run(_create_teams_meeting_async(interview_id, cc_emails=cc_emails))
     except Exception as exc:
         logger.error(f"Teams meeting creation failed: interview={interview_id}: {exc}")
-        # Notifications must still go out even if this retries/exhausts.
         from app.tasks.email_tasks import send_interview_scheduled_notifications
-        send_interview_scheduled_notifications.delay(interview_id, cc_emails=cc_emails)
+        if _notify_only_when_exhausted(
+            self, send_interview_scheduled_notifications, interview_id, cc_emails=cc_emails
+        ):
+            return
         raise self.retry(exc=exc)
 
 
@@ -48,6 +67,21 @@ async def _create_teams_meeting_async(interview_id: str, cc_emails: list[str] | 
         interview = await db.get(Interview, iv_uuid)
         if not interview:
             return
+
+        # A previous attempt already created the event. Calling Graph again would
+        # mint a SECOND calendar event on the organiser's mailbox, and only the
+        # last event_id is stored — every earlier one becomes an orphan nothing
+        # can patch or delete, including cancellation. The notification is still
+        # sent, because the crash may have happened between the commit below and
+        # the send.
+        if interview.ms_graph_event_id:
+            logger.info(
+                f"Teams event already exists for interview={interview_id}; "
+                f"not creating another"
+            )
+            send_interview_scheduled_notifications.delay(interview_id, cc_emails=cc_emails)
+            return
+
         app = await db.get(Application, interview.application_id)
         candidate = await db.get(User, app.applicant_id) if app else None
         job = await db.get(Job, app.job_id) if app else None
@@ -106,7 +140,8 @@ def update_teams_meeting_task(self, interview_id: str):
     except Exception as exc:
         logger.error(f"Teams meeting update failed: interview={interview_id}: {exc}")
         from app.tasks.email_tasks import send_interview_rescheduled_notifications
-        send_interview_rescheduled_notifications.delay(interview_id)
+        if _notify_only_when_exhausted(self, send_interview_rescheduled_notifications, interview_id):
+            return
         raise self.retry(exc=exc)
 
 
@@ -148,7 +183,8 @@ def delete_teams_meeting_task(self, interview_id: str):
     except Exception as exc:
         logger.error(f"Teams meeting deletion failed: interview={interview_id}: {exc}")
         from app.tasks.email_tasks import send_interview_cancelled_notifications
-        send_interview_cancelled_notifications.delay(interview_id)
+        if _notify_only_when_exhausted(self, send_interview_cancelled_notifications, interview_id):
+            return
         raise self.retry(exc=exc)
 
 

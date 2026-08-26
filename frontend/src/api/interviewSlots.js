@@ -12,6 +12,7 @@ export const interviewSlotsApi = {
   requestPublish: (userId) => client.post(`/interview-slots/interviewer/${userId}/request-publish`),
   publishable: () => client.get('/interview-slots/publishable'),
   forJob: (jobId) => client.get(`/interview-slots/job/${jobId}`),
+  bookedRounds: (jobId) => client.get(`/interview-slots/booked-rounds/${jobId}`),
   book: (data) => client.post('/interview-slots/book', data),
   bookUnassigned: (data) => client.post('/interview-slots/book-unassigned', data),
 };

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { addDays, format, isToday, isSameDay, getHours, getMinutes } from 'date-fns';
 import { layoutOverlaps, minutesIntoDay, statusStyle, typeIcon } from './calendarUtils';
 import { toIST } from '@/utils/formatters';
+import { interviewRoundLabel } from '@/constants/interviewRounds';
 
 const HOUR_PX = 64;
 const DEFAULT_START_HOUR = 8;
@@ -42,13 +43,13 @@ function EventBlock({ item, startHour, isSelected, onSelect }) {
           {format(start, 'h:mm')}
         </span>
         <span className={`text-[11px] font-medium truncate ${compact ? '' : 'block leading-tight mt-0.5'}`}>
-          {event.candidate_name ?? event.title ?? `Round ${event.round_number}`}
+          {event.candidate_name ?? interviewRoundLabel(event)}
         </span>
       </span>
       {!compact && height >= 62 && (
         <span className="flex items-center gap-1 pl-1.5 mt-1 text-[10px] opacity-70">
           <Icon className="w-3 h-3 flex-shrink-0" />
-          <span className="truncate">{event.title || `Round ${event.round_number}`}</span>
+          <span className="truncate">{interviewRoundLabel(event)}</span>
         </span>
       )}
     </button>

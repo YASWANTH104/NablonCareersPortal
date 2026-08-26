@@ -27,8 +27,13 @@ def _build_prompt(
     stage_label = _STAGE_LABELS.get(from_stage, from_stage)
     feedback_text = ""
 
-    for i, fb in enumerate(feedbacks, 1):
-        parts = [f"Round {i} ({fb.get('round_label', 'Interview')})"]
+    for fb in feedbacks:
+        # The label is the round's real name. It used to be prefixed with the
+        # list position ("Round 1 (...)"), which stopped matching reality once
+        # screening rounds were filtered out of this list — the first entry can
+        # be TR2, and telling the model "Round 1 (Technical Round 2)" is just
+        # feeding it a contradiction.
+        parts = [fb.get("round_label", "Interview")]
         if fb.get("overall_rating"):
             parts.append(f"  Overall rating: {fb['overall_rating']}/10")
         if fb.get("technical_score"):

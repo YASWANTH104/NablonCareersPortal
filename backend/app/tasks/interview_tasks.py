@@ -2,6 +2,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from app.tasks.celery_app import celery_app
+from app.utils.rounds import round_display_label
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +118,7 @@ def send_feedback_reminders():
                             "full_name": interviewer.full_name,
                             "candidate_name": candidate.full_name if candidate else "the candidate",
                             "job_title": job.title if job else "the position",
-                            "interview_title": interview.title or f"Round {interview.round_number}",
+                            "interview_title": round_display_label(interview),
                             "interviews_url": f"{settings.FRONTEND_URL}/interviews/feedback/{panelist.feedback_token}",
                         },
                     )

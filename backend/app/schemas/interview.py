@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel
 
 
@@ -12,6 +12,9 @@ class PanelistCreate(BaseModel):
 class InterviewCreate(BaseModel):
     application_id: uuid.UUID
     round_number: int = 1
+    # screening | tr1 | tr2 | hr. Left None by the manual-scheduling paths —
+    # create_interview then infers it from the application's current stage.
+    round_type: Optional[str] = None
     title: Optional[str] = None
     interview_type: Optional[str] = None  # video | phone | onsite | technical | hr | panel
     scheduled_at: datetime
@@ -22,6 +25,14 @@ class InterviewCreate(BaseModel):
     panelists: list[PanelistCreate] = []
 
 
+# The only statuses a PATCH may set. "cancelled" is deliberately absent:
+# cancelling has real side effects (reopen the slot, delete the Teams event,
+# notify everyone) that live in cancel_interview, and letting PATCH write the
+# column directly skipped all of them — leaving a slot booked forever against a
+# cancelled interview, and a live calendar invite nobody cancelled.
+INTERVIEW_PATCHABLE_STATUSES = ("scheduled", "rescheduled", "no_show", "completed")
+
+
 class InterviewUpdate(BaseModel):
     round_number: Optional[int] = None
     title: Optional[str] = None
@@ -30,7 +41,7 @@ class InterviewUpdate(BaseModel):
     duration_mins: Optional[int] = None
     meeting_link: Optional[str] = None
     location: Optional[str] = None
-    status: Optional[str] = None
+    status: Optional[Literal[INTERVIEW_PATCHABLE_STATUSES]] = None
     notes: Optional[str] = None
 
 
@@ -115,6 +126,10 @@ class InterviewFeedbackResponse(BaseModel):
 
 class PreviousRoundFeedbackEntry(BaseModel):
     round_number: int
+    # screening | tr1 | tr2 | hr — what the round actually was. round_number
+    # can't be trusted to say (it defaults to 1 on manual scheduling), so the
+    # UI should label from this and fall back to the number.
+    round_type: Optional[str] = None
     interview_title: Optional[str] = None
     feedback: list[InterviewFeedbackResponse]
 
@@ -125,6 +140,7 @@ class InterviewResponse(BaseModel):
     id: uuid.UUID
     application_id: uuid.UUID
     round_number: int
+    round_type: Optional[str] = None
     title: Optional[str] = None
     interview_type: Optional[str] = None
     scheduled_at: datetime
@@ -189,6 +205,7 @@ class CandidateInterviewSummary(BaseModel):
     id: uuid.UUID
     application_id: uuid.UUID
     round_number: int
+    round_type: Optional[str] = None
     title: Optional[str] = None
     interview_type: Optional[str] = None
     scheduled_at: datetime
