@@ -21,6 +21,7 @@ import { useHoldToggle } from '@/hooks/useHoldToggle';
 import { PIPELINE_STAGES, STAGE_MAP, REASON_REQUIRED_STAGES } from '@/constants/pipelineStages';
 import { useAuthStore } from '@/store/authStore';
 import { HR_ROLES } from '@/utils/permissions';
+import { describeApplicationSource } from '@/utils/formatters';
 
 // Same 4 values as Application.source on the backend — kept here rather than a
 // shared constants file since only this page's filter dropdown needs the list
@@ -461,9 +462,19 @@ function TableView({ applications, onRowClick, onToggleHold, readOnly }) {
                   </div>
                 </td>
                 <td className="px-4 py-3.5 text-gray-500">
-                  {app.source === 'agency'
-                    ? (app.agency_name || 'Agency')
-                    : <span className="capitalize">{app.source}</span>}
+                  {(() => {
+                    const src = describeApplicationSource(app);
+                    return (
+                      <>
+                        <span className="block text-gray-700">{src.label}</span>
+                        {src.by && (
+                          <span className="block text-xs text-gray-400 truncate max-w-[14rem]" title={src.by}>
+                            {src.by}
+                          </span>
+                        )}
+                      </>
+                    );
+                  })()}
                 </td>
                 <td className="px-4 py-3.5">
                   {app.rating ? (

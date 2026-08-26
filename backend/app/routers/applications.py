@@ -13,7 +13,7 @@ from app.schemas.application import (
     ApplicationStageUpdate, ApplicationListResponse,
     ApplicationRatingUpdate, ApplicationAssignUpdate, ApplicationHoldUpdate,
     ApplicationUpdate, StageHistoryEntry, ApplicationResumeResponse,
-    ApplicationMoveJobRequest,
+    ApplicationMoveJobRequest, NoteUpdate,
 )
 from app.services import application_service
 
@@ -81,6 +81,7 @@ async def hr_submit_candidate(
         email=email,
         resume_url=resume_url,
         source=source,
+        sourced_by=user.id,
         phone=phone,
         linkedin_url=linkedin_url or None,
         current_location=current_location,
@@ -124,7 +125,7 @@ async def bulk_upload_resumes(
         file_data.append((f.filename or "resume", await f.read(), f.content_type or ""))
 
     results = await application_service.bulk_submit_from_resumes(
-        db, job_id=job_id, source=source, files=file_data,
+        db, job_id=job_id, source=source, files=file_data, sourced_by=user.id,
     )
     created = sum(1 for r in results if r["status"] == "success")
     return {"results": results, "created": created, "failed": len(results) - created}
@@ -189,7 +190,7 @@ async def bulk_upload_excel(
         raise HTTPException(400, f"Please upload at most {application_service.MAX_BULK_EXCEL_ROWS} candidates at a time.")
 
     results = await application_service.bulk_submit_from_excel(
-        db, job_id=job_id, source=source, rows=rows,
+        db, job_id=job_id, source=source, rows=rows, sourced_by=user.id,
     )
     created = sum(1 for r in results if r["status"] == "success")
     return {"results": results, "created": created, "failed": len(results) - created}
@@ -390,6 +391,27 @@ async def add_note(
         })
 
     return await application_service.add_note(db, application_id, note.strip(), user.id, attachments or None)
+
+
+@router.patch("/{application_id}/notes/{note_id}", response_model=StageHistoryEntry)
+async def update_note(
+    application_id: uuid.UUID,
+    note_id: uuid.UUID,
+    data: NoteUpdate,
+    user=Depends(require_roles(*_HR_AND_INTERVIEWER)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await application_service.update_note(db, application_id, note_id, data.note.strip(), user)
+
+
+@router.delete("/{application_id}/notes/{note_id}", status_code=204)
+async def delete_note(
+    application_id: uuid.UUID,
+    note_id: uuid.UUID,
+    user=Depends(require_roles(*_HR_AND_INTERVIEWER)),
+    db: AsyncSession = Depends(get_db),
+):
+    await application_service.delete_note(db, application_id, note_id, user)
 
 
 @router.get("/{application_id}/timeline", response_model=list[StageHistoryEntry])

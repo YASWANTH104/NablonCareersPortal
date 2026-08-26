@@ -128,3 +128,25 @@ export function titleCase(str) {
   if (!str) return '';
   return str.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
+
+// How a candidate reached the pipeline, and who put them there.
+//
+// `source` alone was rendered raw in two places, so the table read
+// "Talent_acquisition", and for a TA upload there was no way to tell WHICH
+// recruiter sourced the profile — the uploader is now recorded on the
+// application as sourced_by. Returns a label plus an optional attribution so
+// callers can lay the two out however suits them.
+export function describeApplicationSource(app) {
+  if (!app) return { label: '—', by: null };
+  if (app.source === 'agency') {
+    return { label: 'Agency', by: app.agency_name || null };
+  }
+  if (app.source === 'referral') {
+    return { label: 'Referral', by: app.referrer_name || null };
+  }
+  if (app.source === 'direct') {
+    return { label: 'Applied directly', by: null };
+  }
+  // talent_acquisition and anything added later
+  return { label: titleCase(app.source), by: app.sourced_by_name || null };
+}

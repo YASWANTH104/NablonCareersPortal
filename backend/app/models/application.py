@@ -41,6 +41,12 @@ class Application(Base):
 
     source: Mapped[str] = mapped_column(String(50), default="direct")
     agency_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("agencies.id"))
+    # The internal user who uploaded this candidate (HR/TA single upload, bulk
+    # resume upload, or bulk Excel). `source` says HOW a candidate arrived and
+    # `agency_id` says WHICH agency, but for a talent_acquisition upload there
+    # was nothing recording WHO — so the pipeline could not tell you which
+    # recruiter sourced a profile. NULL for candidates who applied themselves.
+    sourced_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     rating: Mapped[int | None] = mapped_column(Integer)
     is_starred: Mapped[bool] = mapped_column(Boolean, default=False)
     assigned_to: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
