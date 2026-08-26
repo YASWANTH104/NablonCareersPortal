@@ -119,6 +119,10 @@ class StageHistoryEntry(BaseModel):
     created_at: datetime
 
 
+class NoteUpdate(BaseModel):
+    note: str
+
+
 class ApplicationResumeResponse(BaseModel):
     """One revision in an application's resume history. `is_current` marks the
     revision the application's resume_url currently points at."""
@@ -159,6 +163,9 @@ class ApplicationResponse(BaseModel):
     source: str
     agency_id: Optional[uuid.UUID] = None
     agency_name: Optional[str] = None
+    # Who uploaded this candidate, when an internal recruiter did. `source`
+    # says how they arrived; this says who put them in. NULL for self-applied.
+    sourced_by_name: Optional[str] = None
     referrer_name: Optional[str] = None
     rating: Optional[int] = None
     is_starred: bool

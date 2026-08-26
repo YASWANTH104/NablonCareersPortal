@@ -53,6 +53,8 @@ export const applicationsApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
+  updateNote: (id, noteId, note) => client.patch(`/applications/${id}/notes/${noteId}`, { note }),
+  deleteNote: (id, noteId) => client.delete(`/applications/${id}/notes/${noteId}`),
   getTimeline: (id) => client.get(`/applications/${id}/timeline`),
   listResumes: (id) => client.get(`/applications/${id}/resumes`),
   addResume: (id, file, note) => {

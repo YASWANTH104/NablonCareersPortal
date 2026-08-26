@@ -11,7 +11,7 @@ import {
   Clock, User, Github, Linkedin, Globe, ChevronDown, Plus, Loader2,
   Video, Phone, MapPin, CheckCircle2, AlertCircle, Send, FolderOpen, Download, Eye, X,
   Pencil, Wallet, Briefcase, GraduationCap, AlertTriangle, Pause, PlayCircle, ArrowRightLeft,
-  Paperclip,
+  Paperclip, XCircle, Trash2,
 } from 'lucide-react';
 import { PendingAttachmentChip, NoteAttachmentGallery } from '@/components/shared/NoteAttachments';
 import FilePreviewModal from '@/components/shared/FilePreviewModal';
@@ -37,8 +37,9 @@ import { useAuthStore } from '@/store/authStore';
 import { HR_ROLES } from '@/utils/permissions';
 import {
   utcToISTInputValue, istInputValueToUTCISOString, toIST,
-  istDateKey, istTimeKey, fromISTDateTime,
+  istDateKey, istTimeKey, fromISTDateTime, titleCase, describeApplicationSource,
 } from '@/utils/formatters';
+import { cn } from '@/lib/utils';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -988,6 +989,85 @@ function ScheduleAssessmentDialog({ applicationId, onClose, onSuccess }) {
   );
 }
 
+// ── Interview card bits ──────────────────────────────────────────────────────
+
+// Raw enum values were rendered straight onto the badge, so the UI said
+// "rescheduled" / "no_show" in lower case. Label and colour belong together.
+const INTERVIEW_STATUS = {
+  scheduled:   { label: 'Scheduled',   cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+  rescheduled: { label: 'Rescheduled', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+  completed:   { label: 'Completed',   cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  cancelled:   { label: 'Cancelled',   cls: 'bg-rose-50 text-rose-700 border-rose-200' },
+  no_show:     { label: 'No show',     cls: 'bg-surface-100 text-gray-600 border-surface-200' },
+};
+
+function InterviewStatusPill({ status }) {
+  const s = INTERVIEW_STATUS[status] ?? {
+    label: titleCase(status ?? 'unknown'),
+    cls: 'bg-surface-100 text-gray-600 border-surface-200',
+  };
+  return (
+    <span className={cn(
+      'inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold border whitespace-nowrap',
+      s.cls,
+    )}>
+      {s.label}
+    </span>
+  );
+}
+
+// One confirm for every destructive/irreversible action on an interview card.
+// Cancel used to fire straight from the card with no prompt at all — it deletes
+// the Teams event, emails everyone, and frees the slot, none of which is
+// undoable by clicking again.
+function ConfirmActionDialog({
+  icon: Icon, tone = 'brand', title, description, confirmLabel,
+  isPending, onConfirm, onCancel,
+}) {
+  const tones = {
+    danger:  { ring: 'bg-rose-100 text-rose-600',       btn: 'bg-rose-600 hover:bg-rose-700' },
+    success: { ring: 'bg-emerald-100 text-emerald-600', btn: 'bg-emerald-600 hover:bg-emerald-700' },
+    brand:   { ring: 'bg-brand-100 text-brand-600',     btn: 'bg-brand-600 hover:bg-brand-700' },
+  };
+  const t = tones[tone] ?? tones.brand;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="fixed inset-0 bg-black/40" onClick={onCancel} />
+      <div className="relative bg-white rounded-2xl shadow-modal w-full max-w-sm z-10 p-6">
+        <div className="flex items-start gap-3 mb-5">
+          <div className={cn('w-9 h-9 rounded-full flex items-center justify-center shrink-0', t.ring)}>
+            <Icon className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="font-display font-semibold text-gray-900">{title}</h3>
+            <p className="text-sm text-gray-500 mt-0.5 leading-relaxed">{description}</p>
+          </div>
+        </div>
+        <div className="flex gap-2 justify-end">
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium rounded-lg hover:bg-surface-100 transition-colors"
+          >
+            Keep it
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={isPending}
+            className={cn(
+              'inline-flex items-center gap-1.5 px-4 py-2 text-white text-sm font-semibold rounded-lg disabled:opacity-60 transition-colors',
+              t.btn,
+            )}
+          >
+            {isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 // ── Reschedule Interview Dialog ───────────────────────────────────────────────
 
 const rescheduleSchema = z.object({
@@ -1548,6 +1628,35 @@ export default function ApplicationDetailPage() {
     onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to add note'),
   });
 
+  const [editingNoteId, setEditingNoteId] = useState(null);
+  const [editNoteText, setEditNoteText] = useState('');
+  const [deletingNoteId, setDeletingNoteId] = useState(null);
+
+  const updateNoteMutation = useMutation({
+    mutationFn: ({ noteId, note }) => applicationsApi.updateNote(id, noteId, note),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['application-detail', id] });
+      setEditingNoteId(null);
+      toast.success('Note updated');
+    },
+    onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to update note'),
+  });
+
+  const deleteNoteMutation = useMutation({
+    mutationFn: (noteId) => applicationsApi.deleteNote(id, noteId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['application-detail', id] });
+      setDeletingNoteId(null);
+      toast.success('Note deleted');
+    },
+    onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to delete note'),
+  });
+
+  const startEditNote = (note) => {
+    setEditingNoteId(note.id);
+    setEditNoteText(note.notes ?? '');
+  };
+
   const addNoteFiles = (incoming) => {
     setNoteFiles((prev) => {
       const existingKeys = new Set(prev.map((f) => `${f.name}:${f.size}`));
@@ -1562,6 +1671,7 @@ export default function ApplicationDetailPage() {
   };
 
   const [confirmCompleteId, setConfirmCompleteId] = useState(null);
+  const [confirmCancelFor, setConfirmCancelFor] = useState(null);
 
   const completeInterviewMutation = useMutation({
     mutationFn: (interviewId) => interviewsApi.complete(interviewId),
@@ -1576,6 +1686,7 @@ export default function ApplicationDetailPage() {
   const cancelInterviewMutation = useMutation({
     mutationFn: (interviewId) => interviewsApi.cancel(interviewId),
     onSuccess: () => {
+      setConfirmCancelFor(null);
       refetchInterviews();
       // Cancelling frees the slot AND clears the candidate's booked round.
       // Refetching interviews alone left both caches stale for the full
@@ -1588,7 +1699,10 @@ export default function ApplicationDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['interview-slots-booked-rounds'] });
       toast.success('Interview cancelled');
     },
-    onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to cancel interview'),
+    onError: (err) => {
+      setConfirmCancelFor(null);
+      toast.error(err.response?.data?.detail ?? 'Failed to cancel interview');
+    },
   });
 
   const cancelAssessmentMutation = useMutation({
@@ -1619,6 +1733,7 @@ export default function ApplicationDetailPage() {
   }
 
   const currentStage = STAGE_MAP[app.stage];
+  const appSource = describeApplicationSource(app);
   const validNext = VALID_TRANSITIONS[app.stage] ?? [];
   // Latest-scheduled first — matches Notes/Timeline's recency-first ordering elsewhere on this page.
   const interviews = [...(interviewsData?.items ?? [])].sort(
@@ -2007,11 +2122,12 @@ export default function ApplicationDetailPage() {
               <div>
                 <dt className="text-gray-400">Source</dt>
                 <dd className="text-gray-700 mt-0.5">
-                  {app.source === 'agency'
-                    ? (app.agency_name || 'Agency')
-                    : app.source === 'referral'
-                    ? `Referral${app.referrer_name ? ` - ${app.referrer_name}` : ''}`
-                    : <span className="capitalize">{app.source}</span>}
+                  {appSource.label}
+                  {appSource.by && (
+                    <span className="block text-xs text-gray-500 mt-0.5">
+                      {app.source === 'talent_acquisition' ? `TA - ${appSource.by}` : `by ${appSource.by}`}
+                    </span>
+                  )}
                 </dd>
               </div>
               <div>
@@ -2064,137 +2180,171 @@ export default function ApplicationDetailPage() {
             </div>
           ) : (
             interviews.map((interview) => {
-              const isPast = new Date(interview.scheduled_at) < new Date();
+              const round = ROUND_MAP[interview.round_type];
+              const isLive = ['scheduled', 'rescheduled'].includes(interview.status);
+              const TypeIcon = interview.interview_type === 'video' ? Video
+                : interview.interview_type === 'phone' ? Phone : MapPin;
               return (
-                <div key={interview.id} className="bg-white rounded-xl border border-surface-200 p-5">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center flex-shrink-0">
-                        {interview.interview_type === 'video' ? (
-                          <Video className="w-5 h-5 text-indigo-500" />
-                        ) : interview.interview_type === 'phone' ? (
-                          <Phone className="w-5 h-5 text-indigo-500" />
-                        ) : (
-                          <MapPin className="w-5 h-5 text-indigo-500" />
-                        )}
+                <div key={interview.id} className={cn(
+                  'bg-white rounded-xl border overflow-hidden transition-colors',
+                  isLive ? 'border-surface-200' : 'border-surface-200/70',
+                )}>
+                  {/* Header: what round, when, and where it stands. The round's
+                      own colour carries through from the booking UI. */}
+                  <div className="flex items-start justify-between gap-3 p-5 pb-4">
+                    <div className="flex items-start gap-3 min-w-0">
+                      <div className={cn(
+                        'w-10 h-10 rounded-xl flex items-center justify-center shrink-0',
+                        isLive ? (round?.accent?.badge ?? 'bg-brand-50 text-brand-600 border border-brand-100')
+                               : 'bg-surface-100 text-gray-400',
+                      )}>
+                        <TypeIcon className="w-5 h-5" />
                       </div>
-                      <div>
-                        <p className="text-sm font-semibold text-gray-900">
-                          {interviewRoundLabel(interview)}
-                        </p>
-                        <p className="text-xs text-gray-500 capitalize">{interview.interview_type}</p>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className={cn(
+                            'font-display text-sm font-semibold truncate',
+                            isLive ? 'text-gray-900' : 'text-gray-500',
+                          )}>
+                            {interviewRoundLabel(interview)}
+                          </p>
+                          {round && (
+                            <span className={cn(
+                              'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border whitespace-nowrap',
+                              round.accent?.badge ?? 'bg-surface-100 text-gray-600 border-surface-200',
+                            )}>
+                              <span className={cn('w-1.5 h-1.5 rounded-full', round.accent?.dot ?? 'bg-gray-400')} />
+                              {round.short}
+                            </span>
+                          )}
+                        </div>
+                        {/* One inline meta line instead of a 2-column grid that
+                            left the duration floating in dead space. */}
+                        <div className="flex items-center gap-x-2 gap-y-1 flex-wrap mt-1.5 text-xs text-gray-500">
+                          <span className="inline-flex items-center gap-1.5 tabular-nums">
+                            <Calendar className="w-3.5 h-3.5 text-gray-400" />
+                            {format(toIST(interview.scheduled_at), 'EEE d MMM yyyy, h:mm a')} IST
+                          </span>
+                          <span className="text-surface-300">·</span>
+                          <span className="inline-flex items-center gap-1.5 tabular-nums">
+                            <Clock className="w-3.5 h-3.5 text-gray-400" />
+                            {interview.duration_mins} min
+                          </span>
+                          {interview.interview_type && (
+                            <>
+                              <span className="text-surface-300">·</span>
+                              <span className="capitalize">{interview.interview_type}</span>
+                            </>
+                          )}
+                        </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${
-                        interview.status === 'scheduled'   ? 'bg-blue-100 text-blue-700' :
-                        interview.status === 'completed'   ? 'bg-green-100 text-green-700' :
-                        interview.status === 'cancelled'   ? 'bg-red-100 text-red-700' :
-                        interview.status === 'rescheduled' ? 'bg-yellow-100 text-yellow-700' :
-                        'bg-gray-100 text-gray-600'
-                      }`}>
-                        {interview.status}
-                      </span>
-                      {canManage && ['scheduled', 'rescheduled'].includes(interview.status) && (
-                        <>
-                          <button
-                            onClick={() => setConfirmCompleteId(interview.id)}
-                            className="flex items-center gap-1 text-xs text-green-600 hover:text-green-700 font-medium"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5" /> Complete
-                          </button>
-                          <button
-                            onClick={() => setShowRescheduleFor(interview)}
-                            className="text-xs text-brand-600 hover:text-brand-700 font-medium"
-                          >
-                            Reschedule
-                          </button>
-                          <button
-                            onClick={() => cancelInterviewMutation.mutate(interview.id)}
-                            className="text-xs text-gray-400 hover:text-red-500"
-                          >
-                            Cancel
-                          </button>
-                        </>
+                    <InterviewStatusPill status={interview.status} />
+                  </div>
+
+                  {(interview.meeting_link && interview.status !== 'completed') || interview.location ? (
+                    <div className="px-5 pb-4 -mt-1">
+                      {interview.meeting_link && interview.status !== 'completed' ? (
+                        <a
+                          href={interview.meeting_link}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:text-brand-700"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          Join meeting
+                        </a>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 text-xs text-gray-500">
+                          {interview.interview_type === 'phone'
+                            ? <Phone className="w-3.5 h-3.5 text-gray-400" />
+                            : <MapPin className="w-3.5 h-3.5 text-gray-400" />}
+                          {interview.location}
+                        </span>
                       )}
                     </div>
-                  </div>
-
-                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-gray-600">
-                    <div className="flex items-center gap-1.5">
-                      <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                      {format(toIST(interview.scheduled_at), 'PPp')} IST
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5 text-gray-400" />
-                      {interview.duration_mins} min
-                    </div>
-                    {interview.meeting_link && interview.status !== 'completed' ? (
-                      <a
-                        href={interview.meeting_link}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center gap-1.5 text-brand-600 hover:text-brand-700 sm:col-span-2"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        Join meeting
-                      </a>
-                    ) : interview.location ? (
-                      <div className="flex items-center gap-1.5 sm:col-span-2">
-                        {interview.interview_type === 'phone' ? (
-                          <Phone className="w-3.5 h-3.5 text-gray-400" />
-                        ) : (
-                          <MapPin className="w-3.5 h-3.5 text-gray-400" />
-                        )}
-                        {interview.location}
-                      </div>
-                    ) : null}
-                  </div>
+                  ) : null}
 
                   {interview.notes && (
-                    <p className="mt-3 text-xs text-gray-500 bg-surface-50 rounded-lg p-3">
+                    <p className="mx-5 mb-4 text-xs text-gray-600 bg-surface-50 border border-surface-100 rounded-lg p-3 leading-relaxed">
                       {interview.notes}
                     </p>
                   )}
 
-                  {/* Feedback for this interview */}
-                  {interview.feedback?.length > 0 && (
-                    <div className="mt-4 pt-4 border-t border-surface-100 space-y-3">
-                      <p className="text-xs font-semibold text-gray-600">
-                        Feedback ({interview.feedback.length})
-                      </p>
-                      {interview.feedback.map((fb) => (
-                        <InterviewFeedbackCard key={fb.id} fb={fb} />
-                      ))}
+                  {/* Feedback lives inside the card body. The card lost its
+                      blanket p-5 when the header/footer were split out, so these
+                      trailing blocks were rendering flush to the card edge with
+                      no padding at all — they read as loose page content sitting
+                      under the card rather than part of it. */}
+                  {(interview.feedback?.length > 0
+                    || interview.candidate_self_feedback
+                    || (canWriteNotesAndFeedback
+                        && ['scheduled', 'rescheduled', 'completed'].includes(interview.status))) && (
+                    <div className="px-5 pb-5 pt-4 border-t border-surface-100 space-y-3">
+                      {interview.feedback?.length > 0 && (
+                        <>
+                          <p className="text-xs font-semibold text-gray-600">
+                            Feedback ({interview.feedback.length})
+                          </p>
+                          {interview.feedback.map((fb) => (
+                            <InterviewFeedbackCard key={fb.id} fb={fb} />
+                          ))}
+                        </>
+                      )}
+
+                      {interview.candidate_self_feedback && (
+                        <CandidateSelfAssessment sf={interview.candidate_self_feedback} />
+                      )}
+
+                      {/* Interviewers are the ones who give feedback; a view-only
+                          hiring-manager viewer never gets this (backend rejects it too). */}
+                      {canWriteNotesAndFeedback
+                        && ['scheduled', 'rescheduled', 'completed'].includes(interview.status) && (
+                        showFeedbackFor === interview.id ? (
+                          <InlineFeedbackForm
+                            interviewId={interview.id}
+                            onSuccess={() => {
+                              setShowFeedbackFor(null);
+                              refetchInterviews();
+                            }}
+                            onCancel={() => setShowFeedbackFor(null)}
+                          />
+                        ) : (
+                          <button
+                            onClick={() => setShowFeedbackFor(interview.id)}
+                            className="text-xs font-semibold text-brand-600 hover:text-brand-700"
+                          >
+                            + Add feedback
+                          </button>
+                        )
+                      )}
                     </div>
                   )}
 
-                  {/* Candidate self-assessment */}
-                  {interview.candidate_self_feedback && (
-                    <CandidateSelfAssessment sf={interview.candidate_self_feedback} />
-                  )}
-
-                  {/* Submit feedback button — interviewers are the ones who actually give feedback;
-                      a view-only hiring-manager viewer never gets this (backend rejects it too). */}
-                  {canWriteNotesAndFeedback && ['scheduled', 'rescheduled', 'completed'].includes(interview.status) && (
-                    <div className="mt-3">
-                      {showFeedbackFor === interview.id ? (
-                        <InlineFeedbackForm
-                          interviewId={interview.id}
-                          onSuccess={() => {
-                            setShowFeedbackFor(null);
-                            refetchInterviews();
-                          }}
-                          onCancel={() => setShowFeedbackFor(null)}
-                        />
-                      ) : (
-                        <button
-                          onClick={() => setShowFeedbackFor(interview.id)}
-                          className="text-xs text-brand-600 hover:text-brand-700 font-medium"
-                        >
-                          + Add feedback
-                        </button>
-                      )}
+                  {/* Actions are the LAST row of the card. Placed above the
+                      feedback block they landed mid-card, with the feedback and
+                      "+ Add feedback" dangling underneath them. */}
+                  {canManage && isLive && (
+                    <div className="flex flex-wrap items-center justify-end gap-2 px-5 py-3 border-t border-surface-100 bg-surface-50/60">
+                      <button
+                        onClick={() => setConfirmCancelFor(interview)}
+                        className="px-3 py-1.5 text-xs font-semibold text-rose-600 rounded-lg hover:bg-rose-50 transition-colors"
+                      >
+                        Cancel interview
+                      </button>
+                      <button
+                        onClick={() => setShowRescheduleFor(interview)}
+                        className="px-3 py-1.5 text-xs font-semibold text-gray-700 bg-white border border-surface-300 rounded-lg hover:border-surface-400 hover:bg-surface-50 transition-colors"
+                      >
+                        Reschedule
+                      </button>
+                      <button
+                        onClick={() => setConfirmCompleteId(interview.id)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        Mark complete
+                      </button>
                     </div>
                   )}
                 </div>
@@ -2467,21 +2617,77 @@ export default function ApplicationDetailPage() {
             <div className="text-center py-12 text-sm text-gray-400">No notes yet</div>
           ) : (
             <div className="space-y-3">
-              {[...notes].reverse().map((note) => (
-                <div key={note.id} className="bg-white rounded-xl border border-surface-200 p-4">
-                  {note.notes && <p className="text-sm text-gray-700 whitespace-pre-wrap">{note.notes}</p>}
-                  <NoteAttachmentGallery attachments={note.attachments} onPreview={setPreviewAttachment} />
-                  <p className="text-xs text-gray-400 mt-2">
-                    {formatDistanceToNow(new Date(note.created_at), { addSuffix: true })}
-                    {note.changed_by_name && <> · by {note.changed_by_name}</>}
-                    {note.from_stage && (
-                      <span className="ml-2 text-gray-300">
-                        while in <span className="text-gray-400">{STAGE_MAP[note.from_stage]?.label ?? note.from_stage}</span>
-                      </span>
+              {[...notes].reverse().map((note) => {
+                // Author can always manage their own note; HR can moderate anyone's —
+                // mirrors the backend's _HR_EDIT_ROLES check.
+                const canEditThisNote = canManage || note.changed_by === user?.id;
+                const isEditing = editingNoteId === note.id;
+                return (
+                  <div key={note.id} className="bg-white rounded-xl border border-surface-200 p-4">
+                    {isEditing ? (
+                      <div className="space-y-2">
+                        <textarea
+                          value={editNoteText}
+                          onChange={(e) => setEditNoteText(e.target.value)}
+                          rows={3}
+                          autoFocus
+                          className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => editNoteText.trim() && updateNoteMutation.mutate({ noteId: note.id, note: editNoteText.trim() })}
+                            disabled={!editNoteText.trim() || updateNoteMutation.isPending}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-brand-500 text-white text-xs font-semibold rounded-lg hover:bg-brand-600 disabled:opacity-50"
+                          >
+                            {updateNoteMutation.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                            Save
+                          </button>
+                          <button
+                            onClick={() => setEditingNoteId(null)}
+                            className="px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-800"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {note.notes && <p className="text-sm text-gray-700 whitespace-pre-wrap">{note.notes}</p>}
+                        <NoteAttachmentGallery attachments={note.attachments} onPreview={setPreviewAttachment} />
+                      </>
                     )}
-                  </p>
-                </div>
-              ))}
+                    <div className="flex items-center justify-between gap-2 mt-2">
+                      <p className="text-xs text-gray-400">
+                        {formatDistanceToNow(new Date(note.created_at), { addSuffix: true })}
+                        {note.changed_by_name && <> · by {note.changed_by_name}</>}
+                        {note.from_stage && (
+                          <span className="ml-2 text-gray-300">
+                            while in <span className="text-gray-400">{STAGE_MAP[note.from_stage]?.label ?? note.from_stage}</span>
+                          </span>
+                        )}
+                      </p>
+                      {canEditThisNote && !isEditing && (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            onClick={() => startEditNote(note)}
+                            aria-label="Edit note"
+                            className="p-1 text-gray-400 hover:text-brand-600 rounded transition-colors"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => setDeletingNoteId(note.id)}
+                            aria-label="Delete note"
+                            className="p-1 text-gray-400 hover:text-rose-600 rounded transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -2929,38 +3135,49 @@ export default function ApplicationDetailPage() {
         />
       )}
 
-      {/* Complete Interview Confirmation */}
+      {/* Complete / Cancel confirmations — both go through the same dialog. */}
       {confirmCompleteId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black/40" onClick={() => setConfirmCompleteId(null)} />
-          <div className="relative bg-white rounded-2xl shadow-modal w-full max-w-sm z-10 p-6">
-            <div className="flex items-start gap-3 mb-4">
-              <div className="w-9 h-9 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-                <CheckCircle2 className="w-5 h-5 text-green-600" />
-              </div>
-              <div>
-                <h3 className="font-display font-semibold text-gray-900">Mark interview as completed?</h3>
-                <p className="text-sm text-gray-500 mt-0.5">This will update the interview status to completed.</p>
-              </div>
-            </div>
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => setConfirmCompleteId(null)}
-                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => completeInterviewMutation.mutate(confirmCompleteId)}
-                disabled={completeInterviewMutation.isPending}
-                className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 disabled:opacity-60 transition-colors"
-              >
-                {completeInterviewMutation.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                Yes, complete
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmActionDialog
+          icon={CheckCircle2}
+          tone="success"
+          title="Mark this interview as completed?"
+          description="It moves to Completed and panelists are asked for their feedback."
+          confirmLabel="Yes, complete"
+          isPending={completeInterviewMutation.isPending}
+          onConfirm={() => completeInterviewMutation.mutate(confirmCompleteId)}
+          onCancel={() => setConfirmCompleteId(null)}
+        />
+      )}
+
+      {confirmCancelFor && (
+        <ConfirmActionDialog
+          icon={XCircle}
+          tone="danger"
+          title="Cancel this interview?"
+          description={
+            `${interviewRoundLabel(confirmCancelFor)} on `
+            + `${format(toIST(confirmCancelFor.scheduled_at), 'EEE d MMM, h:mm a')} IST. `
+            + `${app?.applicant?.full_name ?? 'The candidate'} and the interviewer are emailed, the `
+            + 'Teams meeting is deleted, and the slot goes back up for booking. This cannot be undone.'
+          }
+          confirmLabel="Cancel interview"
+          isPending={cancelInterviewMutation.isPending}
+          onConfirm={() => cancelInterviewMutation.mutate(confirmCancelFor.id)}
+          onCancel={() => setConfirmCancelFor(null)}
+        />
+      )}
+
+      {deletingNoteId && (
+        <ConfirmActionDialog
+          icon={Trash2}
+          tone="danger"
+          title="Delete this note?"
+          description="This can't be undone."
+          confirmLabel="Delete"
+          isPending={deleteNoteMutation.isPending}
+          onConfirm={() => deleteNoteMutation.mutate(deletingNoteId)}
+          onCancel={() => setDeletingNoteId(null)}
+        />
       )}
 
       {/* Stage reason dialog — rejected / interview_drop / offer_drop */}

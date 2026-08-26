@@ -271,6 +271,7 @@ async def submit_sourced_application(
     resume_url: str,
     source: str,
     agency_id: Optional[uuid.UUID] = None,
+    sourced_by: Optional[uuid.UUID] = None,
     phone: Optional[str] = None,
     linkedin_url: Optional[str] = None,
     portfolio_url: Optional[str] = None,
@@ -379,6 +380,7 @@ async def submit_sourced_application(
         resume_url=resume_url,
         source=source,
         agency_id=agency_id,
+        sourced_by=sourced_by,
         cover_letter=cover_letter,
         linkedin_url=linkedin_url,
         portfolio_url=portfolio_url,
@@ -426,6 +428,7 @@ async def bulk_submit_from_resumes(
     source: str,
     files: list[tuple[str, bytes, str]],
     agency_id: Optional[uuid.UUID] = None,
+    sourced_by: Optional[uuid.UUID] = None,
 ) -> list[dict]:
     """Parse each uploaded resume and create a sourced application from it —
     no manual re-entry per candidate, since that would defeat the point of a
@@ -459,6 +462,7 @@ async def bulk_submit_from_resumes(
                 resume_url=resume_url,
                 source=source,
                 agency_id=agency_id,
+                sourced_by=sourced_by,
                 phone=parsed.get("phone"),
                 linkedin_url=parsed.get("linkedin_url"),
                 portfolio_url=parsed.get("portfolio_url"),
@@ -566,6 +570,7 @@ async def bulk_submit_from_excel(
     source: str,
     rows: list[dict],
     agency_id: Optional[uuid.UUID] = None,
+    sourced_by: Optional[uuid.UUID] = None,
 ) -> list[dict]:
     """Create a sourced application per spreadsheet row. No resume is required
     for this path (resume_url is stored as '' — the Resume tab shows a
@@ -590,6 +595,7 @@ async def bulk_submit_from_excel(
                 resume_url="",
                 source=source,
                 agency_id=agency_id,
+                sourced_by=sourced_by,
                 phone=row.get("phone"),
                 linkedin_url=row.get("linkedin_url"),
                 current_location=row.get("current_location"),
@@ -712,15 +718,22 @@ async def get_all_applications(
     from app.models.agency import Agency
     from app.models.screening import ScreeningResponse
     from app.services import job_service
+    from sqlalchemy.orm import aliased
+
+    _Sourcer = aliased(User)
 
     base = (
         select(
             Application, User.full_name, User.email, User.avatar_url, Agency.name.label("agency_name"),
             ScreeningResponse.overall_score, ScreeningResponse.auto_reject,
+            _Sourcer.full_name.label("sourced_by_name"),
         )
         .join(User, User.id == Application.applicant_id)
         .join(Agency, Agency.id == Application.agency_id, isouter=True)
         .join(ScreeningResponse, ScreeningResponse.application_id == Application.id, isouter=True)
+        # Second alias of users — Application already joins users once for the
+        # applicant, so the uploader needs its own alias or the join collides.
+        .join(_Sourcer, _Sourcer.id == Application.sourced_by, isouter=True)
     )
 
     filters = []
@@ -775,9 +788,11 @@ async def get_all_applications(
     )).all()
 
     items = []
-    for app, full_name, email, avatar_url, agency_name, screening_score, screening_auto_reject in rows:
+    for (app, full_name, email, avatar_url, agency_name,
+         screening_score, screening_auto_reject, sourced_by_name) in rows:
         d = _app_to_dict(app)
         d["agency_name"] = agency_name
+        d["sourced_by_name"] = sourced_by_name
         d["screening_score"] = float(screening_score) if screening_score is not None else None
         d["screening_auto_reject"] = screening_auto_reject
         d["applicant"] = {
@@ -803,23 +818,27 @@ async def get_application_by_id(
     from app.services import job_service
 
     Referrer = aliased(User)
+    Sourcer = aliased(User)   # the internal recruiter who uploaded the profile
 
     row = (await db.execute(
         select(
             Application, User.full_name, User.email, User.phone, User.avatar_url, User.date_of_birth,
             Agency.name.label("agency_name"), Referrer.full_name.label("referrer_name"),
+            Sourcer.full_name.label("sourced_by_name"),
         )
         .join(User, User.id == Application.applicant_id)
         .join(Agency, Agency.id == Application.agency_id, isouter=True)
         .join(Referral, Referral.id == Application.referral_id, isouter=True)
         .join(Referrer, Referrer.id == Referral.referred_by, isouter=True)
+        .join(Sourcer, Sourcer.id == Application.sourced_by, isouter=True)
         .where(Application.id == application_id)
     )).first()
 
     if not row:
         raise HTTPException(404, "Application not found")
 
-    app, full_name, email, phone, avatar_url, date_of_birth, agency_name, referrer_name = row
+    (app, full_name, email, phone, avatar_url, date_of_birth,
+     agency_name, referrer_name, sourced_by_name) = row
 
     # Same relaxed-gate reasoning as get_all_applications above — a caller
     # who isn't HR only reaches this function at all because the router now
@@ -849,6 +868,7 @@ async def get_application_by_id(
 
     d = _app_to_dict(app)
     d["agency_name"] = agency_name
+    d["sourced_by_name"] = sourced_by_name
     d["referrer_name"] = referrer_name
     d["applicant"] = {
         "id": app.applicant_id,
@@ -1150,6 +1170,38 @@ async def add_note(
     await db.commit()
     await db.refresh(entry)
     return entry
+
+
+async def _get_note_for_edit(
+    db: AsyncSession, application_id: uuid.UUID, note_id: uuid.UUID, user,
+) -> ApplicationStageHistory:
+    entry = await db.get(ApplicationStageHistory, note_id)
+    if not entry or entry.application_id != application_id or entry.to_stage != "_note":
+        raise HTTPException(404, "Note not found")
+    # Author can always manage their own note; HR can moderate anyone's.
+    if entry.changed_by != user.id and user.role not in _HR_EDIT_ROLES:
+        raise HTTPException(403, "You can only edit or delete your own notes")
+    return entry
+
+
+async def update_note(
+    db: AsyncSession, application_id: uuid.UUID, note_id: uuid.UUID, note: str, user,
+) -> ApplicationStageHistory:
+    entry = await _get_note_for_edit(db, application_id, note_id, user)
+    if not note and not entry.attachments:
+        raise HTTPException(400, "Note can't be empty")
+    entry.notes = note
+    await db.commit()
+    await db.refresh(entry)
+    return entry
+
+
+async def delete_note(
+    db: AsyncSession, application_id: uuid.UUID, note_id: uuid.UUID, user,
+) -> None:
+    entry = await _get_note_for_edit(db, application_id, note_id, user)
+    await db.delete(entry)
+    await db.commit()
 
 
 async def get_timeline(

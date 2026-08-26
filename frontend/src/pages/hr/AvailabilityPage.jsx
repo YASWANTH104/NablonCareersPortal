@@ -318,10 +318,39 @@ function ApplicationPickerModal({ jobId, slot, roundType, onCancel, onPick, isPe
   // stay out until their interview is cancelled.
   const [showIneligible, setShowIneligible] = useState(false);
 
+  const requiredStageForFetch = roundType ? ROUND_ELIGIBLE_STAGE[roundType] : null;
+
+  // Filter by stage on the SERVER, not after fetching. This used to pull page 1
+  // of 50 applications ordered by applied_at DESC and filter by stage in the
+  // browser — so on a job with more than 50 applicants, anyone past the cutoff
+  // was invisible no matter what stage they were at. A real case on prod:
+  // "AI Engineer II" has 55 applications and a TR1 candidate sat at rank 53,
+  // so he never reached the UI at all and it looked like the round gate was
+  // rejecting him. Filtering first means the row cap applies to eligible
+  // candidates only. The cap is raised too, since one stage of one job is a
+  // far smaller set than the whole pipeline.
   const { data, isLoading } = useQuery({
-    queryKey: ['availability-job-applications', jobId, search],
+    queryKey: ['availability-job-applications', jobId, search, showIneligible ? 'all' : requiredStageForFetch],
     queryFn: () =>
-      applicationsApi.list({ job_id: jobId, search: search || undefined, limit: 50 }).then((r) => r.data),
+      applicationsApi.list({
+        job_id: jobId,
+        // Omitted when HR ticks the override — that view deliberately wants
+        // every stage, and the backend gate still has the final say.
+        stage: showIneligible ? undefined : (requiredStageForFetch || undefined),
+        search: search || undefined,
+        limit: 200,
+      }).then((r) => r.data),
+  });
+
+  // Total for this job across every stage, used only to label the override
+  // toggle. limit:1 because just the count is needed, not the rows.
+  const { data: allStagesMeta } = useQuery({
+    queryKey: ['availability-job-applications-total', jobId, search],
+    queryFn: () =>
+      applicationsApi.list({
+        job_id: jobId, search: search || undefined, limit: 1,
+      }).then((r) => r.data),
+    enabled: !!jobId && !!requiredStageForFetch,
   });
   // Which rounds each candidate already has a live interview for. The
   // applications list doesn't carry this, and without it the picker would
@@ -335,7 +364,7 @@ function ApplicationPickerModal({ jobId, slot, roundType, onCancel, onPick, isPe
   const applications = data?.items ?? [];
   const start = slot ? gridTime(slot.start_time) : null;
   const round = roundType ? ROUND_MAP[roundType] : null;
-  const requiredStage = roundType ? ROUND_ELIGIBLE_STAGE[roundType] : null;
+  const requiredStage = requiredStageForFetch;
 
   // Already booked for THIS round — never offered, and never overridable.
   // Unlike the stage rule, a duplicate round is a mistake for HR too; moving
@@ -366,7 +395,13 @@ function ApplicationPickerModal({ jobId, slot, roundType, onCancel, onPick, isPe
     [bookable, requiredStage]
   );
   const visible = showIneligible ? bookable : eligible;
-  const hiddenCount = bookable.length - eligible.length;
+  // Counts come from the server totals now, because the fetched page is stage
+  // filtered — deriving "how many are at other stages" from it would always
+  // report 0.
+  const totalAllStages = allStagesMeta?.total ?? applications.length;
+  const hiddenCount = showIneligible
+    ? bookable.length - eligible.length
+    : Math.max(0, totalAllStages - (data?.total ?? applications.length));
   const bookedCount = applications.length - bookable.length;
 
   return (
