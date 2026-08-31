@@ -9,8 +9,9 @@ the composite score which is itself partly AI-assisted:
   - College tier 4/5                          -> auto-reject
   - CGPA below CGPA_HARD_MIN                  -> auto-reject
   - Composite score below OVERALL_SCORE_HARD_MIN -> auto-reject
-  - Referral-sourced applications skip the questionnaire entirely (see
-    create_and_queue_email)
+
+Applies uniformly regardless of source — referral-sourced applications are
+not exempt from the questionnaire (see create_and_queue_email).
 
 Everything else (college tier for names outside the static list, and the
 skills/project judgement) is AI-assisted where available and degrades to a
@@ -494,15 +495,12 @@ async def create_and_queue_email(db: AsyncSession, application_id: uuid.UUID) ->
     since that would fire only after the stage had already flipped past
     `applied`.
 
-    Also skips referral-sourced applications entirely — referrals don't go
-    through the questionnaire/scoring gate, same "checked here, not left to
-    call sites" reasoning as the stage gate above."""
+    Applies to every source, referrals included — no exemption for
+    referral-sourced applications."""
     from app.models.application import Application
 
     application = await db.get(Application, application_id)
     if not application or application.stage != "applied":
-        return
-    if application.source == "referral":
         return
 
     req = await get_or_create_request(db, application_id)

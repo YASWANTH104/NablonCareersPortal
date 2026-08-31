@@ -44,6 +44,7 @@ def send_feedback_reminders():
         from app.models.job import Job
         from app.services.email_service import send_email
         from app.config import settings
+        from app.constants.stages import FEEDBACK_REQUEST_SUPPRESSED_STAGES
 
         async with _task_session() as db:
             now = datetime.now(timezone.utc)
@@ -93,6 +94,9 @@ def send_feedback_reminders():
 
                 app = await db.get(Application, interview.application_id)
                 if not app:
+                    continue
+                # Candidate dropped out mid-pipeline — stop chasing the panel.
+                if app.stage in FEEDBACK_REQUEST_SUPPRESSED_STAGES:
                     continue
                 job = await db.get(Job, app.job_id)
                 candidate = await db.get(User, app.applicant_id)

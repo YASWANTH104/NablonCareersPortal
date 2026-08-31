@@ -77,6 +77,16 @@ FEEDBACK_ELIGIBLE_STAGES = {"tr1", "tr2", "hr"}
 # tr1/tr2/hr allowlist would misclassify as non-interview and wrongly strip.
 FEEDBACK_EXCLUDED_INTERVIEW_STAGES = {"applied", "screening", "assessment"}
 
+# Panelists are never chased for feedback on a candidate who has dropped out.
+# The round still auto-completes on its end time (auto_complete_past_interviews
+# doesn't know or care that the candidate walked), so without this the
+# interviewer gets a "submit your feedback" mail — and then a reminder every
+# 24h — for a conversation that either never happened or no longer matters.
+# interview_drop is the only stage that reaches here in practice: offer_drop
+# only happens past the last round (feedback is already in by then) and
+# withdrawn has no inbound transition from an interview stage.
+FEEDBACK_REQUEST_SUPPRESSED_STAGES = {"interview_drop"}
+
 
 # ── Interview slot rounds ────────────────────────────────────────────────────
 # A published InterviewSlot carries a round_type from this tuple. It is a

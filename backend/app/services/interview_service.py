@@ -1210,16 +1210,23 @@ async def cancel_interview(db: AsyncSession, interview_id: uuid.UUID) -> None:
 
 async def send_feedback_request_emails(db: AsyncSession, interview: Interview) -> int:
     """Email each panelist a tokenized link to submit feedback without logging in.
-    Called when an interview transitions to 'completed'. Returns emails sent."""
+    Called when an interview transitions to 'completed'. Sends nothing if the
+    candidate has dropped out (FEEDBACK_REQUEST_SUPPRESSED_STAGES). Returns
+    emails sent."""
     import secrets
     from app.models.application import Application
     from app.models.user import User
     from app.models.job import Job
     from app.services.email_service import send_email
     from app.config import settings
+    from app.constants.stages import FEEDBACK_REQUEST_SUPPRESSED_STAGES
 
     app = await db.get(Application, interview.application_id)
     if not app:
+        return 0
+    # Candidate dropped out — don't ask the panel for feedback on a round that
+    # is no longer going anywhere.
+    if app.stage in FEEDBACK_REQUEST_SUPPRESSED_STAGES:
         return 0
     job = await db.get(Job, app.job_id)
     candidate = await db.get(User, app.applicant_id)
