@@ -20,6 +20,7 @@ import {
   Award,
   ChevronRight,
   Building2,
+  Zap,
 } from 'lucide-react';
 import { jobsApi } from '@/api/jobs';
 import { HeroBackdrop, TiltCard, Reveal } from '@/components/shared/effects';
@@ -29,27 +30,27 @@ import { HeroBackdrop, TiltCard, Reveal } from '@/components/shared/effects';
    ──────────────────────────────────────────────────────────────── */
 const FLOATING_CARDS = [
   {
-    icon: FileText,
-    title: 'Application received',
-    sub: 'Senior ML Engineer',
+    icon: Zap,
+    title: 'Idea → production',
+    sub: 'In Weeks',
     accent: 'from-sky-400/30 to-brand-500/20',
     depth: 40,
     pos: 'top-[6%] right-[2%]',
     float: 'float-a',
   },
   {
-    icon: MessagesSquare,
-    title: 'Interview scheduled',
-    sub: 'Technical Round 1 · Tomorrow',
+    icon: Rocket,
+    title: 'Shipped this sprint',
+    sub: 'Live for an enterprise client',
     accent: 'from-brand-400/30 to-violet-500/20',
     depth: 90,
     pos: 'top-[38%] right-[18%]',
     float: 'float-b',
   },
   {
-    icon: Award,
-    title: 'Offer extended',
-    sub: 'Welcome to Nablon 🎉',
+    icon: ShieldCheck,
+    title: 'Zero-downtime rollout',
+    sub: 'Deployed today',
     accent: 'from-emerald-400/30 to-brand-500/20',
     depth: 60,
     pos: 'bottom-[8%] right-[5%]',
@@ -273,8 +274,8 @@ export default function LandingPage() {
               <Reveal delay={200}>
                 <p className="text-lg text-brand-100/80 max-w-lg mb-8 leading-relaxed">
                   Nablon builds production-grade AI agents for Fortune 500 companies across
-                  CPG, Banking, MedTech and Industrial. Come do the most ambitious work of
-                  your career.
+                  CPG, Banking, MedTech and Industrial — from prototype to production in
+                  weeks. Come do the most ambitious work of your career.
                 </p>
               </Reveal>
 
