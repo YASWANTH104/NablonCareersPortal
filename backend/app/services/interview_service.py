@@ -34,7 +34,7 @@ async def _users_by_id(db: AsyncSession, user_ids: set) -> dict:
 
 def _round_index(interview) -> int:
     """Where an interview sits in the pipeline, for ordering rounds against each
-    other. Prefers round_type (screening=0, tr1=1, tr2=2, hr=3) and only falls
+    other. Prefers round_type (screening=0, tr1=1, tr2=2, final_tr=3, hr=4) and only falls
     back to round_number for rows that have none — legacy interviews, or ones
     scheduled at a non-round stage.
 

@@ -23,6 +23,7 @@ const STAGE_LABELS = {
   assessment: 'Assessment',
   tr1: 'Technical Round 1',
   tr2: 'Technical Round 2',
+  final_tr: 'Final Technical Round',
   hr: 'HR Interview',
   offer: 'Offer Extended',
   hired: 'Hired',
@@ -38,6 +39,7 @@ const STAGE_COLORS = {
   assessment: 'bg-orange-50 text-orange-700 border-orange-200',
   tr1: 'bg-indigo-50 text-indigo-700 border-indigo-200',
   tr2: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+  final_tr: 'bg-cyan-50 text-cyan-700 border-cyan-200',
   hr: 'bg-violet-50 text-violet-700 border-violet-200',
   offer: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   hired: 'bg-green-50 text-green-700 border-green-200',
@@ -368,7 +370,7 @@ function groupSlotsByRound(slots) {
     if (!byRound.has(slot.round_type)) byRound.set(slot.round_type, []);
     byRound.get(slot.round_type).push(slot);
   });
-  // Pipeline order (screening → tr1 → tr2 → hr), not whatever order the API
+  // Pipeline order (screening → tr1 → tr2 → final_tr → hr), not whatever order the API
   // happened to return, so the tabs read like the hiring process itself.
   return ROUND_TYPES
     .filter((r) => byRound.has(r.key))

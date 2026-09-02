@@ -29,6 +29,7 @@ _STAGE_TO_REFERRAL_STATUS = {
     "assessment": "in_progress",
     "tr1": "in_progress",
     "tr2": "in_progress",
+    "final_tr": "in_progress",
     "hr": "in_progress",
     "offer": "in_progress",
     "hired": "hired",
@@ -48,7 +49,7 @@ def _derived_status_expr():
 
     return case(
         (Application.stage == "applied", "applied"),
-        (Application.stage.in_(["screening", "assessment", "tr1", "tr2", "hr", "offer"]), "in_progress"),
+        (Application.stage.in_(["screening", "assessment", "tr1", "tr2", "final_tr", "hr", "offer"]), "in_progress"),
         (Application.stage == "hired", "hired"),
         (Application.stage.in_(["rejected", "interview_drop", "offer_drop", "withdrawn"]), "rejected"),
         else_=Referral.status,

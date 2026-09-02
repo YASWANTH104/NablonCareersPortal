@@ -48,13 +48,13 @@ const sourceColor = (s) => SOURCE_COLORS[s] ?? '#94a3b8';
 // node scripts/validate_palette.js "#818cf8,#6366f1,#4338ca,#312e81" --mode light --ordinal → ALL PASS
 const STAGE_LABELS = {
   applied: 'Applied', screening: 'Screening', assessment: 'Assessment',
-  tr1: 'Round 1 (TR1)', tr2: 'Round 2 (TR2)', hr: 'HR Round',
+  tr1: 'Round 1 (TR1)', tr2: 'Round 2 (TR2)', final_tr: 'Final TR', hr: 'HR Round',
   offer: 'Offer', hired: 'Hired', rejected: 'Rejected', withdrawn: 'Withdrawn',
 };
 const FUNNEL_STAGE_COLOR = {
   applied: '#818cf8', screening: '#818cf8',
   assessment: '#6366f1', tr1: '#6366f1',
-  tr2: '#4338ca', hr: '#4338ca',
+  tr2: '#4338ca', final_tr: '#4338ca', hr: '#4338ca',
   offer: '#312e81', hired: '#312e81',
 };
 
@@ -121,7 +121,7 @@ function PipelineSnapshotReport() {
             <div
               key={d.stage}
               className={`rounded-lg p-3 text-center ${
-                ['tr1', 'tr2', 'hr'].includes(d.stage) ? 'bg-brand-50 border border-brand-100' : 'bg-surface-50'
+                ['tr1', 'tr2', 'final_tr', 'hr'].includes(d.stage) ? 'bg-brand-50 border border-brand-100' : 'bg-surface-50'
               }`}
             >
               <p className="text-xl font-bold text-gray-900">{d.count}</p>
@@ -537,7 +537,7 @@ function TimeToHireReport({ days }) {
 
 const STAGE_SHORT = {
   applied: 'Applied', screening: 'Screen', assessment: 'Assess', tr1: 'TR1', tr2: 'TR2',
-  hr: 'HR', offer: 'Offer', hired: 'Hired', rejected: 'Rejected', withdrawn: 'Withdrawn',
+  final_tr: 'Final TR', hr: 'HR', offer: 'Offer', hired: 'Hired', rejected: 'Rejected', withdrawn: 'Withdrawn',
 };
 const stageBarColor = (stage) =>
   FUNNEL_STAGE_COLOR[stage] ?? (stage === 'hired' ? '#22c55e' : stage === 'rejected' ? '#f87171' : '#94a3b8');

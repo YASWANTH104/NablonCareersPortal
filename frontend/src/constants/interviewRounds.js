@@ -49,6 +49,19 @@ export const ROUND_TYPES = [
     blurb: 'Second technical round — candidates at the Technical Round 2 stage only.',
   },
   {
+    key: 'final_tr',
+    label: 'Final Technical Round',
+    short: 'Final TR',
+    color: 'bg-cyan-100 text-cyan-800',
+    accent: {
+      badge: 'bg-cyan-50 text-cyan-700 border-cyan-200',
+      chip: 'border-cyan-200 hover:border-cyan-400 hover:bg-cyan-50/60',
+      tab: 'bg-cyan-500 border-cyan-500 text-white',
+      dot: 'bg-cyan-500',
+    },
+    blurb: 'Last technical round before HR — candidates at the Final Technical Round stage only.',
+  },
+  {
     key: 'hr',
     label: 'HR Interview',
     short: 'HR',
@@ -73,6 +86,7 @@ export const ROUND_ELIGIBLE_STAGE = {
   screening: 'screening',
   tr1: 'tr1',
   tr2: 'tr2',
+  final_tr: 'final_tr',
   hr: 'hr',
 };
 
