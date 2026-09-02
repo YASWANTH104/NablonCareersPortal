@@ -71,6 +71,7 @@ const STAGE_LABELS = {
   assessment: 'Assessment',
   tr1: 'Technical Round 1',
   tr2: 'Technical Round 2',
+  final_tr: 'Final Technical Round',
   hr: 'HR Interview',
   offer: 'Offer Extended',
   hired: 'Hired',
@@ -98,6 +99,7 @@ const GRID_ROUND_COLORS = {
   screening: { bg: 'bg-purple-50', bar: 'bg-purple-400', hover: 'hover:bg-purple-100', text: 'text-purple-900', dot: 'bg-purple-400', swatch: 'bg-purple-200' },
   tr1: { bg: 'bg-sky-50', bar: 'bg-sky-400', hover: 'hover:bg-sky-100', text: 'text-sky-900', dot: 'bg-sky-400', swatch: 'bg-sky-200' },
   tr2: { bg: 'bg-teal-50', bar: 'bg-teal-400', hover: 'hover:bg-teal-100', text: 'text-teal-900', dot: 'bg-teal-400', swatch: 'bg-teal-200' },
+  final_tr: { bg: 'bg-cyan-50', bar: 'bg-cyan-400', hover: 'hover:bg-cyan-100', text: 'text-cyan-900', dot: 'bg-cyan-400', swatch: 'bg-cyan-200' },
   hr: { bg: 'bg-violet-50', bar: 'bg-violet-400', hover: 'hover:bg-violet-100', text: 'text-violet-900', dot: 'bg-violet-400', swatch: 'bg-violet-200' },
 };
 const DEFAULT_GRID_COLOR = { bg: 'bg-brand-50', bar: 'bg-brand-400', hover: 'hover:bg-brand-100', text: 'text-brand-900', dot: 'bg-brand-400', swatch: 'bg-brand-200' };

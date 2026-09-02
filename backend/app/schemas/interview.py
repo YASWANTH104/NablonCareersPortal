@@ -12,7 +12,7 @@ class PanelistCreate(BaseModel):
 class InterviewCreate(BaseModel):
     application_id: uuid.UUID
     round_number: int = 1
-    # screening | tr1 | tr2 | hr. Left None by the manual-scheduling paths —
+    # screening | tr1 | tr2 | final_tr | hr. Left None by the manual-scheduling paths —
     # create_interview then infers it from the application's current stage.
     round_type: Optional[str] = None
     title: Optional[str] = None
@@ -126,7 +126,7 @@ class InterviewFeedbackResponse(BaseModel):
 
 class PreviousRoundFeedbackEntry(BaseModel):
     round_number: int
-    # screening | tr1 | tr2 | hr — what the round actually was. round_number
+    # screening | tr1 | tr2 | final_tr | hr — what the round actually was. round_number
     # can't be trusted to say (it defaults to 1 on manual scheduling), so the
     # UI should label from this and fall back to the number.
     round_type: Optional[str] = None

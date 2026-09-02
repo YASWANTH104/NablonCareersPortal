@@ -13,6 +13,7 @@ _STAGE_LABELS = {
     "assessment": "technical assessment",
     "tr1":        "Technical Round 1 interview",
     "tr2":        "Technical Round 2 interview",
+    "final_tr":   "Final Technical Round interview",
     "hr":         "HR interview",
     "offer":      "offer stage",
 }

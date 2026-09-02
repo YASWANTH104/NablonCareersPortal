@@ -6,8 +6,9 @@ VALID_TRANSITIONS = {
     "applied":        ["screening", "rejected"],
     "screening":      ["assessment", "tr1", "rejected"],
     "assessment":     ["tr1", "rejected", "interview_drop"],
-    "tr1":            ["tr2", "hr", "offer", "rejected", "interview_drop"],
-    "tr2":            ["hr", "offer", "rejected", "interview_drop"],
+    "tr1":            ["tr2", "final_tr", "hr", "offer", "rejected", "interview_drop"],
+    "tr2":            ["final_tr", "hr", "offer", "rejected", "interview_drop"],
+    "final_tr":       ["hr", "offer", "rejected", "interview_drop"],
     "hr":             ["offer", "rejected", "interview_drop"],
     "offer":          ["hired", "rejected", "offer_drop"],
     "hired":          [],
@@ -23,6 +24,7 @@ STAGE_LABELS = {
     "assessment": "Assessment",
     "tr1": "Technical Round 1",
     "tr2": "Technical Round 2",
+    "final_tr": "Final Technical Round",
     "hr": "HR Interview",
     "offer": "Offer Extended",
     "hired": "Hired",
@@ -60,21 +62,21 @@ DROP_REASON_CATEGORIES = [
 # free-text rejection note as a fallback) is only ever sent for a rejection
 # from an actual interview round. Rejections from applied/screening/assessment
 # get a generic email with no feedback content, regardless of category.
-FEEDBACK_ELIGIBLE_STAGES = {"tr1", "tr2", "hr"}
+FEEDBACK_ELIGIBLE_STAGES = {"tr1", "tr2", "final_tr", "hr"}
 
 # Rounds/stages a single Interview row can be attributed to that must NEVER
 # contribute feedback to a candidate-facing rejection summary, even when the
-# rejection itself is from tr1/tr2/hr. Screening is here on purpose: HR
+# rejection itself is from tr1/tr2/final_tr/hr. Screening is here on purpose: HR
 # screening-call notes are internal. They DO feed forward to whoever runs the
 # next round (interview_service._get_previous_rounds) — a rejected candidate
 # just never sees them, only the real rounds they actually sat.
 #
 # Attribution now prefers interviews.round_type; the ApplicationStageHistory
 # inference in tasks/email_tasks.py is only the fallback for rows without one.
-# Deliberately a denylist rather than an allowlist of {"tr1","tr2","hr"}: some
+# Deliberately a denylist rather than an allowlist of the real rounds: some
 # ApplicationStageHistory rows predate the interview_1/interview_2/interview_3/
 # final_interview -> tr1/tr2/hr rename and still carry the old names, which a
-# tr1/tr2/hr allowlist would misclassify as non-interview and wrongly strip.
+# round allowlist would misclassify as non-interview and wrongly strip.
 FEEDBACK_EXCLUDED_INTERVIEW_STAGES = {"applied", "screening", "assessment"}
 
 # Panelists are never chased for feedback on a candidate who has dropped out.
@@ -94,7 +96,7 @@ FEEDBACK_REQUEST_SUPPRESSED_STAGES = {"interview_drop"}
 # slot's round and the stage it belongs to never drift apart) — "screening"
 # here is the HR screening call, booked while the application sits at the
 # "screening" stage.
-SLOT_ROUND_TYPES = ("screening", "tr1", "tr2", "hr")
+SLOT_ROUND_TYPES = ("screening", "tr1", "tr2", "final_tr", "hr")
 
 # Which application stage a candidate must be sitting at to be booked into a
 # slot of a given round. Deliberately strict 1:1 rather than "this stage or
@@ -105,6 +107,7 @@ ROUND_ELIGIBLE_STAGE = {
     "screening": "screening",
     "tr1": "tr1",
     "tr2": "tr2",
+    "final_tr": "final_tr",
     "hr": "hr",
 }
 
@@ -112,12 +115,20 @@ ROUND_ELIGIBLE_STAGE = {
 # what orders rounds relative to each other, because round_number is unreliable:
 # it defaults to 1 on every manually scheduled interview, so a manually booked
 # HR screening call and a TR1 both land on 1. Feeding previous-round context
-# forward (screening notes -> TR1 -> TR2 -> HR) has to use this map.
+# forward (screening notes -> TR1 -> TR2 -> Final TR -> HR) has to use this map.
+#
+# Inserting final_tr at 3 pushed hr from 3 to 4. That only shifts the
+# round_number stamped on NEW slot bookings (ROUND_TO_NUMBER in
+# interview_slot_service is this map); HR interviews booked before the change
+# keep round_number 3. Nothing orders on that number — _round_index in
+# interview_service resolves round_type first and falls back to round_number
+# only for rows that carry no round_type at all.
 ROUND_ORDER = {
     "screening": 0,
     "tr1": 1,
     "tr2": 2,
-    "hr": 3,
+    "final_tr": 3,
+    "hr": 4,
 }
 
 # Round labels as an agency sees them in their portal. Same wording as
@@ -128,5 +139,6 @@ ROUND_LABELS = {
     "screening": "HR Screening Call",
     "tr1": "Technical Round 1",
     "tr2": "Technical Round 2",
+    "final_tr": "Final Technical Round",
     "hr": "HR Interview",
 }

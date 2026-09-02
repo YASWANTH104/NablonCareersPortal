@@ -26,7 +26,7 @@ class InterviewSlot(Base):
     # this agency-visible "assigned but open" state at all.
     job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("jobs.id"))
     round_type: Mapped[str | None] = mapped_column(String(20))
-    # tr1 | tr2 | hr — mirrors the pipeline stage vocabulary in app/constants/stages.py
+    # tr1 | tr2 | final_tr | hr — mirrors the pipeline stage vocabulary in app/constants/stages.py
     start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     duration_mins: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")

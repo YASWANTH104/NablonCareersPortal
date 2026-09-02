@@ -32,7 +32,7 @@ class Application(Base):
     answers: Mapped[dict] = mapped_column(JSONB, default=dict)
 
     stage: Mapped[str] = mapped_column(String(50), default="applied", index=True)
-    # applied | screening | assessment | tr1 | tr2 | hr | offer | hired | rejected
+    # applied | screening | assessment | tr1 | tr2 | final_tr | hr | offer | hired | rejected
     # | withdrawn | interview_drop | offer_drop  (see app/constants/stages.py)
     rejection_reason: Mapped[str | None] = mapped_column(Text)
     # Structured category for rejected/interview_drop/offer_drop, e.g. "got_another_offer" —

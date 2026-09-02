@@ -144,7 +144,7 @@ async def _send_stage_update_email_async(application_id: str, new_stage: str, fr
 
     # Candidate-facing feedback (AI summary, or the raw HR note as a fallback)
     # is only ever shown for a rejection out of an actual interview round
-    # (tr1/tr2/hr) — always sent then, regardless of which reason category HR
+    # (tr1/tr2/final_tr/hr) — always sent then, regardless of which reason category HR
     # picked. Applied/screening/assessment/offer rejections always get the
     # generic version, with no feedback content.
     show_feedback = from_stage in FEEDBACK_ELIGIBLE_STAGES
@@ -167,7 +167,7 @@ async def _send_stage_update_email_async(application_id: str, new_stage: str, fr
         # An Interview row has no stage field of its own — HR schedules interviews
         # against round_number/title, not against "screening" vs "tr1". To know
         # which pipeline stage a given interview actually happened in (so screening
-        # round feedback never bleeds into a TR1/TR2/HR rejection's summary), infer
+        # round feedback never bleeds into a TR1/TR2/Final TR/HR rejection's summary), infer
         # it from ApplicationStageHistory: whichever stage was current as of the
         # interview's creation time.
         stage_history_rows = (await db.execute(
@@ -204,7 +204,7 @@ async def _send_stage_update_email_async(application_id: str, new_stage: str, fr
             )).scalars().all()
 
             # A rejected candidate only ever sees feedback from rounds they
-            # actually sat: real interview rounds (tr1/tr2/hr), and only ones
+            # actually sat: real interview rounds (tr1/tr2/final_tr/hr), and only ones
             # that went ahead. HR screening-call notes are internal — they feed
             # forward to the next interviewer (interview_service._get_previous_rounds)
             # but never reach the candidate. A cancelled round didn't happen, so
@@ -253,6 +253,7 @@ async def _send_stage_update_email_async(application_id: str, new_stage: str, fr
             "assessment": "An update on your Nablon AI assessment",
             "tr1":        "An update following your Technical Round 1 interview at Nablon AI",
             "tr2":        "An update following your Technical Round 2 interview at Nablon AI",
+            "final_tr":   "An update following your Final Technical Round interview at Nablon AI",
             "hr":         "An update following your HR interview at Nablon AI",
             "offer":      "An update regarding your Nablon AI offer",
         }
@@ -492,6 +493,7 @@ async def _send_agency_stage_update_email_async(application_id: str, new_stage: 
             "assessment": "Assessment",
             "tr1": "Technical Round 1",
             "tr2": "Technical Round 2",
+            "final_tr": "Final Technical Round",
             "hr": "HR Interview",
             "offer": "Offer Extended",
             "hired": "Hired",

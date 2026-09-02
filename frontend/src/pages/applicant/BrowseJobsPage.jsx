@@ -27,6 +27,7 @@ const STAGE_LABELS = {
   assessment: 'Assessment',
   tr1: 'Interview',
   tr2: 'Interview',
+  final_tr: 'Final interview round',
   hr: 'HR round',
   interview_1: 'Interview',
   interview_2: 'Interview',

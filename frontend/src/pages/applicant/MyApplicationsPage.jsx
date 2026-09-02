@@ -663,8 +663,8 @@ function OfferActionPanel({ applicationId }) {
   );
 }
 
-const INTERVIEW_STAGES = new Set(['screening', 'assessment', 'tr1', 'tr2', 'hr']);
-const INTERVIEW_VIEWABLE_STAGES = new Set(['applied', 'screening', 'assessment', 'tr1', 'tr2', 'hr']);
+const INTERVIEW_STAGES = new Set(['screening', 'assessment', 'tr1', 'tr2', 'final_tr', 'hr']);
+const INTERVIEW_VIEWABLE_STAGES = new Set(['applied', 'screening', 'assessment', 'tr1', 'tr2', 'final_tr', 'hr']);
 
 const HEATMAP_QUESTIONS = [
   { key: 'overall_score',        label: 'Overall performance',       sub: 'How well do you think you performed?' },

@@ -23,7 +23,8 @@ SLOT_BOOKING_CC = ["sneha.vangada@nablon.ai"]
 # context, so an HR screening call reads as prior context for TR1.
 ROUND_TO_NUMBER = ROUND_ORDER
 ROUND_TO_INTERVIEW_TYPE = {
-    "screening": "phone", "tr1": "technical", "tr2": "technical", "hr": "hr",
+    "screening": "phone", "tr1": "technical", "tr2": "technical",
+    "final_tr": "technical", "hr": "hr",
 }
 SLOT_CONFLICT_MESSAGE = "This slot is no longer available — please pick another."
 # On-demand, HR-triggered nudge ("please go publish your free slots"), not an

@@ -18,7 +18,7 @@ _HR_ROLES = (Role.HR_MANAGER, Role.ADMIN, Role.SUPER_ADMIN)
 
 FUNNEL_STAGES = [
     "applied", "screening", "assessment",
-    "tr1", "tr2", "hr",
+    "tr1", "tr2", "final_tr", "hr",
     "offer", "hired",
 ]
 
@@ -347,7 +347,7 @@ async def agency_performance(
             "rejected": rejected,
             "conversion_rate": round((hired / total) * 100, 1) if total > 0 else 0,
             "by_stage": [{"stage": s, "count": stage_map.get(s, 0)} for s in [
-                "applied", "screening", "assessment", "tr1", "tr2", "hr", "offer", "hired", "rejected"
+                "applied", "screening", "assessment", "tr1", "tr2", "final_tr", "hr", "offer", "hired", "rejected"
             ]],
         })
 
