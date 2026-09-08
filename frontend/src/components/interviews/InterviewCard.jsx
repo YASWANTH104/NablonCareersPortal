@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import {
   Clock, Users, ExternalLink, CheckCircle2, RefreshCw, History,
   MapPin, ChevronDown, ChevronUp, Briefcase,
 } from 'lucide-react';
-import { statusStyle, typeIcon, isActive, interviewRange } from './calendarUtils';
+import { statusStyle, typeIcon, isActive, interviewRange, isWithinRescheduleGrace } from './calendarUtils';
 import { InterviewFeedbackCard, InlineFeedbackForm } from './feedback';
 import { interviewRoundLabel, roundContextHeading } from '@/constants/interviewRounds';
 
@@ -26,6 +26,22 @@ export default function InterviewCard({
   const hasFeedback = interview.feedback?.length > 0;
   const hasPrevRounds = interview.previous_rounds_feedback?.length > 0;
   const live = isActive(interview);
+
+  // This page has no polling refetch, so without a tick the reschedule button
+  // would only disappear on the grace boundary the next time something else
+  // happens to force a re-render (a manual refresh, a different interview's
+  // action). A minute tick is enough given the window is 30 minutes wide.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 60000);
+    return () => clearInterval(id);
+  }, []);
+  // A "completed" interview is often just the auto-complete job blindly
+  // flipping status once scheduled_at + duration passes, with no signal on
+  // whether the candidate actually attended — HR needs to be able to
+  // reschedule it once they learn it was really a no-show, but only within a
+  // short grace window past the scheduled end (see isWithinRescheduleGrace).
+  const canReschedule = live || (interview.status === 'completed' && isWithinRescheduleGrace(interview));
 
   return (
     <div className="group relative bg-white rounded-xl border border-surface-200 hover:border-brand-200 hover:shadow-card-hover transition-all overflow-hidden">
@@ -116,7 +132,7 @@ export default function InterviewCard({
               <CheckCircle2 className="w-3 h-3" /> Complete
             </button>
           )}
-          {canCancel && live && (
+          {canCancel && canReschedule && (
             <button
               onClick={() => onReschedule(interview)}
               className="flex items-center gap-1 px-3 py-1.5 border border-brand-200 text-xs text-brand-600 font-medium rounded-lg hover:bg-brand-50 transition-colors"

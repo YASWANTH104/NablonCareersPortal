@@ -29,6 +29,7 @@ import ResumeVersions, { resolveFileUrl } from '@/components/shared/ResumeVersio
 import { InlineFeedbackForm, InterviewFeedbackCard } from '@/components/interviews/feedback';
 import { FREE_TEXT_MAX } from '@/constants/fieldLimits';
 import ScheduleTimeGrid from '@/components/interviews/ScheduleTimeGrid';
+import { isWithinRescheduleGrace } from '@/components/interviews/calendarUtils';
 import StageReasonDialog from '@/components/shared/StageReasonDialog';
 import HoldReasonDialog from '@/components/shared/HoldReasonDialog';
 import { useHoldToggle } from '@/hooks/useHoldToggle';
@@ -2182,6 +2183,14 @@ export default function ApplicationDetailPage() {
             interviews.map((interview) => {
               const round = ROUND_MAP[interview.round_type];
               const isLive = ['scheduled', 'rescheduled'].includes(interview.status);
+              // Reschedule stays available on a "completed" interview for a
+              // short grace window past its scheduled end — auto-complete
+              // flips status purely on elapsed time with no attendance check,
+              // so HR needs a chance to fix it once told it was a no-show, but
+              // not indefinitely (see isWithinRescheduleGrace). This page
+              // polls every 15s (['application-interviews', id]), so the
+              // button disappears on its own once the window closes.
+              const canReschedule = isLive || (interview.status === 'completed' && isWithinRescheduleGrace(interview));
               const TypeIcon = interview.interview_type === 'video' ? Video
                 : interview.interview_type === 'phone' ? Phone : MapPin;
               return (
@@ -2324,27 +2333,31 @@ export default function ApplicationDetailPage() {
                   {/* Actions are the LAST row of the card. Placed above the
                       feedback block they landed mid-card, with the feedback and
                       "+ Add feedback" dangling underneath them. */}
-                  {canManage && isLive && (
+                  {canManage && canReschedule && (
                     <div className="flex flex-wrap items-center justify-end gap-2 px-5 py-3 border-t border-surface-100 bg-surface-50/60">
-                      <button
-                        onClick={() => setConfirmCancelFor(interview)}
-                        className="px-3 py-1.5 text-xs font-semibold text-rose-600 rounded-lg hover:bg-rose-50 transition-colors"
-                      >
-                        Cancel interview
-                      </button>
+                      {isLive && (
+                        <button
+                          onClick={() => setConfirmCancelFor(interview)}
+                          className="px-3 py-1.5 text-xs font-semibold text-rose-600 rounded-lg hover:bg-rose-50 transition-colors"
+                        >
+                          Cancel interview
+                        </button>
+                      )}
                       <button
                         onClick={() => setShowRescheduleFor(interview)}
                         className="px-3 py-1.5 text-xs font-semibold text-gray-700 bg-white border border-surface-300 rounded-lg hover:border-surface-400 hover:bg-surface-50 transition-colors"
                       >
                         Reschedule
                       </button>
-                      <button
-                        onClick={() => setConfirmCompleteId(interview.id)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors"
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        Mark complete
-                      </button>
+                      {isLive && (
+                        <button
+                          onClick={() => setConfirmCompleteId(interview.id)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          Mark complete
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
