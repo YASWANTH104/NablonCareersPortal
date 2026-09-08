@@ -1011,19 +1011,19 @@ async def update_interview(
         raise HTTPException(
             400, "This interview was cancelled. Schedule a new one instead of editing it.",
         )
-    if interview.status == "completed" and "scheduled_at" in data.model_dump(exclude_unset=True):
-        raise HTTPException(400, "A completed interview can't be rescheduled.")
 
     update_data = data.model_dump(exclude_unset=True)
     old_scheduled_at = interview.scheduled_at
+    was_completed = interview.status == "completed"
 
     # Check panelist conflicts when time changes
     new_scheduled_at = update_data.get("scheduled_at", interview.scheduled_at)
     new_duration = update_data.get("duration_mins", interview.duration_mins)
     if "scheduled_at" in update_data and update_data["scheduled_at"] != old_scheduled_at:
-        panelist_ids = [p.user_id for p in (await db.execute(
+        panelist_rows = (await db.execute(
             select(InterviewPanelist).where(InterviewPanelist.interview_id == interview_id)
-        )).scalars().all()]
+        )).scalars().all()
+        panelist_ids = [p.user_id for p in panelist_rows]
         # Same single sorted lock over everyone involved as create_interview.
         from app.models.application import Application as _AppModel
         _app_for_lock = await db.get(_AppModel, interview.application_id)
@@ -1049,6 +1049,17 @@ async def update_interview(
             raise HTTPException(
                 409, f"This candidate already has an interview at {clash_at}.",
             )
+
+        # A "completed" sitting may already have a feedback-request email out
+        # with a live tokenized link (auto_complete_past_interviews fires that
+        # synchronously). Once HR moves the interview to a new time, that old
+        # link must stop working — otherwise a panelist could still submit
+        # feedback for a no-show that's since been rescheduled.
+        if was_completed:
+            import secrets
+            for p in panelist_rows:
+                if p.feedback_token:
+                    p.feedback_token = secrets.token_urlsafe(32)
 
     for field, val in update_data.items():
         setattr(interview, field, val)
@@ -1245,6 +1256,10 @@ async def send_feedback_request_emails(db: AsyncSession, interview: Interview) -
 
     sent = 0
     for panelist in panelists:
+        # Observers sit in on the interview but aren't expected to submit a
+        # formal recommendation — only interviewer-role panelists get asked.
+        if panelist.role == "observer":
+            continue
         if panelist.user_id in submitted_by_ids:
             continue
         interviewer = await db.get(User, panelist.user_id)

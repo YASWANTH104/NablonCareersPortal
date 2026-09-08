@@ -64,6 +64,21 @@ export const typeIcon = (type) => TYPE_ICONS[type] ?? Calendar;
 export const ACTIVE_STATUSES = ['scheduled', 'rescheduled'];
 export const isActive = (interview) => ACTIVE_STATUSES.includes(interview.status);
 
+// auto_complete_past_interviews flips status to "completed" purely on
+// scheduled_at + duration elapsing, with no attendance check — so HR needs a
+// window to reschedule one that turns out to have been a no-show. Past this
+// many minutes after the scheduled end, the reschedule action disappears.
+export const RESCHEDULE_GRACE_MINS = 30;
+
+/** Real-instant check (deliberately NOT toIST — see interviewRange's comment;
+    toIST returns a shifted/fake epoch that must never be compared directly
+    against Date.now()) for whether a "completed" interview is still within
+    the grace window HR can reschedule it in. */
+export function isWithinRescheduleGrace(interview) {
+  const end = new Date(interview.scheduled_at).getTime() + (interview.duration_mins || 60) * 60000;
+  return Date.now() <= end + RESCHEDULE_GRACE_MINS * 60000;
+}
+
 /** Start/end, in IST wall-clock terms, for an interview — defaulting to a
     60-minute block. `toIST` keeps this correct regardless of the viewer's
     own machine timezone (see formatters.js). */

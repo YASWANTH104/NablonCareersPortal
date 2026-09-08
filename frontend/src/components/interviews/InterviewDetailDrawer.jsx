@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import {
   X, Calendar, Users, ExternalLink, CheckCircle2, RefreshCw,
   MapPin, Phone, Video, User, History,
 } from 'lucide-react';
-import { statusStyle, typeIcon, isActive, interviewRange } from './calendarUtils';
+import { statusStyle, typeIcon, isActive, interviewRange, isWithinRescheduleGrace } from './calendarUtils';
 import { InterviewFeedbackCard, InlineFeedbackForm } from './feedback';
 import { interviewRoundLabel, roundContextHeading } from '@/constants/interviewRounds';
 
@@ -31,6 +31,14 @@ export default function InterviewDetailDrawer({
   const TypeIcon = typeIcon(interview.interview_type);
   const { start, end } = interviewRange(interview);
   const live = isActive(interview);
+  // See InterviewCard's canReschedule/tick — same 30-min grace window, and
+  // the same reason a tick is needed to make the button actually disappear.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 60000);
+    return () => clearInterval(id);
+  }, []);
+  const canReschedule = live || (interview.status === 'completed' && isWithinRescheduleGrace(interview));
 
   const locationIcon = interview.interview_type === 'phone' ? Phone : MapPin;
   const hasPrevRounds = interview.previous_rounds_feedback?.length > 0;
@@ -140,7 +148,7 @@ export default function InterviewDetailDrawer({
                     <CheckCircle2 className="w-4 h-4" /> Complete
                   </button>
                 )}
-                {canCancel && live && (
+                {canCancel && canReschedule && (
                   <button
                     onClick={() => onReschedule(interview)}
                     className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 border border-brand-200 text-brand-600 rounded-xl text-sm font-semibold hover:bg-brand-50 transition-colors"
