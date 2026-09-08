@@ -1245,6 +1245,10 @@ async def send_feedback_request_emails(db: AsyncSession, interview: Interview) -
 
     sent = 0
     for panelist in panelists:
+        # Observers sit in on the interview but aren't expected to submit a
+        # formal recommendation — only interviewer-role panelists get asked.
+        if panelist.role == "observer":
+            continue
         if panelist.user_id in submitted_by_ids:
             continue
         interviewer = await db.get(User, panelist.user_id)

@@ -76,9 +76,15 @@ def send_feedback_reminders():
 
             reminded = 0
             for interview in interviews:
-                panelists = (await db.execute(
-                    select(InterviewPanelist).where(InterviewPanelist.interview_id == interview.id)
-                )).scalars().all()
+                # Observers sit in on the interview but aren't expected to submit
+                # a formal recommendation — only interviewer-role panelists are
+                # chased for feedback (see send_feedback_request_emails, same rule).
+                panelists = [
+                    p for p in (await db.execute(
+                        select(InterviewPanelist).where(InterviewPanelist.interview_id == interview.id)
+                    )).scalars().all()
+                    if p.role != "observer"
+                ]
 
                 submitted_by_ids = {
                     row.submitted_by for row in (await db.execute(
@@ -88,7 +94,7 @@ def send_feedback_reminders():
                     )).all()
                 }
 
-                # All panelists submitted — stop reminding
+                # All (non-observer) panelists submitted — stop reminding
                 if panelists and all(p.user_id in submitted_by_ids for p in panelists):
                     continue
 

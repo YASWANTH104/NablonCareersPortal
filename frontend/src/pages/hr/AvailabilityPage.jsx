@@ -8,7 +8,7 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, X, Loader2, Search, CalendarClock, Copy,
   Maximize2, Minimize2, BellRing, Trash2, Repeat, Users, User, CalendarCheck, Send,
   CalendarDays, CalendarRange, LayoutGrid, MousePointerClick, Eraser, MoveVertical,
-  Check, RotateCcw, Clock, CalendarX, Hourglass, Sparkles, ArrowRight,
+  Check, RotateCcw, Clock, CalendarX, Hourglass, Sparkles, ArrowRight, CalendarPlus,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { interviewSlotsApi } from '@/api/interviewSlots';
@@ -1782,6 +1782,7 @@ function Legend({ editable }) {
 const HR_MODES = [
   { value: 'own', label: 'My availability', shortLabel: 'Mine', icon: User },
   { value: 'manage', label: 'Book for an interviewer', shortLabel: 'Book', icon: CalendarCheck },
+  { value: 'publish_for', label: 'Publish for an interviewer', shortLabel: 'Publish for', icon: CalendarPlus },
   { value: 'publish', label: 'Publish to agencies', shortLabel: 'Publish', icon: Send },
 ];
 
@@ -1829,9 +1830,12 @@ export default function AvailabilityPage() {
   // interview_slots.py), this mode toggle is what actually exposes it in the UI
   // instead of always defaulting them into "book for someone else".
   // 'own' = publish my own slots | 'manage' = browse an interviewer's calendar
-  // to book a slot directly for an internal candidate | 'publish' = pick a
-  // job, tick several of that interviewer's open slots, publish them all to
-  // agencies at once (PublishSlotsPanel).
+  // to book a slot directly for an internal candidate | 'publish_for' = same
+  // drag-to-create grid as 'own', but targeting an interviewer HR picks —
+  // for someone who's traveling, out sick, or otherwise can't publish their
+  // own availability | 'publish' = pick a job, tick several of that
+  // interviewer's open slots, publish them all to agencies at once
+  // (PublishSlotsPanel).
   const [hrMode, setHrMode] = useState('manage');
 
   const startHour = showFullDay ? FULL_START_HOUR : WORK_START_HOUR;
@@ -1856,7 +1860,13 @@ export default function AvailabilityPage() {
 
   const manageOwnSlots = !isHR || hrMode === 'own';
   const viewingInterviewerId = manageOwnSlots ? user?.id : selectedInterviewerId;
-  const editable = manageOwnSlots; // publishing own slots vs. HR just booking someone else's
+  // Publishing (own slots, or HR publishing on behalf of a chosen interviewer)
+  // vs. HR just booking/browsing someone else's calendar read-only.
+  const editable = manageOwnSlots || (isHR && hrMode === 'publish_for' && !!selectedInterviewerId);
+  // undefined (not the requesting user's own id) when publishing for oneself —
+  // the backend already defaults interviewer_id to the caller in that case,
+  // so this only needs a value on the HR-on-behalf-of path.
+  const targetInterviewerId = manageOwnSlots ? undefined : viewingInterviewerId;
   const selectedInterviewer = interviewersData?.find((p) => p.id === selectedInterviewerId);
 
   const { data: slots, isLoading } = useQuery({
@@ -1972,8 +1982,13 @@ export default function AvailabilityPage() {
   const publishBatchMutation = useMutation({
     // start_times arrive as IST wall-clock grid Dates; gridToInstant is what
     // turns each one back into the real UTC instant the API stores.
-    mutationFn: ({ jobId, roundType, durationMins, startTimes }) =>
+    mutationFn: ({ interviewerId, jobId, roundType, durationMins, startTimes }) =>
       interviewSlotsApi.publish({
+        // Omitted entirely (rather than sent as null) when publishing for
+        // yourself — the router/schema treats a present-but-foreign id as the
+        // HR-on-behalf-of path, so a non-HR interviewer must never see this
+        // field at all in their own request.
+        ...(interviewerId ? { interviewer_id: interviewerId } : {}),
         job_id: jobId,
         round_type: roundType,
         duration_mins: durationMins,
@@ -2127,6 +2142,7 @@ export default function AvailabilityPage() {
 
     try {
       const res = await publishBatchMutation.mutateAsync({
+        interviewerId: targetInterviewerId,
         jobId: null, roundType: null, durationMins: PUBLISH_DURATION_MINS, startTimes,
       });
       invalidateSlots(); // reconciles the optimistic temp rows with real ids in the background
@@ -2188,6 +2204,7 @@ export default function AvailabilityPage() {
       for (const [durationMins, startTimes] of groups) {
         totalRequested += startTimes.length;
         const res = await publishBatchMutation.mutateAsync({
+          interviewerId: targetInterviewerId,
           jobId: null, roundType: null, durationMins, startTimes,
         });
         totalCreated += res.data?.length ?? 0;
@@ -2307,6 +2324,7 @@ export default function AvailabilityPage() {
 
     try {
       const res = await publishBatchMutation.mutateAsync({
+        interviewerId: targetInterviewerId,
         jobId: null, roundType: null, durationMins: PUBLISH_DURATION_MINS, startTimes,
       });
       invalidateSlots();
@@ -2328,15 +2346,19 @@ export default function AvailabilityPage() {
     ? 'My Availability'
     : hrMode === 'publish'
     ? 'Publish Slots to Agencies'
+    : hrMode === 'publish_for'
+    ? 'Publish Availability for an Interviewer'
     : 'Interviewer Availability';
   const subheading = manageOwnSlots
     ? 'Drag across the grid to mark yourself free — HR takes it from there.'
     : hrMode === 'publish'
     ? 'Attach a job and round to open availability so recruitment partners can book it.'
+    : hrMode === 'publish_for'
+    ? 'Pick a panel member who can’t publish their own time — traveling, out sick, or otherwise unavailable — and add slots on their behalf.'
     : 'Browse a panel member’s calendar and book an interview directly for a candidate.';
 
   const isCalendarMode = hrMode !== 'publish';
-  const needsInterviewerPick = isHR && hrMode === 'manage' && !selectedInterviewerId;
+  const needsInterviewerPick = isHR && (hrMode === 'manage' || hrMode === 'publish_for') && !selectedInterviewerId;
 
   function goToday() {
     if (view === 'day') setDayCursor(gridNow());
@@ -2420,7 +2442,7 @@ export default function AvailabilityPage() {
 
       {/* ── Toolbar ── */}
       <div className="flex flex-col xl:flex-row xl:items-center gap-3">
-        {isHR && (hrMode === 'manage' || hrMode === 'publish') && (
+        {isHR && (hrMode === 'manage' || hrMode === 'publish' || hrMode === 'publish_for') && (
           <div className="flex items-end gap-2">
             <InterviewerPicker
               value={selectedInterviewerId}
@@ -2499,7 +2521,9 @@ export default function AvailabilityPage() {
           <div className="px-4 sm:px-5 py-4 border-b border-surface-200">
             <h2 className="font-display font-semibold text-gray-900">Whose calendar do you need?</h2>
             <p className="text-sm text-gray-500 mt-0.5">
-              Pick someone from the interview panel to see their availability and book a candidate into it.
+              {hrMode === 'publish_for'
+                ? 'Pick someone from the interview panel to add availability on their behalf.'
+                : 'Pick someone from the interview panel to see their availability and book a candidate into it.'}
             </p>
           </div>
           {!interviewersData ? (
@@ -2551,7 +2575,17 @@ export default function AvailabilityPage() {
               <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 mb-3 px-1">
                 {editable ? (
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-                    <Hint icon={MousePointerClick}>Drag empty cells to mark yourself free</Hint>
+                    {!manageOwnSlots && (
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Avatar name={selectedInterviewer?.full_name} className="w-6 h-6 text-[10px]" />
+                        <span className="text-sm text-gray-600 truncate">
+                          Publishing for <span className="font-medium text-gray-800">{selectedInterviewer?.full_name}</span>
+                        </span>
+                      </div>
+                    )}
+                    <Hint icon={MousePointerClick}>
+                      {manageOwnSlots ? 'Drag empty cells to mark yourself free' : 'Drag empty cells to add availability'}
+                    </Hint>
                     <Hint icon={Eraser}>Drag over free time to clear it</Hint>
                     <Hint icon={MoveVertical}>Drag a slot’s bottom edge to resize</Hint>
                   </div>
