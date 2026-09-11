@@ -60,6 +60,7 @@ async def _create_teams_meeting_async(interview_id: str, cc_emails: list[str] | 
     from app.models.job import Job
     from app.services import ms_graph_service
     from app.tasks.email_tasks import send_interview_scheduled_notifications
+    from app.config import settings
 
     iv_uuid = uuid.UUID(interview_id)
 
@@ -110,6 +111,11 @@ async def _create_teams_meeting_async(interview_id: str, cc_emails: list[str] | 
         start = interview.scheduled_at
         end = start + timedelta(minutes=interview.duration_mins or 60)
 
+        # Shown to every attendee on the invite, candidate included — the link
+        # itself is HR-only (requires HR auth), so it's safe to expose here even
+        # though the candidate can't open it.
+        profile_url = f"{settings.FRONTEND_URL}/hr/applicants/{app.id}"
+
         result = None
         try:
             result = await ms_graph_service.create_teams_meeting(
@@ -118,7 +124,10 @@ async def _create_teams_meeting_async(interview_id: str, cc_emails: list[str] | 
                 start=start,
                 end=end,
                 attendee_emails=attendee_emails,
-                body_html=f"<p>Interview for {job_title} with {candidate.full_name}.</p>",
+                body_html=(
+                    f"<p>Interview for {job_title} with {candidate.full_name}.</p>"
+                    f'<p><a href="{profile_url}">View candidate profile</a></p>'
+                ),
             )
         except Exception as exc:
             logger.error(f"Graph create_teams_meeting failed: interview={interview_id}: {exc}")

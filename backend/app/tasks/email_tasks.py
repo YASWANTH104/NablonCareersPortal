@@ -754,6 +754,7 @@ async def _send_interview_scheduled_async(interview_id: str, cc_emails: list[str
     from app.models.user import User
     from app.models.job import Job
     from app.services.email_service import send_email
+    from app.config import settings
 
     iv_uuid = uuid.UUID(interview_id)
 
@@ -808,6 +809,11 @@ async def _send_interview_scheduled_async(interview_id: str, cc_emails: list[str
                         "full_name": i.full_name,
                         "role": "interviewer",
                         "candidate_name": candidate.full_name if candidate else "",
+                        # HR-only route (/hr/applicants) — never included in the
+                        # candidate's own copy of this template, and never in the
+                        # Teams invite body, since that's shared with the candidate
+                        # as an attendee.
+                        "candidate_profile_url": f"{settings.FRONTEND_URL}/hr/applicants/{app.id}",
                         **email_ctx,
                     },
                     cc_email=cc_emails,

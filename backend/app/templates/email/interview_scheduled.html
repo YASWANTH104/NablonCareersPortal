@@ -15,7 +15,12 @@
   {% if role == "interviewer" and candidate_name %}
   <tr>
     <td style="padding:12px 16px; font-weight:600; color:#6B7280; width:40%; border-bottom:1px solid #E5E7EB;">Candidate</td>
-    <td style="padding:12px 16px; border-bottom:1px solid #E5E7EB;">{{ candidate_name }}</td>
+    <td style="padding:12px 16px; border-bottom:1px solid #E5E7EB;">
+      {{ candidate_name }}
+      {% if candidate_profile_url %}
+      &nbsp;&ndash;&nbsp;<a href="{{ candidate_profile_url }}" style="color:#0238DD;">View Profile</a>
+      {% endif %}
+    </td>
   </tr>
   {% endif %}
   <tr>
