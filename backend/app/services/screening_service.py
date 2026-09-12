@@ -632,3 +632,61 @@ async def get_for_application(db: AsyncSession, application_id: uuid.UUID) -> Op
     if not req:
         return None
     return _to_dict(req)
+
+
+async def auto_reject_expired(db: AsyncSession) -> int:
+    """Auto-rejects any candidate whose screening link expired (7 days,
+    REQUEST_EXPIRY_DAYS) without ever submitting the questionnaire — but only
+    while the application is STILL sitting at `applied`. If HR already moved
+    it on manually (to any other stage, screening included) before the
+    deadline, that manual action wins and this is a no-op for that row —
+    same guarded-not-forced convention as the pass/fail auto-advance in
+    submit_screening above. Runs periodically via
+    app/tasks/screening_tasks.py::auto_reject_expired_screening_requests.
+
+    Idempotent by construction: once an application here actually moves to
+    `rejected`, the next run's `application.stage != "applied"` check skips
+    it — no separate "already processed" flag needed.
+    """
+    from app.models.application import Application
+    from app.services import application_service
+
+    now = datetime.now(timezone.utc)
+    expired = (await db.execute(
+        select(ScreeningResponse).where(
+            ScreeningResponse.status == "pending",
+            ScreeningResponse.expires_at < now,
+        )
+    )).scalars().all()
+
+    rejected = 0
+    for req in expired:
+        application = await db.get(Application, req.application_id)
+        if not application or application.stage != "applied":
+            continue
+
+        try:
+            await application_service.move_stage(
+                db,
+                application.id,
+                "rejected",
+                moved_by=None,
+                notes=(
+                    "Automatically rejected — screening questionnaire was not submitted "
+                    f"within the {REQUEST_EXPIRY_DAYS}-day window."
+                ),
+                rejection_reason=(
+                    "We did not receive your screening questionnaire responses within the "
+                    "time window provided, so we are unable to move forward with your "
+                    "application at this time."
+                ),
+                drop_category="other",
+            )
+            rejected += 1
+        except HTTPException:
+            logger.info(
+                f"Auto-reject-on-expiry skipped for application {application.id} "
+                "(stage already moved on by HR)"
+            )
+
+    return rejected
