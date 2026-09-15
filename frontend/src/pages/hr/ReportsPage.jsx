@@ -6,9 +6,11 @@ import {
 } from 'recharts';
 import {
   BarChart2, TrendingUp, UserCheck, Clock, Building2, Activity, LineChart, Inbox, Briefcase,
+  AlertTriangle, CheckCircle2, ChevronRight, Sparkles,
 } from 'lucide-react';
 import { reportsApi } from '@/api/reports';
 import ReportExportBar from '@/components/shared/ReportExportBar';
+import Modal from '@/components/ui/Modal';
 
 const DAYS_OPTIONS = [
   { label: 'Today', value: 1 },
@@ -543,6 +545,7 @@ const stageBarColor = (stage) =>
   FUNNEL_STAGE_COLOR[stage] ?? (stage === 'hired' ? '#22c55e' : stage === 'rejected' ? '#f87171' : '#94a3b8');
 
 function JobPerformanceReport({ days }) {
+  const [drilldownJobId, setDrilldownJobId] = useState(null);
   const { data, isLoading } = useQuery({
     queryKey: ['report-job', days],
     queryFn: () => reportsApi.jobPerformance({ days }).then((r) => r.data),
@@ -589,11 +592,17 @@ function JobPerformanceReport({ days }) {
               <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Rejected</th>
               <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Conversion</th>
               <th className="py-2.5 px-3 text-xs font-medium text-gray-500">Pipeline</th>
+              <th className="py-2.5 px-3 w-8" />
             </tr>
           </thead>
           <tbody className="divide-y divide-surface-100">
             {data.map((j) => (
-              <tr key={j.job_id} className="hover:bg-surface-50">
+              <tr
+                key={j.job_id}
+                className="hover:bg-surface-50 cursor-pointer"
+                onClick={() => setDrilldownJobId(j.job_id)}
+                title="View stuck candidates, bottlenecks & drop-off reasons for this job"
+              >
                 <td className="py-3 px-3">
                   <p className="font-medium text-gray-900">{j.title}</p>
                   <p className="text-xs text-gray-400">{j.department || 'No department'}</p>
@@ -625,11 +634,15 @@ function JobPerformanceReport({ days }) {
                     </div>
                   )}
                 </td>
+                <td className="py-3 px-3 text-gray-300">
+                  <ChevronRight className="w-4 h-4" />
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      <p className="text-xs text-gray-400 -mt-3">Click a job for the weekly bottleneck report — stuck candidates, drop-off reasons and stage aging.</p>
 
       <div>
         <SectionHeading title="Applications vs. hired per job" subtitle={data.length > 12 ? 'Top 12 by application volume' : undefined} />
@@ -645,7 +658,224 @@ function JobPerformanceReport({ days }) {
           </BarChart>
         </ResponsiveContainer>
       </div>
+
+      {drilldownJobId && (
+        <JobBottleneckModal jobId={drilldownJobId} onClose={() => setDrilldownJobId(null)} />
+      )}
     </div>
+  );
+}
+
+// Severity bands for "days stuck" — status color, not a series identity, so it
+// borrows STATUS_COLORS' amber/red rather than inventing new hues.
+function stuckSeverity(days) {
+  if (days >= 10) return { label: 'Critical', text: 'text-red-600', bg: 'bg-red-50', dot: '#f87171' };
+  return { label: 'Watch', text: 'text-amber-600', bg: 'bg-amber-50', dot: '#f59e0b' };
+}
+
+function JobBottleneckModal({ jobId, onClose }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['report-job-bottleneck', jobId],
+    queryFn: () => reportsApi.jobBottleneck(jobId).then((r) => r.data),
+  });
+
+  const activeStages = data?.by_stage?.filter((s) => s.count > 0) ?? [];
+  const stageTotal = activeStages.reduce((s, x) => s + x.count, 0);
+  const maxDropCount = Math.max(1, ...(data?.drop_reasons ?? []).map((d) => d.count));
+
+  return (
+    <Modal
+      onClose={onClose}
+      title={isLoading ? 'Loading…' : data?.title}
+      description={
+        data
+          ? `${data.status[0].toUpperCase()}${data.status.slice(1)} · Hiring manager: ${data.hiring_manager_name || 'Unassigned'}`
+          : undefined
+      }
+      icon={Briefcase}
+      size="3xl"
+    >
+      {isLoading && <EmptyState text="Loading…" icon={Briefcase} />}
+      {data && (
+        <div className="space-y-7">
+          {/* KPIs */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-surface-50 rounded-xl p-4 text-center">
+              <p className="text-2xl font-bold text-gray-900">{data.total_applications}</p>
+              <p className="text-xs text-gray-500 mt-1">Total Applications</p>
+            </div>
+            <div className="bg-surface-50 rounded-xl p-4 text-center">
+              <p className="text-2xl font-bold text-gray-900">{data.in_progress}</p>
+              <p className="text-xs text-gray-500 mt-1">In Progress</p>
+            </div>
+            <div className="bg-green-50 rounded-xl p-4 text-center">
+              <p className="text-2xl font-bold text-green-700">{data.hired}</p>
+              <p className="text-xs text-green-600 mt-1">Hired</p>
+            </div>
+            <div className={`rounded-xl p-4 text-center ${data.stuck_candidates.length ? 'bg-red-50' : 'bg-green-50'}`}>
+              <p className={`text-2xl font-bold ${data.stuck_candidates.length ? 'text-red-600' : 'text-green-700'}`}>
+                {data.stuck_candidates.length}
+              </p>
+              <p className={`text-xs mt-1 ${data.stuck_candidates.length ? 'text-red-500' : 'text-green-600'}`}>
+                Stuck {data.stuck_threshold_days}+ Days
+              </p>
+            </div>
+          </div>
+
+          {/* This week */}
+          <div>
+            <SectionHeading title="This week" subtitle="Activity in the last 7 days on this req" />
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="border border-surface-200 rounded-lg p-3 text-center">
+                <p className="text-lg font-semibold text-gray-900">{data.weekly_activity.new_applications}</p>
+                <p className="text-xs text-gray-500">New Applicants</p>
+              </div>
+              <div className="border border-surface-200 rounded-lg p-3 text-center">
+                <p className="text-lg font-semibold text-gray-900">{data.weekly_activity.stage_moves}</p>
+                <p className="text-xs text-gray-500">Stage Moves</p>
+              </div>
+              <div className="border border-surface-200 rounded-lg p-3 text-center">
+                <p className="text-lg font-semibold text-red-500">{data.weekly_activity.drops}</p>
+                <p className="text-xs text-gray-500">Drop-offs</p>
+              </div>
+              <div className="border border-surface-200 rounded-lg p-3 text-center">
+                <p className="text-lg font-semibold text-green-600">{data.weekly_activity.hires}</p>
+                <p className="text-xs text-gray-500">Hires</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Current pipeline */}
+          {stageTotal > 0 && (
+            <div>
+              <SectionHeading title="Where the pipeline sits right now" />
+              <div className="space-y-1.5">
+                {activeStages.map((s) => (
+                  <div key={s.stage} className="flex items-center gap-2 text-xs">
+                    <span className="w-28 shrink-0 text-gray-600 truncate">{s.stage_label}</span>
+                    <div className="flex-1 h-3 bg-surface-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full"
+                        style={{ width: `${(s.count / stageTotal) * 100}%`, background: stageBarColor(s.stage) }}
+                      />
+                    </div>
+                    <span className="w-6 text-right font-medium text-gray-700">{s.count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Stuck candidates — the actionable list */}
+          <div>
+            <SectionHeading
+              title="Stuck candidates"
+              subtitle={`No stage change for ${data.stuck_threshold_days}+ days — sorted worst first`}
+            />
+            {data.stuck_candidates.length === 0 ? (
+              <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 rounded-lg p-3">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                No one is stuck right now — every active candidate moved within the last {data.stuck_threshold_days} days.
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-lg border border-surface-100">
+                <table className="w-full text-sm min-w-[520px]">
+                  <thead>
+                    <tr className="border-b border-surface-200 bg-surface-50">
+                      <th className="text-left py-2 px-3 text-xs font-medium text-gray-500">Candidate</th>
+                      <th className="text-left py-2 px-3 text-xs font-medium text-gray-500">Stage</th>
+                      <th className="text-right py-2 px-3 text-xs font-medium text-gray-500">Days Stuck</th>
+                      <th className="text-left py-2 px-3 text-xs font-medium text-gray-500">Assigned To</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-surface-100">
+                    {data.stuck_candidates.map((c) => {
+                      const sev = stuckSeverity(c.days_stuck);
+                      return (
+                        <tr key={c.application_id} className={sev.bg}>
+                          <td className="py-2.5 px-3">
+                            <p className="font-medium text-gray-900">{c.applicant_name}</p>
+                            <p className="text-xs text-gray-400">{c.applicant_email}</p>
+                          </td>
+                          <td className="py-2.5 px-3 text-gray-600">{c.stage_label}</td>
+                          <td className={`py-2.5 px-3 text-right font-semibold ${sev.text}`}>
+                            <span className="inline-flex items-center gap-1">
+                              {sev.label === 'Critical' && <AlertTriangle className="w-3.5 h-3.5" />}
+                              {c.days_stuck}d
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-gray-600">{c.assigned_to_name || '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Historical bottleneck */}
+          {data.avg_time_in_stage.length > 0 && (
+            <div>
+              <SectionHeading
+                title="Where this role's bottleneck actually is"
+                subtitle="Average days spent in each stage before moving on, across every candidate this job has ever had"
+              />
+              <ResponsiveContainer width="100%" height={Math.max(140, data.avg_time_in_stage.length * 34)}>
+                <BarChart
+                  data={data.avg_time_in_stage}
+                  layout="vertical"
+                  margin={{ left: 8, right: 24 }}
+                >
+                  <CartesianGrid {...gridProps} horizontal={false} />
+                  <XAxis type="number" tick={tickProps} allowDecimals={false} unit="d" />
+                  <YAxis type="category" dataKey="stage_label" tick={tickProps} width={110} />
+                  <Tooltip
+                    contentStyle={tooltipStyle}
+                    formatter={(v, _n, p) => [`${v} days (n=${p.payload.sample_size})`, 'Avg time in stage']}
+                  />
+                  <Bar dataKey="avg_days" radius={[0, 4, 4, 0]}>
+                    {data.avg_time_in_stage.map((s) => (
+                      <Cell key={s.stage} fill={FUNNEL_STAGE_COLOR[s.stage] ?? '#6366f1'} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {/* Drop-off reasons */}
+          {data.drop_reasons.length > 0 && (
+            <div>
+              <SectionHeading
+                title="Why candidates are dropping off this role"
+                subtitle="Rejected, interview-drop and offer-drop applications, all time"
+              />
+              <div className="space-y-1.5">
+                {data.drop_reasons.map((d) => (
+                  <div key={d.category} className="flex items-center gap-2 text-xs">
+                    <span className="w-40 shrink-0 text-gray-600 truncate">{d.label}</span>
+                    <div className="flex-1 h-4 bg-surface-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-rose-400"
+                        style={{ width: `${(d.count / maxDropCount) * 100}%`, minWidth: d.count ? 6 : 0 }}
+                      />
+                    </div>
+                    <span className="w-6 text-right font-medium text-gray-700">{d.count}</span>
+                  </div>
+                ))}
+              </div>
+              {data.drop_reasons.some((d) => d.category === 'not_categorized') && (
+                <p className="text-xs text-gray-400 mt-2 flex items-center gap-1">
+                  <Sparkles className="w-3 h-3" />
+                  "Not categorized" are drop-offs recorded before reason tracking was added — no action needed on those.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </Modal>
   );
 }
 

@@ -42,6 +42,13 @@ TERMINAL_STAGES = {"rejected", "withdrawn", "interview_drop", "offer_drop", "hir
 # Stages that require a reason (category + optional free-text note) on transition.
 REASON_REQUIRED_STAGES = {"rejected", "interview_drop", "offer_drop"}
 
+# How long an application can sit in one non-terminal stage with no move
+# before the weekly job-bottleneck report (reports.py: job_bottleneck) flags it
+# as "stuck" and surfaces it for follow-up. One flat number rather than a
+# per-stage SLA — simplest thing that works; revisit if it proves too
+# noisy/lax for a particular stage.
+STUCK_THRESHOLD_DAYS = 5
+
 # HR can reassign a candidate's application to a different job req while it's
 # still this early — once real interview rounds have started, the interviews
 # already scheduled are tied to the original role, so a move stops being a
