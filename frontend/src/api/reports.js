@@ -7,6 +7,7 @@ export const reportsApi = {
   sourceFunnel: (params) => client.get('/reports/source-funnel', { params }),
   sourceAnalysis: (params) => client.get('/reports/source-analysis', { params }),
   jobPerformance: (params) => client.get('/reports/job-performance', { params }),
+  jobBottleneck: (jobId) => client.get(`/reports/job-bottleneck/${jobId}`),
   referralPerformance: (params) => client.get('/reports/referral-performance', { params }),
   timeToHire: (params) => client.get('/reports/time-to-hire', { params }),
   agencyPerformance: (params) => client.get('/reports/agency-performance', { params }),

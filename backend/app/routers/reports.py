@@ -8,13 +8,19 @@ from sqlalchemy import select, func, and_
 
 from app.database import get_db
 from app.dependencies import require_roles, Role
-from app.models.application import Application
+from app.models.application import Application, ApplicationStageHistory
 from app.models.job import Job, Department
 from app.models.referral import Referral
 from app.models.agency import Agency
+from app.models.user import User
+from app.constants.stages import STAGE_LABELS, TERMINAL_STAGES, DROP_REASON_CATEGORIES, STUCK_THRESHOLD_DAYS
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 _HR_ROLES = (Role.HR_MANAGER, Role.ADMIN, Role.SUPER_ADMIN)
+
+_ALL_STAGES = list(STAGE_LABELS.keys())
+_DROP_STAGES = ("rejected", "interview_drop", "offer_drop")
+_DROP_CATEGORY_LABELS = {c["value"]: c["label"] for c in DROP_REASON_CATEGORIES}
 
 FUNNEL_STAGES = [
     "applied", "screening", "assessment",
@@ -237,6 +243,162 @@ async def job_performance(
         })
     result.sort(key=lambda x: -x["total_applications"])
     return result
+
+
+@router.get("/job-bottleneck/{job_id}")
+async def job_bottleneck(
+    job_id: uuid.UUID,
+    _=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Deep per-job drill-down for the weekly review: who is currently stuck and
+    for how long, why candidates are actually dropping off this specific role,
+    which stage is the systemic historical bottleneck, and what moved this week.
+    Point-in-time (not `days`-scoped) — this is a live health check on one req,
+    not a period report."""
+    job = await db.get(Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    hiring_manager = await db.get(User, job.hiring_manager_id) if job.hiring_manager_id else None
+    week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+
+    # --- current snapshot ---
+    stage_rows = (await db.execute(
+        select(Application.stage, func.count())
+        .where(Application.job_id == job_id)
+        .group_by(Application.stage)
+    )).all()
+    stage_map = {stage: count for stage, count in stage_rows}
+    total = sum(stage_map.values())
+    terminal_count = sum(stage_map.get(s, 0) for s in TERMINAL_STAGES)
+
+    # --- stuck: sitting in a non-terminal stage past STUCK_THRESHOLD_DAYS with no move ---
+    days_stuck_expr = func.extract("epoch", func.now() - Application.stage_updated_at) / 86400.0
+    stuck_rows = (await db.execute(
+        select(
+            Application.id, Application.stage, Application.assigned_to,
+            User.full_name, User.email,
+            days_stuck_expr.label("days_stuck"),
+        )
+        .join(User, Application.applicant_id == User.id)
+        .where(
+            Application.job_id == job_id,
+            Application.stage.notin_(TERMINAL_STAGES),
+            days_stuck_expr >= STUCK_THRESHOLD_DAYS,
+        )
+        .order_by(days_stuck_expr.desc())
+    )).all()
+
+    assignee_ids = {r.assigned_to for r in stuck_rows if r.assigned_to}
+    assignee_names = {}
+    if assignee_ids:
+        assignee_rows = (await db.execute(select(User.id, User.full_name).where(User.id.in_(assignee_ids)))).all()
+        assignee_names = {uid: name for uid, name in assignee_rows}
+
+    stuck_candidates = [{
+        "application_id": str(r.id),
+        "applicant_name": r.full_name,
+        "applicant_email": r.email,
+        "stage": r.stage,
+        "stage_label": STAGE_LABELS.get(r.stage, r.stage),
+        "days_stuck": round(float(r.days_stuck), 1),
+        "assigned_to_name": assignee_names.get(r.assigned_to),
+    } for r in stuck_rows]
+
+    # --- historical avg time-in-stage, derived from real stage transitions only.
+    # A history row is a real move when to_stage isn't the "_note" pseudo-stage and
+    # differs from from_stage (both a plain note and a same-job "moved job" record
+    # set from_stage == to_stage and must not be counted as a transition).
+    history_rows = (await db.execute(
+        select(
+            ApplicationStageHistory.application_id, ApplicationStageHistory.to_stage,
+            ApplicationStageHistory.created_at, Application.applied_at,
+        )
+        .join(Application, ApplicationStageHistory.application_id == Application.id)
+        .where(
+            Application.job_id == job_id,
+            ApplicationStageHistory.to_stage != "_note",
+            ApplicationStageHistory.from_stage != ApplicationStageHistory.to_stage,
+        )
+        .order_by(ApplicationStageHistory.application_id, ApplicationStageHistory.created_at)
+    )).all()
+
+    stage_durations: dict[str, list[float]] = {}
+    prev_app_id = None
+    prev_time = prev_stage = None
+    for r in history_rows:
+        if r.application_id != prev_app_id:
+            prev_time, prev_stage = r.applied_at, "applied"
+        days = (r.created_at - prev_time).total_seconds() / 86400.0
+        stage_durations.setdefault(prev_stage, []).append(days)
+        prev_app_id, prev_time, prev_stage = r.application_id, r.created_at, r.to_stage
+
+    avg_time_in_stage = [
+        {
+            "stage": stage,
+            "stage_label": STAGE_LABELS.get(stage, stage),
+            "avg_days": round(sum(days_list) / len(days_list), 1),
+            "sample_size": len(days_list),
+        }
+        for stage, days_list in stage_durations.items() if stage not in TERMINAL_STAGES
+    ]
+    avg_time_in_stage.sort(key=lambda x: _ALL_STAGES.index(x["stage"]) if x["stage"] in _ALL_STAGES else 99)
+
+    # --- why candidates are actually dropping off THIS job (all-time — a 7-day
+    # slice would be too sparse on most reqs to mean anything) ---
+    drop_rows = (await db.execute(
+        select(Application.drop_category, func.count())
+        .where(Application.job_id == job_id, Application.stage.in_(_DROP_STAGES))
+        .group_by(Application.drop_category)
+    )).all()
+    drop_reasons = [{
+        "category": category or "not_categorized",
+        "label": _DROP_CATEGORY_LABELS.get(category, "Not categorized"),
+        "count": count,
+    } for category, count in drop_rows]
+    drop_reasons.sort(key=lambda x: -x["count"])
+
+    # --- this week's activity, so the report reads as "what changed" not just a snapshot ---
+    new_applications = (await db.execute(
+        select(func.count()).where(Application.job_id == job_id, Application.applied_at >= week_ago)
+    )).scalar() or 0
+    week_moves = [
+        r.to_stage for r in (await db.execute(
+            select(ApplicationStageHistory.to_stage)
+            .join(Application, ApplicationStageHistory.application_id == Application.id)
+            .where(
+                Application.job_id == job_id,
+                ApplicationStageHistory.created_at >= week_ago,
+                ApplicationStageHistory.to_stage != "_note",
+                ApplicationStageHistory.from_stage != ApplicationStageHistory.to_stage,
+            )
+        )).all()
+    ]
+
+    return {
+        "job_id": str(job.id),
+        "title": job.title,
+        "status": job.status,
+        "hiring_manager_name": hiring_manager.full_name if hiring_manager else None,
+        "stuck_threshold_days": STUCK_THRESHOLD_DAYS,
+        "total_applications": total,
+        "in_progress": total - terminal_count,
+        "hired": stage_map.get("hired", 0),
+        "by_stage": [
+            {"stage": s, "stage_label": STAGE_LABELS.get(s, s), "count": stage_map.get(s, 0)}
+            for s in _ALL_STAGES
+        ],
+        "stuck_candidates": stuck_candidates,
+        "avg_time_in_stage": avg_time_in_stage,
+        "drop_reasons": drop_reasons,
+        "weekly_activity": {
+            "new_applications": new_applications,
+            "stage_moves": len(week_moves),
+            "drops": sum(1 for s in week_moves if s in _DROP_STAGES),
+            "hires": sum(1 for s in week_moves if s == "hired"),
+        },
+    }
 
 
 @router.get("/referral-performance")
