@@ -33,6 +33,26 @@ PARSED_FIELDS = [
 ]
 
 
+# Icon-font families commonly used for header contact icons (LinkedIn/envelope/phone
+# glyphs) in LaTeX/Overleaf CV templates. pypdf has no concept of icon vs. body text —
+# when a template places an icon glyph with no space before the value it labels (e.g.
+# an envelope icon directly followed by the email), pypdf's default extraction fuses
+# the icon glyph's (often mis-mapped) characters straight onto the front of that value,
+# e.g. "email" becomes "envel⌢pesomeone@x.com". These glyphs carry no real content, so
+# dropping any text run drawn in one of these fonts (matched via visitor_text, see
+# below) removes the noise instead of letting it corrupt the adjacent real text.
+_ICON_FONT_MARKERS = (
+    "fontawesome", "font-awesome", "icomoon", "materialicons", "material-icons",
+    "academicons", "glyphicons", "elusiveicons", "ionicons", "simpleicons",
+)
+
+
+def _is_icon_font(base_font: Any) -> bool:
+    if not base_font:
+        return False
+    return any(marker in str(base_font).lower() for marker in _ICON_FONT_MARKERS)
+
+
 def extract_text(content: bytes, content_type: str, filename: str = "") -> str:
     """Best-effort plain-text extraction. Returns '' when the format is unsupported."""
     name = (filename or "").lower()
@@ -40,7 +60,20 @@ def extract_text(content: bytes, content_type: str, filename: str = "") -> str:
         if content_type == "application/pdf" or name.endswith(".pdf"):
             from pypdf import PdfReader
             reader = PdfReader(io.BytesIO(content))
-            return "\n".join((page.extract_text() or "") for page in reader.pages)
+            pages = []
+            for page in reader.pages:
+                icon_runs: list[str] = []
+
+                def _visitor(text, cm, tm, font_dict, font_size, _runs=icon_runs):
+                    if text and _is_icon_font((font_dict or {}).get("/BaseFont")):
+                        _runs.append(text)
+
+                page_text = page.extract_text(visitor_text=_visitor) or ""
+                for junk in icon_runs:
+                    if junk.strip():
+                        page_text = page_text.replace(junk, " ")
+                pages.append(page_text)
+            return "\n".join(pages)
 
         if (
             content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -112,14 +145,39 @@ def extract_hyperlinks(content: bytes, content_type: str, filename: str = "") ->
     return unique
 
 
+# Template boilerplate that candidates routinely leave un-replaced behind a contact
+# icon (e.g. several popular LaTeX/Overleaf CV templates default the header's mailto:/
+# tel: href to exactly these) — seen live on a real submitted resume where the *visible*
+# text next to the icon had the real email/phone but the href was still the template
+# default. Never trust these as a real value, even when nothing else is found.
+_PLACEHOLDER_EMAIL_DOMAINS = {"mysite.com", "example.com", "yourdomain.com", "domain.com", "site.com", "test.com"}
+_PLACEHOLDER_EMAIL_LOCALS = {"email", "yourname", "yourmail", "youremail", "name", "firstname.lastname"}
+
+
+def _is_placeholder_email(value: str) -> bool:
+    local, _, domain = value.lower().partition("@")
+    return domain in _PLACEHOLDER_EMAIL_DOMAINS or local in _PLACEHOLDER_EMAIL_LOCALS
+
+
+def _is_placeholder_phone(value: str) -> bool:
+    digits = re.sub(r"\D", "", value)
+    # A real phone number is never a single digit repeated (e.g. the "+000000000000"
+    # template default) and is always at least 7 digits long.
+    return len(digits) < 7 or len(set(digits)) == 1
+
+
 def _classify_links(links: list[str]) -> dict[str, str | None]:
     """Match extracted hyperlink targets to the email/phone/linkedin/github/portfolio slots.
 
     Resumes frequently put contact info behind icon-only mailto:/tel: links with no
     visible label at all (e.g. a header icon row) — extract_text() never sees an
     email address or phone number in that case, so these hrefs are the only source
-    of truth. Without this, tel: links used to fall through into the portfolio_url
-    catch-all instead of being dropped or matched to phone.
+    of truth. But unlike linkedin/github links (where the visible text is usually just
+    a label like "LinkedIn"), a mailto:/tel: href is often *stale template boilerplate*
+    that the candidate updated in the visible text but never in the underlying link —
+    see _is_placeholder_email/_is_placeholder_phone. So callers should treat the
+    email/phone this returns as a fallback for when text extraction found nothing,
+    not as automatically authoritative the way the URL fields are.
     """
     result: dict[str, str | None] = {
         "email": None, "phone": None,
@@ -129,10 +187,14 @@ def _classify_links(links: list[str]) -> dict[str, str | None]:
         low = link.lower()
         if low.startswith("mailto:"):
             if not result["email"]:
-                result["email"] = link.split(":", 1)[1].split("?", 1)[0].strip()
+                candidate = link.split(":", 1)[1].split("?", 1)[0].strip()
+                if candidate and not _is_placeholder_email(candidate):
+                    result["email"] = candidate
         elif low.startswith("tel:"):
             if not result["phone"]:
-                result["phone"] = link.split(":", 1)[1].strip()
+                candidate = link.split(":", 1)[1].strip()
+                if candidate and not _is_placeholder_phone(candidate):
+                    result["phone"] = candidate
         elif "linkedin.com" in low and not result["linkedin_url"]:
             result["linkedin_url"] = link
         elif "github.com" in low and not result["github_url"]:
@@ -161,13 +223,20 @@ def _regex_fallback(text: str, links: list[str] | None = None) -> dict[str, Any]
     if github:
         result["github_url"] = _with_scheme(github.group(0))
 
-    # Real hyperlink targets (if any were extracted) are authoritative over text
-    # regex matches — a resume can hyperlink a friendly label to the real URL,
-    # which the text regex above would never see correctly.
     if links:
-        for key, val in _classify_links(links).items():
-            if val:
-                result[key] = val
+        classified = _classify_links(links)
+        # Real hyperlink targets are authoritative over text regex matches for the
+        # URL fields — a resume can hyperlink a friendly label to the real URL,
+        # which the text regex above would never see correctly.
+        for key in URL_FIELDS:
+            if classified[key]:
+                result[key] = classified[key]
+        # For email/phone the direction is flipped: the visible text is usually the
+        # real value, while the mailto:/tel: href can be stale template boilerplate
+        # (see _classify_links) — only use the link when text extraction found nothing.
+        for key in ("email", "phone"):
+            if not result[key] and classified[key]:
+                result[key] = classified[key]
 
     result["is_ai_parsed"] = False
     return result
@@ -271,9 +340,16 @@ async def parse_resume(content: bytes, content_type: str, filename: str = "") ->
 
             # Override with the real hyperlink targets when we found any — more
             # reliable than anything the model read off of visible anchor text.
-            for key, val in _classify_links(links).items():
-                if val:
-                    result[key] = val
+            classified = _classify_links(links)
+            for key in URL_FIELDS:
+                if classified[key]:
+                    result[key] = classified[key]
+            # email/phone: only fill in from the link when the model found nothing —
+            # see _classify_links for why a mailto:/tel: href isn't trusted to override
+            # a real value already read from the visible text.
+            for key in ("email", "phone"):
+                if not result[key] and classified[key]:
+                    result[key] = classified[key]
 
             result["is_ai_parsed"] = True
             return result
