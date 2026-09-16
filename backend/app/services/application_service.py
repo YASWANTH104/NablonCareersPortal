@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +10,10 @@ from app.schemas.application import (
     ApplicationCreate, ApplicationResponse, ApplicationDetailResponse,
     ApplicantBrief, StageHistoryEntry,
 )
-from app.constants.stages import VALID_TRANSITIONS, STAGE_LABELS, REASON_REQUIRED_STAGES, MOVE_JOB_ALLOWED_STAGES
+from app.constants.stages import (
+    STAGE_LABELS, REASON_REQUIRED_STAGES, MOVE_JOB_ALLOWED_STAGES,
+    valid_transitions_for,
+)
 
 
 async def _seed_initial_resume_version(db: AsyncSession, application: Application, applicant_id: uuid.UUID) -> None:
@@ -926,7 +929,7 @@ async def move_stage(
     if app.on_hold:
         raise HTTPException(400, "Candidate is on hold — resume before changing stage.")
 
-    allowed = VALID_TRANSITIONS.get(app.stage, [])
+    allowed = valid_transitions_for(app.source).get(app.stage, [])
     if new_stage not in allowed:
         raise HTTPException(400, f"Cannot move from '{app.stage}' to '{new_stage}'")
 
@@ -1006,6 +1009,64 @@ async def move_stage(
             send_document_request_email_task.delay(str(application_id))
         except Exception:
             pass
+
+    return app
+
+
+async def mark_offer_accepted(
+    db: AsyncSession,
+    application_id: uuid.UUID,
+    moved_by: uuid.UUID,
+) -> Application:
+    """Temporary HR-only shortcut: the real offer flow (director approval,
+    candidate token-signature) isn't in active use yet, so move_stage's normal
+    "hired" guard (a signed OfferLetter) can never be satisfied through it.
+
+    This does NOT move the stage. It only marks the OfferLetter accepted +
+    signed by hand, satisfying that guard for real — which unlocks the
+    existing "Hired" option in the stage dropdown. HR still has to pick
+    "Hired" from there as a separate, deliberate action to actually move the
+    stage. The preboarding email fires right here, on this click, not on that
+    later move — matching the original ask (send it the moment HR marks the
+    offer accepted). Remove once offers are issued through the portal for
+    real."""
+    from app.models.offer import OfferLetter
+    from app.models.job import Job as JobModel
+    from sqlalchemy import select as _select
+
+    app = await db.get(Application, application_id)
+    if not app:
+        raise HTTPException(404, "Application not found")
+    if app.stage != "offer":
+        raise HTTPException(400, "Application must be at the Offer stage to mark offer accepted")
+
+    offer = (await db.execute(
+        _select(OfferLetter).where(OfferLetter.application_id == application_id)
+    )).scalar_one_or_none()
+
+    now = datetime.now(timezone.utc)
+    if not offer:
+        job = await db.get(JobModel, app.job_id)
+        offer = OfferLetter(
+            application_id=application_id,
+            designation=(job.title if job else "N/A"),
+        )
+        db.add(offer)
+
+    offer.status = "accepted"
+    offer.candidate_signature = "Marked accepted via HR portal (manual override — portal offer flow not in use)"
+    offer.signed_at = now
+    offer.accepted_at = now
+    offer.updated_at = now
+
+    await db.commit()
+    await db.refresh(app)
+
+    try:
+        from app.tasks.email_tasks import send_preboarding_email_task
+        send_preboarding_email_task.delay(str(application_id))
+    except Exception:
+        pass
 
     return app
 
