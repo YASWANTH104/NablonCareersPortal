@@ -9,6 +9,7 @@ falls back to regex-only extraction (email/phone/links) when AI is unavailable.
 import io
 import re
 import logging
+from datetime import date
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -112,15 +113,31 @@ def extract_hyperlinks(content: bytes, content_type: str, filename: str = "") ->
 
 
 def _classify_links(links: list[str]) -> dict[str, str | None]:
-    """Match extracted hyperlink targets to the linkedin/github/portfolio slots."""
-    result: dict[str, str | None] = {"linkedin_url": None, "github_url": None, "portfolio_url": None}
+    """Match extracted hyperlink targets to the email/phone/linkedin/github/portfolio slots.
+
+    Resumes frequently put contact info behind icon-only mailto:/tel: links with no
+    visible label at all (e.g. a header icon row) — extract_text() never sees an
+    email address or phone number in that case, so these hrefs are the only source
+    of truth. Without this, tel: links used to fall through into the portfolio_url
+    catch-all instead of being dropped or matched to phone.
+    """
+    result: dict[str, str | None] = {
+        "email": None, "phone": None,
+        "linkedin_url": None, "github_url": None, "portfolio_url": None,
+    }
     for link in links:
         low = link.lower()
-        if "linkedin.com" in low and not result["linkedin_url"]:
+        if low.startswith("mailto:"):
+            if not result["email"]:
+                result["email"] = link.split(":", 1)[1].split("?", 1)[0].strip()
+        elif low.startswith("tel:"):
+            if not result["phone"]:
+                result["phone"] = link.split(":", 1)[1].strip()
+        elif "linkedin.com" in low and not result["linkedin_url"]:
             result["linkedin_url"] = link
         elif "github.com" in low and not result["github_url"]:
             result["github_url"] = link
-        elif not any(d in low for d in ("mailto:", "linkedin.com", "github.com")) and not result["portfolio_url"]:
+        elif not result["portfolio_url"]:
             result["portfolio_url"] = link
     return result
 
@@ -156,15 +173,19 @@ def _regex_fallback(text: str, links: list[str] | None = None) -> dict[str, Any]
     return result
 
 
-def _build_prompt(text: str, links: list[str] | None = None) -> str:
+def _build_prompt(text: str, links: list[str] | None = None, today: str | None = None) -> str:
     links_block = ""
     if links:
         links_block = (
-            "\n\nHyperlinks found embedded in the document (these are the real URLs — "
-            "prefer these over anything that merely looks like a URL in the visible text):\n"
+            "\n\nHyperlinks found embedded in the document (these are the real URLs/contact "
+            "targets — prefer these over anything that merely looks right in the visible text; "
+            "a mailto: link is the email address, a tel: link is the phone number, even if no "
+            "matching text appears anywhere else in the resume):\n"
             + "\n".join(f"- {link}" for link in links)
         )
+    today = today or date.today().isoformat()
     return f"""You are a resume parser for a careers portal. Extract candidate details from the resume text below.
+Today's date is {today} — use it to resolve any "Present"/"Current" end date in the work history.
 
 Resume text:
 \"\"\"
@@ -190,6 +211,14 @@ Return a JSON object with exactly these keys (use null when the resume does not 
 Rules:
 - Every value must be a string or null. No nested objects or arrays.
 - Copy values from the resume; do not fabricate anything that is not present.
+- total_experience: if not explicitly stated as a single figure, calculate it yourself from
+  EVERY job listed in the work history — sum the duration of each entry (using {today} for any
+  "Present"/"Current" end date), not just the most recent or current role. Only skip a gap
+  between two jobs if the resume shows one; otherwise treat consecutive roles as continuous.
+  Round to the nearest year (e.g. "5 years"), and do not return the tenure of only one job when
+  the resume lists a longer combined history.
+- current_company/current_designation: use the entry with the most recent end date, i.e. the one
+  marked "Present"/"Current", not simply the first one listed.
 - Return only valid JSON, no markdown fences."""
 
 
