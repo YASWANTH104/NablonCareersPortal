@@ -18,6 +18,28 @@ VALID_TRANSITIONS = {
     "offer_drop":     [],
 }
 
+# Agency-sourced candidates are pre-screened by the agency itself before they
+# ever reach Nablon, so the assessment happens first and the HR screening call
+# comes after it — the reverse of the direct-applicant order above. Only
+# applied/screening/assessment swap places; tr1 onward is identical for every
+# source, so this is a targeted override, not a parallel pipeline.
+AGENCY_VALID_TRANSITIONS = {
+    **VALID_TRANSITIONS,
+    "applied":        ["assessment", "rejected"],
+    "assessment":     ["screening", "rejected", "interview_drop"],
+    "screening":      ["tr1", "rejected"],
+}
+
+
+def valid_transitions_for(source: str | None) -> dict:
+    """Which VALID_TRANSITIONS table governs an application's stage moves.
+
+    Keep this as the only place that branches on source == "agency" for stage
+    order — every caller (HR move_stage, any future stage-gating check) should
+    go through this rather than re-checking app.source itself."""
+    return AGENCY_VALID_TRANSITIONS if source == "agency" else VALID_TRANSITIONS
+
+
 STAGE_LABELS = {
     "applied": "Applied",
     "screening": "Screening",

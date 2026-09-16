@@ -301,6 +301,17 @@ async def move_stage(
     )
 
 
+@router.post("/{application_id}/mark-offer-accepted", response_model=ApplicationResponse)
+async def mark_offer_accepted(
+    application_id: uuid.UUID,
+    user=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Temporary stand-in for the real offer-acceptance flow — see
+    application_service.mark_offer_accepted."""
+    return await application_service.mark_offer_accepted(db, application_id, user.id)
+
+
 @router.patch("/{application_id}/move-job", response_model=ApplicationResponse)
 async def move_application_job(
     application_id: uuid.UUID,

@@ -36,6 +36,24 @@ export const VALID_TRANSITIONS = {
   offer_drop:      [],
 };
 
+// Agency-sourced candidates are pre-screened by the agency itself before they
+// reach Nablon, so assessment happens first and the HR screening call comes
+// after it — the reverse of the direct order above. Only applied/screening/
+// assessment swap; tr1 onward is identical for every source.
+export const AGENCY_VALID_TRANSITIONS = {
+  ...VALID_TRANSITIONS,
+  applied:    ['assessment', 'rejected'],
+  assessment: ['screening', 'rejected', 'interview_drop'],
+  screening:  ['tr1', 'rejected'],
+};
+
+// Which transition table governs a given application's stage moves — keep
+// this as the only place that branches on source === 'agency' for stage
+// order, mirroring backend/app/constants/stages.py's valid_transitions_for.
+export function getValidTransitions(application) {
+  return application?.source === 'agency' ? AGENCY_VALID_TRANSITIONS : VALID_TRANSITIONS;
+}
+
 export const REASON_REQUIRED_STAGES = new Set(['rejected', 'interview_drop', 'offer_drop']);
 
 export const MOVE_JOB_ALLOWED_STAGES = new Set(['applied', 'screening']);

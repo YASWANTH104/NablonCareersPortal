@@ -32,8 +32,9 @@ import ScheduleTimeGrid from '@/components/interviews/ScheduleTimeGrid';
 import { isWithinRescheduleGrace } from '@/components/interviews/calendarUtils';
 import StageReasonDialog from '@/components/shared/StageReasonDialog';
 import HoldReasonDialog from '@/components/shared/HoldReasonDialog';
+import ConfirmDialog from '@/components/shared/ConfirmDialog';
 import { useHoldToggle } from '@/hooks/useHoldToggle';
-import { PIPELINE_STAGES, STAGE_MAP, VALID_TRANSITIONS, REASON_REQUIRED_STAGES, MOVE_JOB_ALLOWED_STAGES } from '@/constants/pipelineStages';
+import { PIPELINE_STAGES, STAGE_MAP, getValidTransitions, REASON_REQUIRED_STAGES, MOVE_JOB_ALLOWED_STAGES } from '@/constants/pipelineStages';
 import { useAuthStore } from '@/store/authStore';
 import { HR_ROLES } from '@/utils/permissions';
 import {
@@ -1600,6 +1601,28 @@ export default function ApplicationDetailPage() {
     },
   });
 
+  const [confirmOfferAccept, setConfirmOfferAccept] = useState(false);
+
+  // Temporary stand-in while the portal's real offer flow (director approval,
+  // candidate signature) isn't in active use. This does NOT move the stage —
+  // it only marks the OfferLetter accepted+signed by hand, which unlocks the
+  // existing "Hired" option in the stage dropdown below (HR still has to pick
+  // Hired from there separately to actually move the stage) — and sends the
+  // preboarding email right away, on this click. Remove once offers go
+  // through the portal for real.
+  const offerAcceptMutation = useMutation({
+    mutationFn: () => applicationsApi.markOfferAccepted(id),
+    onSuccess: () => {
+      setConfirmOfferAccept(false);
+      queryClient.invalidateQueries({ queryKey: ['application-offer', id], exact: true });
+      toast.success('Offer marked accepted — preboarding email sent, "Hired" is now unlocked');
+    },
+    onError: (err) => {
+      setConfirmOfferAccept(false);
+      toast.error(err.response?.data?.detail ?? 'Failed to mark offer accepted');
+    },
+  });
+
   const starMutation = useMutation({
     mutationFn: () => applicationsApi.toggleStar(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['application-detail', id] }),
@@ -1735,7 +1758,7 @@ export default function ApplicationDetailPage() {
 
   const currentStage = STAGE_MAP[app.stage];
   const appSource = describeApplicationSource(app);
-  const validNext = VALID_TRANSITIONS[app.stage] ?? [];
+  const validNext = getValidTransitions(app)[app.stage] ?? [];
   // Latest-scheduled first — matches Notes/Timeline's recency-first ordering elsewhere on this page.
   const interviews = [...(interviewsData?.items ?? [])].sort(
     (a, b) => new Date(b.scheduled_at) - new Date(a.scheduled_at)
@@ -1917,6 +1940,21 @@ export default function ApplicationDetailPage() {
                 </>
               )}
             </div>
+            {canManage && app.stage === 'offer' && !app.on_hold && (
+              offerData?.status === 'accepted' && offerData?.candidate_signature ? (
+                <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold bg-green-50 text-green-700">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Offer accepted — Hired unlocked
+                </span>
+              ) : (
+                <button
+                  onClick={() => setConfirmOfferAccept(true)}
+                  title="Temporary: skips the signed-offer requirement while the portal offer flow isn't in use"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold bg-green-600 text-white hover:bg-green-700"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Offer Accepted
+                </button>
+              )
+            )}
             {canManage && (
               <button
                 onClick={() => toggleHold(app)}
@@ -3223,6 +3261,17 @@ export default function ApplicationDetailPage() {
           url={resolveFileUrl(previewAttachment.url)}
           name={previewAttachment.name}
           onClose={() => setPreviewAttachment(null)}
+        />
+      )}
+
+      {confirmOfferAccept && (
+        <ConfirmDialog
+          title="Mark offer accepted?"
+          message={`Sends the pre-onboarding email to ${app?.applicant?.full_name ?? 'this candidate'} now and unlocks "Hired" in their stage menu — you'll still need to move them to Hired separately from there. Skips the normal signed-offer requirement — use only while the portal offer flow isn't in use.`}
+          confirmLabel="Offer Accepted"
+          isPending={offerAcceptMutation.isPending}
+          onCancel={() => setConfirmOfferAccept(false)}
+          onConfirm={() => offerAcceptMutation.mutate()}
         />
       )}
     </div>

@@ -1294,3 +1294,49 @@ async def _send_availability_request_email_async(interviewer_id: str, requested_
         )
 
         logger.info(f"Availability request email sent: interviewer={interviewer_id}, to={interviewer.email}")
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def send_preboarding_email_task(self, application_id: str):
+    try:
+        asyncio.run(_send_preboarding_email_async(application_id))
+    except Exception as exc:
+        logger.error(f"Preboarding email failed: app={application_id}: {exc}")
+        raise self.retry(exc=exc)
+
+
+async def _send_preboarding_email_async(application_id: str):
+    """Fired by the temporary "mark offer accepted" HR action
+    (application_service.mark_offer_accepted_and_hire) — real offers aren't
+    being issued through the portal yet, so this is the only preboarding
+    trigger for now. Template is the design HR supplied as-is; only the
+    candidate's name and job title are substituted in."""
+    from app.models.application import Application
+    from app.models.user import User
+    from app.models.job import Job
+    from app.services.email_service import send_email
+    from sqlalchemy import select
+
+    async with _task_session() as db:
+        row = (await db.execute(
+            select(User.full_name, User.email, Job.title.label("job_title"))
+            .select_from(Application)
+            .join(User, User.id == Application.applicant_id)
+            .join(Job, Job.id == Application.job_id)
+            .where(Application.id == uuid.UUID(application_id))
+        )).first()
+
+        if not row:
+            logger.warning(f"Application {application_id} not found for preboarding email")
+            return
+
+        candidate_name, candidate_email, job_title = row
+
+        await send_email(
+            to_email=candidate_email,
+            subject=f"Welcome to Nablon AI, {candidate_name} — Pre-Onboarding",
+            template_name="preboarding_email",
+            context={"candidate_name": candidate_name, "job_title": job_title},
+        )
+
+        logger.info(f"Preboarding email sent: app={application_id}, to={candidate_email}")

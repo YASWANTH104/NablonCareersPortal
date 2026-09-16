@@ -605,22 +605,30 @@ async def submit_screening(db: AsyncSession, token: str, data) -> dict:
             # the score is still recorded either way, so this is non-fatal.
             logger.info(f"Auto-reject stage move skipped for application {application.id} (already moved on)")
     elif application.stage == "applied":
-        # Passed both hard gates — advance out of "applied" into "screening" so HR
-        # sees them (with a score attached) in the Screening column, same as if
-        # they'd clicked the move themselves. Only acts from "applied": if HR has
-        # already moved the candidate on by the time they submit, their manual
-        # action wins and this is a no-op (guarded, not forced).
+        # Passed both hard gates — advance out of "applied" into whichever stage
+        # comes next for this application's source, so HR sees them (with a
+        # score attached) in the right column, same as if they'd clicked the
+        # move themselves. Only acts from "applied": if HR has already moved the
+        # candidate on by the time they submit, their manual action wins and
+        # this is a no-op (guarded, not forced).
+        #
+        # Agency-sourced applications run assessment before the HR screening
+        # call (see AGENCY_VALID_TRANSITIONS) — "applied" -> "screening" isn't a
+        # valid move for them, so hardcoding "screening" here would 400 and get
+        # silently swallowed below, leaving a passed candidate stuck at
+        # "applied" forever.
+        next_stage = "assessment" if application.source == "agency" else "screening"
         try:
             from app.services import application_service
             await application_service.move_stage(
                 db,
                 application.id,
-                "screening",
+                next_stage,
                 moved_by=None,
-                notes="Automatically advanced to Screening after passing the AI screening gate.",
+                notes=f"Automatically advanced to {next_stage.title()} after passing the AI screening gate.",
             )
         except HTTPException:
-            logger.info(f"Auto-advance to screening skipped for application {application.id} (already moved on)")
+            logger.info(f"Auto-advance to {next_stage} skipped for application {application.id} (already moved on)")
 
     return _to_dict(req)
 
