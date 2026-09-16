@@ -195,11 +195,24 @@ class CandidateProfileBrief(BaseModel):
     education: Optional[str] = None
 
 
+class RelatedApplicationBrief(BaseModel):
+    id: uuid.UUID
+    job_id: uuid.UUID
+    job_title: str
+    stage: str
+    applied_at: datetime
+
+
 class ApplicationDetailResponse(ApplicationResponse):
     stage_history: list[StageHistoryEntry] = []
     interview_count: int = 0
     date_of_birth: Optional[date] = None
     candidate_profile: Optional[CandidateProfileBrief] = None
+    # Other applications by this same candidate account (same email — User.email
+    # is unique, so same email always means same applicant_id) that are still in
+    # a non-terminal stage. Lets HR see at a glance that a candidate is actively
+    # in the pipeline for more than one role. Empty unless there are any.
+    related_active_applications: list[RelatedApplicationBrief] = []
 
 
 class ApplicationListResponse(BaseModel):
