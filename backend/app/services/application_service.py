@@ -11,7 +11,7 @@ from app.schemas.application import (
     ApplicantBrief, StageHistoryEntry,
 )
 from app.constants.stages import (
-    STAGE_LABELS, REASON_REQUIRED_STAGES, MOVE_JOB_ALLOWED_STAGES,
+    STAGE_LABELS, REASON_REQUIRED_STAGES, MOVE_JOB_ALLOWED_STAGES, TERMINAL_STAGES,
     valid_transitions_for,
 )
 
@@ -909,6 +909,28 @@ async def get_application_by_id(
         "skills": profile.skills if profile else None,
         "education": profile.education if profile else None,
     }
+
+    # Same candidate (same account — User.email is unique, so "same email"
+    # always means "same applicant_id" already, no separate email lookup
+    # needed), other jobs, still in-flight. Terminal on either side (this
+    # application or the sibling) is deliberately not in scope here — only the
+    # sibling's own stage matters, so a candidate rejected/hired/withdrawn from
+    # THIS job still surfaces where else they're currently active.
+    from app.models.job import Job
+    siblings = (await db.execute(
+        select(Application.id, Application.job_id, Job.title, Application.stage, Application.applied_at)
+        .join(Job, Job.id == Application.job_id)
+        .where(
+            Application.applicant_id == app.applicant_id,
+            Application.id != application_id,
+            Application.stage.notin_(TERMINAL_STAGES),
+        )
+        .order_by(Application.applied_at.desc())
+    )).all()
+    d["related_active_applications"] = [
+        {"id": s.id, "job_id": s.job_id, "job_title": s.title, "stage": s.stage, "applied_at": s.applied_at}
+        for s in siblings
+    ]
 
     return ApplicationDetailResponse.model_validate(d)
 

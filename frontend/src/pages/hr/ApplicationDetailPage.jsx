@@ -11,7 +11,7 @@ import {
   Clock, User, Github, Linkedin, Globe, ChevronDown, Plus, Loader2,
   Video, Phone, MapPin, CheckCircle2, AlertCircle, Send, FolderOpen, Download, Eye, X,
   Pencil, Wallet, Briefcase, GraduationCap, AlertTriangle, Pause, PlayCircle, ArrowRightLeft,
-  Paperclip, XCircle, Trash2,
+  Paperclip, XCircle, Trash2, Layers,
 } from 'lucide-react';
 import { PendingAttachmentChip, NoteAttachmentGallery } from '@/components/shared/NoteAttachments';
 import FilePreviewModal from '@/components/shared/FilePreviewModal';
@@ -2038,6 +2038,33 @@ export default function ApplicationDetailPage() {
         <p className="text-xs text-gray-400 mb-6">
           Possible-duplicate flag reviewed {formatDistanceToNow(new Date(app.duplicate_reviewed_at), { addSuffix: true })}.
         </p>
+      )}
+
+      {/* Also active elsewhere — same candidate account, other jobs, still in-flight */}
+      {app.related_active_applications?.length > 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 mb-6 flex items-start gap-3">
+          <Layers className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-blue-800">
+              Also active on {app.related_active_applications.length === 1 ? 'another job' : `${app.related_active_applications.length} other jobs`}
+            </p>
+            <ul className="mt-1.5 space-y-1">
+              {app.related_active_applications.map((rel) => {
+                const relStage = STAGE_MAP[rel.stage];
+                return (
+                  <li key={rel.id} className="flex items-center gap-2 flex-wrap text-sm">
+                    <Link to={`/hr/applicants/${rel.id}`} className="text-blue-700 hover:underline font-medium">
+                      {rel.job_title}
+                    </Link>
+                    <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${relStage?.color ?? 'bg-gray-100 text-gray-700'}`}>
+                      {relStage?.label ?? rel.stage}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </div>
       )}
 
       {/* Tabs */}
