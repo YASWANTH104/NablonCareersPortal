@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Loader2, XCircle, UserMinus } from 'lucide-react';
 import { DROP_REASON_CATEGORIES, STAGE_MAP } from '@/constants/pipelineStages';
 import { interviewRoundLabel } from '@/constants/interviewRounds';
+import RichTextView from '@/components/shared/RichTextView';
 
 // Reusable reason-capture dialog for any transition into a "closed with a
 // reason" stage (rejected / interview_drop / offer_drop). For `rejected` it
@@ -73,19 +74,19 @@ export default function StageReasonDialog({
                           {fb.strengths && (
                             <div>
                               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Strengths</p>
-                              <p className="text-sm text-gray-700 leading-relaxed">{fb.strengths}</p>
+                              <RichTextView html={fb.strengths} className="text-sm text-gray-700 leading-relaxed" />
                             </div>
                           )}
                           {fb.weaknesses && (
                             <div>
                               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Areas for Growth</p>
-                              <p className="text-sm text-gray-700 leading-relaxed">{fb.weaknesses}</p>
+                              <RichTextView html={fb.weaknesses} className="text-sm text-gray-700 leading-relaxed" />
                             </div>
                           )}
                           {fb.notes && (
                             <div>
                               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Notes</p>
-                              <p className="text-sm text-gray-700 leading-relaxed">{fb.notes}</p>
+                              <RichTextView html={fb.notes} className="text-sm text-gray-700 leading-relaxed" />
                             </div>
                           )}
                         </div>

@@ -6,6 +6,7 @@ import { ClipboardCheck, Star, Loader2, CheckCircle, AlertTriangle, Paperclip, X
 import { format } from 'date-fns';
 import { interviewsApi } from '@/api/interviews';
 import { toIST } from '@/utils/formatters';
+import RichTextEditor from '@/components/shared/RichTextEditor';
 
 const RECOMMENDATIONS = [
   { value: 'strong_yes', label: 'Strong Yes', cls: 'bg-green-600 text-white border-green-600' },
@@ -254,32 +255,29 @@ export default function InterviewFeedbackPage() {
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Strengths</label>
-              <textarea
-                rows={3}
+              <RichTextEditor
                 value={form.strengths}
-                onChange={(e) => set('strengths')(e.target.value)}
+                onChange={set('strengths')}
                 placeholder="What did the candidate do well?"
-                className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent resize-none"
+                minHeight={90}
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Areas to improve</label>
-              <textarea
-                rows={3}
+              <RichTextEditor
                 value={form.weaknesses}
-                onChange={(e) => set('weaknesses')(e.target.value)}
+                onChange={set('weaknesses')}
                 placeholder="Where did the candidate struggle?"
-                className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent resize-none"
+                minHeight={90}
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Additional notes</label>
-              <textarea
-                rows={2}
+              <RichTextEditor
                 value={form.notes}
-                onChange={(e) => set('notes')(e.target.value)}
+                onChange={set('notes')}
                 placeholder="Anything else the hiring team should know"
-                className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent resize-none"
+                minHeight={70}
               />
             </div>
           </div>

@@ -126,7 +126,10 @@ export default function WeekCalendar({ weekStart, interviews, selectedInterviewI
             <div className="border-r border-surface-200" />
             {days.map((day) => {
               const today = isToday(day);
-              const count = (byDay.get(day.toDateString()) ?? []).length;
+              // Same "don't inflate the day count with cancelled interviews"
+              // rule as MonthCalendar — the blocks themselves still render below.
+              const count = (byDay.get(day.toDateString()) ?? [])
+                .filter((item) => item.event.status !== 'cancelled').length;
               return (
                 <div
                   key={day.toISOString()}

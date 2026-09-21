@@ -150,7 +150,7 @@ export default function InterviewCard({
       </div>
 
       {interview.notes && (
-        <p className="mx-4 mb-4 text-xs text-gray-500 bg-surface-50 rounded-lg p-2.5">
+        <p className="mx-4 mb-4 text-xs text-gray-500 bg-surface-50 rounded-lg p-2.5 whitespace-pre-wrap">
           {interview.notes}
         </p>
       )}

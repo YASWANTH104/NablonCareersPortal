@@ -26,6 +26,8 @@ import { screeningApi } from '@/api/screening';
 import { interviewSlotsApi } from '@/api/interviewSlots';
 import { ROUND_MAP, ROUND_ELIGIBLE_STAGE, interviewRoundLabel } from '@/constants/interviewRounds';
 import ResumeVersions, { resolveFileUrl } from '@/components/shared/ResumeVersions';
+import RichTextEditor from '@/components/shared/RichTextEditor';
+import RichTextView from '@/components/shared/RichTextView';
 import { InlineFeedbackForm, InterviewFeedbackCard } from '@/components/interviews/feedback';
 import { FREE_TEXT_MAX } from '@/constants/fieldLimits';
 import ScheduleTimeGrid from '@/components/interviews/ScheduleTimeGrid';
@@ -816,6 +818,7 @@ const ASSESSMENT_PRESETS = [
   { label: 'AI Engineer 2',   url: 'https://www.autoproctor.co/tests/Nj7fLKVvdf/instructions/' },
   { label: 'Computer Vision Architect',     url: 'https://www.autoproctor.co/tests/ZEkNoybx33/instructions/' },
   { label: 'Impact Architect',url: 'https://www.autoproctor.co/tests/OCZ3ibsBdf/instructions/' },
+  { label: 'Reinforcement Learning Scientist', url: 'https://www.autoproctor.co/tests/Cyypi1YXwr/instructions/'},
   { label: 'Custom link',     url: '__custom__' },
 ];
 
@@ -2340,7 +2343,7 @@ export default function ApplicationDetailPage() {
                   ) : null}
 
                   {interview.notes && (
-                    <p className="mx-5 mb-4 text-xs text-gray-600 bg-surface-50 border border-surface-100 rounded-lg p-3 leading-relaxed">
+                    <p className="mx-5 mb-4 text-xs text-gray-600 bg-surface-50 border border-surface-100 rounded-lg p-3 leading-relaxed whitespace-pre-wrap">
                       {interview.notes}
                     </p>
                   )}
@@ -2507,7 +2510,7 @@ export default function ApplicationDetailPage() {
                 </div>
 
                 {a.instructions && (
-                  <p className="mt-3 text-xs text-gray-500 bg-amber-50 rounded-lg p-3 border-l-2 border-amber-300">
+                  <p className="mt-3 text-xs text-gray-500 bg-amber-50 rounded-lg p-3 border-l-2 border-amber-300 whitespace-pre-wrap">
                     {a.instructions}
                   </p>
                 )}
@@ -2517,7 +2520,7 @@ export default function ApplicationDetailPage() {
                     {a.score != null && (
                       <p>Score: <span className="font-semibold text-gray-900">{a.score}{a.max_score ? ` / ${a.max_score}` : ''}</span></p>
                     )}
-                    {a.evaluator_notes && <p className="mt-1 text-gray-500">{a.evaluator_notes}</p>}
+                    {a.evaluator_notes && <p className="mt-1 text-gray-500 whitespace-pre-wrap">{a.evaluator_notes}</p>}
                   </div>
                 )}
               </div>
@@ -2589,7 +2592,7 @@ export default function ApplicationDetailPage() {
                         )}
                       </p>
                       {entry.notes && (
-                        <p className="text-xs text-gray-500 mt-1 bg-surface-50 rounded p-2">{entry.notes}</p>
+                        <RichTextView html={entry.notes} className="text-xs text-gray-500 mt-1 bg-surface-50 rounded p-2" />
                       )}
                       <p className="text-xs text-gray-400 mt-1">
                         {formatDistanceToNow(new Date(entry.created_at), { addSuffix: true })}
@@ -2631,12 +2634,11 @@ export default function ApplicationDetailPage() {
                 </div>
               )}
 
-              <textarea
+              <RichTextEditor
                 value={noteText}
-                onChange={(e) => setNoteText(e.target.value)}
+                onChange={setNoteText}
                 placeholder="Add a note about this candidate..."
-                rows={3}
-                className="w-full px-3 py-2.5 border border-surface-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+                minHeight={90}
               />
 
               {noteFiles.length > 0 && (
@@ -2704,12 +2706,10 @@ export default function ApplicationDetailPage() {
                   <div key={note.id} className="bg-white rounded-xl border border-surface-200 p-4">
                     {isEditing ? (
                       <div className="space-y-2">
-                        <textarea
+                        <RichTextEditor
                           value={editNoteText}
-                          onChange={(e) => setEditNoteText(e.target.value)}
-                          rows={3}
-                          autoFocus
-                          className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+                          onChange={setEditNoteText}
+                          minHeight={90}
                         />
                         <div className="flex items-center gap-2">
                           <button
@@ -2730,7 +2730,7 @@ export default function ApplicationDetailPage() {
                       </div>
                     ) : (
                       <>
-                        {note.notes && <p className="text-sm text-gray-700 whitespace-pre-wrap">{note.notes}</p>}
+                        <RichTextView html={note.notes} className="text-sm text-gray-700" />
                         <NoteAttachmentGallery attachments={note.attachments} onPreview={setPreviewAttachment} />
                       </>
                     )}

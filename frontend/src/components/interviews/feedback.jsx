@@ -1,11 +1,13 @@
 import { useRef, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, Controller } from 'react-hook-form';
 import { useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Star, CheckCircle2, AlertCircle, Loader2, Paperclip, Eye, X } from 'lucide-react';
 import { interviewsApi } from '@/api/interviews';
 import { resolveFileUrl } from '@/components/shared/ResumeVersions';
 import FilePreviewModal from '@/components/shared/FilePreviewModal';
+import RichTextEditor from '@/components/shared/RichTextEditor';
+import RichTextView from '@/components/shared/RichTextView';
 
 export const RECOMMENDATION_LABELS = {
   strong_yes: { label: 'Strong Yes', color: 'text-green-700 bg-green-50' },
@@ -91,7 +93,7 @@ export function InterviewFeedbackCard({ fb }) {
               <p className="font-semibold text-green-700 mb-1 flex items-center gap-1">
                 <CheckCircle2 className="w-3 h-3" /> Strengths
               </p>
-              <p className="text-gray-700">{fb.strengths}</p>
+              <RichTextView html={fb.strengths} className="text-gray-700" />
             </div>
           )}
           {fb.weaknesses && (
@@ -99,13 +101,13 @@ export function InterviewFeedbackCard({ fb }) {
               <p className="font-semibold text-orange-700 mb-1 flex items-center gap-1">
                 <AlertCircle className="w-3 h-3" /> Areas to improve
               </p>
-              <p className="text-gray-700">{fb.weaknesses}</p>
+              <RichTextView html={fb.weaknesses} className="text-gray-700" />
             </div>
           )}
         </div>
       )}
 
-      {fb.notes && <p className="text-xs text-gray-600 bg-white rounded-lg p-2.5 border border-surface-100">{fb.notes}</p>}
+      <RichTextView html={fb.notes} className="text-xs text-gray-600 bg-white rounded-lg p-2.5 border border-surface-100" />
 
       {fb.attachment_url && (
         <>
@@ -131,7 +133,7 @@ export function InterviewFeedbackCard({ fb }) {
 }
 
 export function InlineFeedbackForm({ interviewId, onSuccess, onCancel }) {
-  const { register, handleSubmit, formState: { isSubmitting } } = useForm();
+  const { control, handleSubmit, formState: { isSubmitting } } = useForm();
   const [overallRating,  setOverallRating]  = useState(null);
   const [recommendation, setRecommendation] = useState('');
   const [scores, setScores] = useState({
@@ -216,28 +218,37 @@ export function InlineFeedbackForm({ interviewId, onSuccess, onCancel }) {
       <div className="grid sm:grid-cols-2 gap-3">
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Strengths</label>
-          <textarea
-            {...register('strengths')}
-            rows={2}
-            className="w-full px-3 py-1.5 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+          <Controller
+            name="strengths"
+            control={control}
+            defaultValue=""
+            render={({ field }) => (
+              <RichTextEditor value={field.value} onChange={field.onChange} minHeight={70} />
+            )}
           />
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Areas to improve</label>
-          <textarea
-            {...register('weaknesses')}
-            rows={2}
-            className="w-full px-3 py-1.5 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+          <Controller
+            name="weaknesses"
+            control={control}
+            defaultValue=""
+            render={({ field }) => (
+              <RichTextEditor value={field.value} onChange={field.onChange} minHeight={70} />
+            )}
           />
         </div>
       </div>
 
       <div>
         <label className="block text-xs font-medium text-gray-600 mb-1">Additional notes</label>
-        <textarea
-          {...register('notes')}
-          rows={2}
-          className="w-full px-3 py-1.5 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+        <Controller
+          name="notes"
+          control={control}
+          defaultValue=""
+          render={({ field }) => (
+            <RichTextEditor value={field.value} onChange={field.onChange} minHeight={70} />
+          )}
         />
       </div>
 
