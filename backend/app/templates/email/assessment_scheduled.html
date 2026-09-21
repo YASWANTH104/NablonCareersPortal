@@ -3,46 +3,61 @@
 {% block title %}Assessment Assigned – Nablon AI Careers{% endblock %}
 
 {% block content %}
-<h2>Hi {{ full_name }}, you've been assigned an assessment.</h2>
-<p>Please complete the following assessment as part of your application for <strong>{{ job_title }}</strong>.</p>
+<p>Hi {{ full_name }},</p>
+
+<p>Thank you for showing interest in the opportunity.</p>
+<p>As a next step, we'd like you to complete a short online assessment for <strong>{{ job_title }}</strong>. This is designed to better understand your problem-solving approach, technical depth, and how you think about building real-world systems.</p>
 
 <table style="width:100%; border-collapse:collapse; margin: 24px 0; background:#f8f9fc; border-radius:8px; overflow:hidden;">
+  {% if platform_link %}
   <tr>
-    <td style="padding:12px 16px; font-weight:600; color:#6B7280; width:40%; border-bottom:1px solid #E5E7EB;">Assessment</td>
-    <td style="padding:12px 16px; border-bottom:1px solid #E5E7EB;">{{ assessment_title }}</td>
+    <td style="padding:12px 16px; font-weight:600; color:#6B7280; width:40%; border-bottom:1px solid #E5E7EB;">Assessment Link</td>
+    <td style="padding:12px 16px; border-bottom:1px solid #E5E7EB;"><a href="{{ platform_link }}" style="color:#0238DD;">{{ platform_link }}</a></td>
   </tr>
-  <tr>
-    <td style="padding:12px 16px; font-weight:600; color:#6B7280; border-bottom:1px solid #E5E7EB;">Type</td>
-    <td style="padding:12px 16px; border-bottom:1px solid #E5E7EB;">{{ assessment_type }}</td>
-  </tr>
-  <tr>
-    <td style="padding:12px 16px; font-weight:600; color:#F59E0B; border-bottom:1px solid #E5E7EB;">Deadline</td>
-    <td style="padding:12px 16px; border-bottom:1px solid #E5E7EB; font-weight:600; color:#F59E0B;">{{ deadline }}</td>
-  </tr>
+  {% endif %}
   {% if duration_mins %}
   <tr>
-    <td style="padding:12px 16px; font-weight:600; color:#6B7280; border-bottom:1px solid #E5E7EB;">Duration</td>
+    <td style="padding:12px 16px; font-weight:600; color:#6B7280; width:40%; border-bottom:1px solid #E5E7EB;">Time Duration</td>
     <td style="padding:12px 16px; border-bottom:1px solid #E5E7EB;">{{ duration_mins }} minutes</td>
   </tr>
   {% endif %}
-  {% if platform_link %}
   <tr>
-    <td style="padding:12px 16px; font-weight:600; color:#6B7280;">Assessment Link</td>
-    <td style="padding:12px 16px;"><a href="{{ platform_link }}" style="color:#0238DD;">{{ platform_link }}</a></td>
+    <td style="padding:12px 16px; font-weight:600; color:#F59E0B;">Deadline</td>
+    <td style="padding:12px 16px; font-weight:600; color:#F59E0B;">{{ deadline }}</td>
   </tr>
-  {% endif %}
 </table>
 
 {% if platform_link %}
 <a href="{{ platform_link }}" class="cta">Start Assessment</a>
 {% endif %}
 
+<p style="margin:24px 0 8px; font-weight:600; color:#374151;">Please ensure the following while attempting the test:</p>
+<ul style="margin:0 0 16px; padding-left:20px; color:#374151;">
+  <li>Attempt the assignment in one sitting</li>
+  <li>Carefully read all the instructions before starting</li>
+  <li>Ensure a stable internet connection and a distraction-free environment</li>
+</ul>
+
+<div style="margin-top:16px; padding:16px; background:#FEF2F2; border-left:4px solid #EF4444; border-radius:4px;">
+  <p style="font-weight:600; color:#991B1B; margin:0 0 8px;">Special Note</p>
+  <ul style="margin:0; padding-left:20px; color:#7F1D1D;">
+    <li>You will be shortlisted only if your Trust Score is above 90% and Technical Score is above 75%</li>
+    <li>Please log in using your laptop and use your phone as an auxiliary device</li>
+    <li>To improve your trust score, ensure the auxiliary camera clearly captures your face and both hands at all times</li>
+    <li>Avoid any external noise or disturbances during the assessment</li>
+  </ul>
+</div>
+
 {% if instructions %}
-<div style="margin-top:24px; padding:16px; background:#FFFBEB; border-left:4px solid #F59E0B; border-radius:4px;">
-  <p style="font-weight:600; color:#92400E; margin:0 0 8px;">Instructions</p>
+<div style="margin-top:16px; padding:16px; background:#FFFBEB; border-left:4px solid #F59E0B; border-radius:4px;">
+  <p style="font-weight:600; color:#92400E; margin:0 0 8px;">Additional instructions</p>
   <p style="color:#78350F; margin:0; white-space:pre-wrap;">{{ instructions }}</p>
 </div>
 {% endif %}
 
-<p style="margin-top:24px;">Please complete the assessment before the deadline. If you have questions, reach out to our HR team.</p>
+<p style="margin-top:24px;">Kindly complete the assignment within the given timeline. Once done, please inform us so we can proceed with the evaluation.</p>
+<p>If you face any issues while accessing the test, feel free to reach out.</p>
+<p>Looking forward to your submission.</p>
+
+<p style="margin-top:24px;">Best regards,<br>Nablon AI Team</p>
 {% endblock %}

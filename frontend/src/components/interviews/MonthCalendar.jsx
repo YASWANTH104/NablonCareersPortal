@@ -72,6 +72,10 @@ export default function MonthCalendar({
           const today = isToday(day);
           const selected = selectedDay && isSameDay(day, selectedDay);
           const overflow = dayInterviews.length - MAX_CHIPS;
+          // The day badge is a "how many interviews today" signal — a cancelled
+          // one shouldn't inflate it, even though it still renders (greyed out,
+          // line-through) among the chips/dots below.
+          const activeCount = dayInterviews.filter((iv) => iv.status !== 'cancelled').length;
 
           return (
             <div
@@ -94,9 +98,9 @@ export default function MonthCalendar({
                 >
                   {format(day, 'd')}
                 </span>
-                {dayInterviews.length > 0 && (
+                {activeCount > 0 && (
                   <span className="text-[10px] font-semibold text-gray-400 tabular-nums">
-                    {dayInterviews.length}
+                    {activeCount}
                   </span>
                 )}
               </div>
