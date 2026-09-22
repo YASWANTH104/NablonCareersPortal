@@ -636,6 +636,18 @@ async def create_interview(
         db.add(panelist)
         panelists.append(panelist)
 
+    # If any panelist has a published, still-open slot at this exact time,
+    # close it out — see claim_matching_open_slot's docstring. A no-op for
+    # interviews created FROM a slot (that row is already "booked" by then).
+    from app.services.interview_slot_service import claim_matching_open_slot
+    for p in panelists:
+        claimed_slot = await claim_matching_open_slot(
+            db, interviewer_id=p.user_id, start_time=data.scheduled_at,
+        )
+        if claimed_slot:
+            claimed_slot.interview_id = interview.id
+            claimed_slot.booked_by_user_id = created_by
+
     try:
         from app.models.notification import Notification
         from app.models.application import Application

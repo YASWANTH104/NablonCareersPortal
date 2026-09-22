@@ -1393,7 +1393,7 @@ function EditCandidateDetailsModal({ app, onClose, onSuccess }) {
   );
 }
 
-// ── Move to another job (HR — early stages only) ──────────────────────────────
+// ── Move to another job (HR — any pre-offer stage) ─────────────────────────────
 
 function MoveJobModal({ app, currentJobTitle, onClose, onSuccess }) {
   const [selectedJobId, setSelectedJobId] = useState('');
@@ -1425,6 +1425,12 @@ function MoveJobModal({ app, currentJobTitle, onClose, onSuccess }) {
             Currently applied for <strong>{currentJobTitle ?? 'this role'}</strong>. Their resume, notes and
             current stage carry over as-is to the job you pick below.
           </p>
+          {!['applied', 'screening'].includes(app.stage) && (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              Any interviews or assessments already scheduled stay on this application and move
+              with it — they aren't cancelled or re-labelled for the new job.
+            </p>
+          )}
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">Target job</label>
             <select

@@ -56,7 +56,9 @@ export function getValidTransitions(application) {
 
 export const REASON_REQUIRED_STAGES = new Set(['rejected', 'interview_drop', 'offer_drop']);
 
-export const MOVE_JOB_ALLOWED_STAGES = new Set(['applied', 'screening']);
+export const MOVE_JOB_ALLOWED_STAGES = new Set([
+  'applied', 'screening', 'assessment', 'tr1', 'tr2', 'final_tr', 'hr',
+]);
 
 export const DROP_REASON_CATEGORIES = [
   { value: 'got_another_offer', label: 'Got another offer' },
