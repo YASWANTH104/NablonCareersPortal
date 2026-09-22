@@ -1100,11 +1100,12 @@ async def move_application_job(
     moved_by: uuid.UUID,
 ) -> Application:
     """Reassign an application to a different job req — same application row,
-    same resume/history/stage, just pointed at the correct opening (e.g. HR
-    finds a screening candidate is a better fit for a sibling role). Kept to
-    early stages only: UniqueConstraint(job_id, applicant_id) means the
-    candidate can't already have a separate application for the target job,
-    and once real interviews are underway they're tied to the original role."""
+    same resume/history/stage/interviews/assessments, just pointed at the
+    correct opening (e.g. HR finds a TR1 candidate is a better fit for a
+    sibling role). Allowed through any pre-offer stage — see
+    MOVE_JOB_ALLOWED_STAGES for why offer+ is excluded. UniqueConstraint
+    (job_id, applicant_id) means the candidate can't already have a separate
+    application for the target job."""
     from app.models.job import Job as JobModel
 
     app = await db.get(Application, application_id)

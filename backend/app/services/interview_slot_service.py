@@ -670,6 +670,45 @@ async def book_slot(
     )
 
 
+async def claim_matching_open_slot(
+    db: AsyncSession, *, interviewer_id: uuid.UUID, start_time: datetime,
+) -> Optional[InterviewSlot]:
+    """Closes out a published slot that a just-created interview happens to
+    land on, when that interview was scheduled the regular manual way rather
+    than through the slot-booking flow (e.g. HR free-picks a time on
+    ApplicationDetailPage that coincides with one of this interviewer's
+    published slots). Without this, the slot stays "open" — still bookable by
+    an agency or another HR user — even though the interviewer is now
+    genuinely busy at that time, since nothing about a manual booking ever
+    touched the InterviewSlot table at all.
+
+    Matches on (interviewer_id, start_time) alone — that pair is exactly the
+    table's own UniqueConstraint, so at most one open row can ever match, and
+    it's the right key regardless of which job/round the slot was published
+    under: the slot represents this interviewer's calendar availability, and
+    a manual booking at that exact instant makes them unavailable no matter
+    which candidate it's for. Callers created FROM a slot (book_slot,
+    book_unassigned_slot) already flip this same row to "booked" before ever
+    calling create_interview(), so this is a no-op there — the status="open"
+    filter simply finds nothing left to claim.
+    """
+    claim_stmt = (
+        update(InterviewSlot)
+        .where(InterviewSlot.id.in_(
+            select(InterviewSlot.id)
+            .where(
+                InterviewSlot.interviewer_id == interviewer_id,
+                InterviewSlot.start_time == start_time,
+                InterviewSlot.status == "open",
+            )
+            .with_for_update(skip_locked=True).limit(1)
+        ))
+        .values(status="booked")
+        .returning(InterviewSlot)
+    )
+    return (await db.execute(claim_stmt)).scalar_one_or_none()
+
+
 async def book_unassigned_slot(
     db: AsyncSession,
     *,

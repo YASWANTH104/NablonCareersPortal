@@ -71,11 +71,14 @@ REASON_REQUIRED_STAGES = {"rejected", "interview_drop", "offer_drop"}
 # noisy/lax for a particular stage.
 STUCK_THRESHOLD_DAYS = 5
 
-# HR can reassign a candidate's application to a different job req while it's
-# still this early — once real interview rounds have started, the interviews
-# already scheduled are tied to the original role, so a move stops being a
-# clean "wrong req, same candidate" fix.
-MOVE_JOB_ALLOWED_STAGES = {"applied", "screening"}
+# HR can reassign a candidate's application to a different job req any time
+# before an offer is on the table. Interviews/assessments already scheduled
+# stay attached to the same application row (they key off application_id, not
+# job_id) — a move doesn't cancel or relabel them, it just carries them over
+# under the new job. Once an offer exists it's tied to specific compensation
+# for the original role, so a move stops being a clean "wrong req, same
+# candidate" fix past that point.
+MOVE_JOB_ALLOWED_STAGES = {"applied", "screening", "assessment", "tr1", "tr2", "final_tr", "hr"}
 
 DROP_REASON_CATEGORIES = [
     {"value": "got_another_offer", "label": "Got another offer"},
