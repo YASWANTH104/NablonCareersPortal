@@ -532,6 +532,37 @@ def _interview_to_response(
     return InterviewResponse.model_validate(d)
 
 
+async def _claim_open_slot_for_panelist(
+    db: AsyncSession, *, interviewer_id: uuid.UUID, start_time: datetime,
+    interview_id: uuid.UUID, job_id: Optional[uuid.UUID], round_type: Optional[str],
+    duration_mins: Optional[int] = None, booked_by: Optional[uuid.UUID] = None,
+) -> bool:
+    """Claims a published, still-open InterviewSlot for this interviewer at
+    this exact time (if one exists) and points it at `interview_id` —
+    re-attributed to the job/round actually being interviewed, not whatever
+    the slot happened to be published under. Also syncs duration_mins: the
+    match is on start_time alone (see claim_matching_open_slot's docstring),
+    so a published 30-min slot can be claimed by a 60-min interview, and the
+    slot should reflect how long the interviewer is actually busy, not
+    whatever length it happened to be published for. Shared by
+    create_interview (fresh manual booking) and update_interview (reschedule
+    landing on a published slot). Returns whether a slot was claimed.
+    """
+    from app.services.interview_slot_service import claim_matching_open_slot
+    slot = await claim_matching_open_slot(db, interviewer_id=interviewer_id, start_time=start_time)
+    if not slot:
+        return False
+    slot.interview_id = interview_id
+    slot.booked_by_user_id = booked_by
+    if job_id:
+        slot.job_id = job_id
+    if round_type:
+        slot.round_type = round_type
+    if duration_mins:
+        slot.duration_mins = duration_mins
+    return True
+
+
 async def create_interview(
     db: AsyncSession,
     data: InterviewCreate,
@@ -637,16 +668,16 @@ async def create_interview(
         panelists.append(panelist)
 
     # If any panelist has a published, still-open slot at this exact time,
-    # close it out — see claim_matching_open_slot's docstring. A no-op for
-    # interviews created FROM a slot (that row is already "booked" by then).
-    from app.services.interview_slot_service import claim_matching_open_slot
+    # close it out — see _claim_open_slot_for_panelist's docstring. A no-op
+    # for interviews created FROM a slot (that row is already "booked" by
+    # then, so claim_matching_open_slot's status="open" filter finds nothing).
     for p in panelists:
-        claimed_slot = await claim_matching_open_slot(
+        await _claim_open_slot_for_panelist(
             db, interviewer_id=p.user_id, start_time=data.scheduled_at,
+            interview_id=interview.id,
+            job_id=_app_for_lock.job_id if _app_for_lock else None,
+            round_type=round_type, duration_mins=data.duration_mins, booked_by=created_by,
         )
-        if claimed_slot:
-            claimed_slot.interview_id = interview.id
-            claimed_slot.booked_by_user_id = created_by
 
     try:
         from app.models.notification import Notification
@@ -1031,7 +1062,13 @@ async def update_interview(
     # Check panelist conflicts when time changes
     new_scheduled_at = update_data.get("scheduled_at", interview.scheduled_at)
     new_duration = update_data.get("duration_mins", interview.duration_mins)
-    if "scheduled_at" in update_data and update_data["scheduled_at"] != old_scheduled_at:
+    time_changed = "scheduled_at" in update_data and update_data["scheduled_at"] != old_scheduled_at
+    # Populated inside the block below when time_changed — hoisted out here so
+    # the slot-claiming logic further down (which needs both) can run after
+    # this block regardless, without re-querying.
+    panelist_ids: list[uuid.UUID] = []
+    _app_for_lock = None
+    if time_changed:
         panelist_rows = (await db.execute(
             select(InterviewPanelist).where(InterviewPanelist.interview_id == interview_id)
         )).scalars().all()
@@ -1086,9 +1123,48 @@ async def update_interview(
         slot = (await db.execute(
             select(InterviewSlot).where(InterviewSlot.interview_id == interview_id)
         )).scalar_one_or_none()
-        if slot:
-            slot.start_time = interview.scheduled_at
+
+        if slot and time_changed:
+            # Rescheduling this interview's OWN slot onto a time where a
+            # DIFFERENT open slot for the same interviewer already exists —
+            # just moving slot.start_time here would collide with that other
+            # row on the table's (interviewer_id, start_time) uniqueness (an
+            # unhandled 500) or, if it somehow succeeded, silently strand the
+            # other slot as an orphaned "open" duplicate. Release this slot
+            # back to open and claim the other one instead, same as a fresh
+            # manual booking landing on a published slot.
+            moved_onto_other = await _claim_open_slot_for_panelist(
+                db, interviewer_id=slot.interviewer_id, start_time=interview.scheduled_at,
+                interview_id=interview.id,
+                job_id=_app_for_lock.job_id if _app_for_lock else None,
+                round_type=interview.round_type, duration_mins=interview.duration_mins,
+            )
+            if moved_onto_other:
+                slot.status = "open"
+                slot.interview_id = None
+                slot.booked_by_agency_id = None
+                slot.booked_by_user_id = None
+            else:
+                slot.start_time = interview.scheduled_at
+                slot.duration_mins = interview.duration_mins
+        elif slot:
+            # Only duration_mins changed (start_time didn't move) — nothing to
+            # re-match, just keep the slot's own duration in step.
             slot.duration_mins = interview.duration_mins
+        elif time_changed:
+            # This interview never had a slot following it at all (e.g. it was
+            # manually created before its scheduled time matched any open
+            # slot). If the NEW time now lands on a published slot for one of
+            # its interviewers, close that out too — same gap this whole
+            # mechanism exists to prevent, just hit via reschedule instead of
+            # create.
+            for pid in panelist_ids:
+                await _claim_open_slot_for_panelist(
+                    db, interviewer_id=pid, start_time=interview.scheduled_at,
+                    interview_id=interview.id,
+                    job_id=_app_for_lock.job_id if _app_for_lock else None,
+                    round_type=interview.round_type, duration_mins=interview.duration_mins,
+                )
 
     await db.commit()
     await db.refresh(interview)

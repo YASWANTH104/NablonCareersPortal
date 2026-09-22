@@ -691,6 +691,11 @@ async def claim_matching_open_slot(
     book_unassigned_slot) already flip this same row to "booked" before ever
     calling create_interview(), so this is a no-op there — the status="open"
     filter simply finds nothing left to claim.
+
+    Only flips status here — the caller (interview_service.create_interview)
+    also overwrites job_id/round_type on the returned row to match what the
+    slot actually got used for, since a manual booking has no obligation to
+    land on the job/round the slot was originally published under.
     """
     claim_stmt = (
         update(InterviewSlot)
