@@ -160,6 +160,10 @@ class ApplicationResponse(BaseModel):
     stage: str
     rejection_reason: Optional[str] = None
     drop_category: Optional[str] = None
+    # Set only for a screening-flow auto-rejection whose candidate-facing
+    # email is being held — see application_service.move_stage(notify_delay=).
+    rejection_notify_at: Optional[datetime] = None
+    rejection_email_sent_at: Optional[datetime] = None
     source: str
     agency_id: Optional[uuid.UUID] = None
     agency_name: Optional[str] = None

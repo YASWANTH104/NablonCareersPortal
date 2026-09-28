@@ -47,3 +47,39 @@ jobs:
               --resource-group "${{ env.RG }}" \
               --image "${{ env.IMAGE }}:${{ github.sha }}"
           done
+
+      - name: Run database migrations
+        run: |
+          set -o pipefail
+          az extension add --name containerapp --upgrade --only-show-errors
+
+          echo "Waiting for a running careers-backend replica on the new revision..."
+          for i in $(seq 1 15); do
+            STATE=$(az containerapp replica list \
+              --name careers-backend \
+              --resource-group "${{ env.RG }}" \
+              --query "[0].properties.runningState" -o tsv 2>/dev/null || true)
+            if [ "$STATE" = "Running" ]; then
+              echo "Replica is running."
+              break
+            fi
+            echo "  replica state: ${STATE:-<none yet>} (attempt $i/15) — waiting 10s"
+            sleep 10
+          done
+
+          echo "Running alembic upgrade head on careers-backend..."
+          OUTPUT=$(timeout 180 az containerapp exec \
+            --name careers-backend \
+            --resource-group "${{ env.RG }}" \
+            --command "sh -c 'alembic upgrade head && echo MIGRATION_OK || echo MIGRATION_FAILED'" 2>&1) || true
+          echo "$OUTPUT"
+
+          if echo "$OUTPUT" | grep -q "MIGRATION_FAILED"; then
+            echo "::error::alembic upgrade head failed inside careers-backend — see output above"
+            exit 1
+          fi
+          if ! echo "$OUTPUT" | grep -q "MIGRATION_OK"; then
+            echo "::error::Could not confirm the migration completed (no MIGRATION_OK marker seen). az containerapp exec can be unreliable for scripted use — verify and, if needed, run it manually: az containerapp exec -n careers-backend -g ${{ env.RG }} --command \"alembic upgrade head\""
+            exit 1
+          fi
+          echo "Migrations applied successfully."

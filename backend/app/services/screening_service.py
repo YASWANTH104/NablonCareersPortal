@@ -1,25 +1,38 @@
-"""AI-assisted candidate screening: college tier, CGPA, skills and project
-scoring for the questionnaire sent when an application enters the `screening`
-stage on a job with `Job.screening_enabled = True`.
+"""AI-assisted candidate screening: college (NIRF ranking), CGPA, skills and
+project scoring for the questionnaire sent when an application enters the
+`screening` stage on a job with `Job.screening_enabled = True`.
 
-Three hard gates drive auto-rejection. The first two are deterministic and
-never depend on Azure OpenAI being configured, per the explicit scoring brief
-this module implements; the third runs only after both of those pass, using
-the composite score which is itself partly AI-assisted:
-  - College tier 4/5                          -> auto-reject
-  - CGPA below CGPA_HARD_MIN                  -> auto-reject
+Two hard gates drive auto-rejection, both deterministic and never dependent
+on Azure OpenAI being configured:
+  - CGPA below CGPA_HARD_MIN                     -> auto-reject
   - Composite score below OVERALL_SCORE_HARD_MIN -> auto-reject
+
+College is NOT a rejection gate (removed 2026-09-27, explicit instruction:
+"don't auto reject the candidates based on the college, just give score
+based on the NIRF ranking"). It only ever contributes its 30% weight to the
+composite score, via classify_college_nirf / app/constants/nirf_rankings.py
+(NIRF India Rankings 2025, Engineering category) — no college signal, however
+weak or unranked, can by itself reject a candidate.
 
 Applies uniformly regardless of source — referral-sourced applications are
 not exempt from the questionnaire (see create_and_queue_email).
 
-Everything else (college tier for names outside the static list, and the
-skills/project judgement) is AI-assisted where available and degrades to a
-deterministic heuristic otherwise — same fail-open convention as
+Everything else (college score for names outside the static NIRF list, and
+the skills/project judgement) is AI-assisted where available and degrades to
+a deterministic heuristic otherwise — same fail-open convention as
 ai_rejection_service.py / resume_parsing_service.py elsewhere in this app.
-Nothing here silently rejects a candidate *because* AI was unavailable: an
-unrecognised college defaults to the benefit of the doubt (tier 3) rather
-than tier 4/5 when there's no AI to actually judge it.
+Nothing here silently penalises a candidate *because* AI was unavailable: an
+unrecognised, NIRF-unranked college defaults to a neutral mid-range score
+rather than a low one when there's no AI to actually judge it.
+
+Auto-rejects from this module never email the candidate immediately — see
+REJECTION_EMAIL_DELAY and the notify_delay passed into move_stage below. The
+stage still moves to "rejected" right away (for pipeline bookkeeping/HR
+visibility); only the candidate-facing email is held, and
+screening_tasks.send_delayed_screening_rejection_emails (Celery beat) fires
+it once the delay has passed. This was an explicit instruction: sending an
+instant automated rejection the moment the questionnaire is scored/expires
+was "very brutal" — 2026-09-27.
 """
 import json
 import logging
@@ -34,6 +47,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.screening import ScreeningResponse
+from app.constants.nirf_rankings import RANK_BY_ALIAS, BAND_101_150_ALIASES, BAND_101_150, NIRF_SOURCE
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +59,12 @@ logger = logging.getLogger(__name__)
 REQUEST_EXPIRY_DAYS = 7
 REQUEST_EXPIRY_HOURS = REQUEST_EXPIRY_DAYS * 24
 CGPA_HARD_MIN = 7.5
+
+# How long a screening-flow auto-rejection holds its candidate-facing email
+# before screening_tasks.send_delayed_screening_rejection_emails actually
+# sends it — see the module docstring. The stage move to "rejected" itself
+# is NOT delayed, only the email.
+REJECTION_EMAIL_DELAY = timedelta(days=2)
 
 # Third hard gate, applied after the composite score is computed (college tier
 # and CGPA gates above run first and short-circuit before this is ever
@@ -62,46 +82,12 @@ WEIGHT_CGPA = 0.20
 WEIGHT_SKILLS = 0.25
 WEIGHT_PROJECTS = 0.25
 
-# ── College tier classification ──────────────────────────────────────────────
-# Static fast-path for the most commonly seen institutions in Indian tech
-# hiring, so the common case never depends on an AI round-trip. Anything not
-# listed here falls through to AI classification (see classify_college_tier).
-_TIER1_COLLEGES = {
-    "iit bombay", "iit delhi", "iit madras", "iit kanpur", "iit kharagpur",
-    "iit roorkee", "iit guwahati", "iit hyderabad", "iit indore", "iit bhu",
-    "iit bhubaneswar", "iit gandhinagar", "iit ropar", "iit patna", "iit mandi",
-    "iit jodhpur", "iit varanasi", "indian institute of technology",
-    "iisc bangalore", "indian institute of science",
-    "bits pilani", "birla institute of technology and science",
-    "iiit hyderabad", "international institute of information technology hyderabad",
-    "iiit bangalore", "iiit delhi", "iiit-b", "iiit-d",
-    "nit trichy", "nit tiruchirappalli", "nit warangal", "nit surathkal",
-    "nit karnataka", "dtu", "delhi technological university",
-}
-_TIER2_COLLEGES = {
-    "nit calicut", "nit rourkela", "nit durgapur", "nit allahabad", "mnnit",
-    "nit kurukshetra", "nit jaipur", "mnit jaipur", "nit patna", "nit raipur",
-    "nit silchar", "nit agartala", "nit hamirpur", "nit jalandhar", "nit srinagar",
-    "iiit allahabad", "iiit gwalior", "iiit jabalpur", "iiit kota", "iiit vadodara",
-    "vit vellore", "vellore institute of technology", "vit chennai",
-    "srm institute of science and technology", "srm university",
-    "manipal institute of technology", "manipal academy of higher education",
-    "thapar institute of engineering and technology", "thapar university",
-    "pes university", "pesu", "pes institute of technology",
-    "rv college of engineering", "rvce", "bms college of engineering", "bmsce",
-    "psg college of technology", "psg tech",
-    "coep pune", "college of engineering pune", "vjti mumbai",
-    "vjti", "veermata jijabai technological institute",
-    "anna university", "amrita vishwa vidyapeetham", "amrita university",
-    "kiit university", "kalinga institute of industrial technology",
-    "nsut", "netaji subhas university of technology", "nsit delhi",
-    "iit ism dhanbad", "indian school of mines",
-    "jadavpur university", "iiit lucknow", "iiit una", "iiit nagpur",
-    "iiit surat", "iiit sonepat", "iiit ranchi", "iiit trichy",
-    "chennai mathematical institute", "iisc", "iit dharwad", "iit bhilai",
-    "iit goa", "iit jammu", "iit palakkad", "iit tirupati",
-}
-
+# ── College scoring (NIRF ranking) ───────────────────────────────────────────
+# Static fast-path against the real, published NIRF India Rankings 2025
+# (Engineering) list — app/constants/nirf_rankings.py — so the common case
+# never depends on an AI round-trip. Anything not in that list falls through
+# to an AI-assisted plausibility score (see classify_college_nirf) and is
+# NEVER treated as tier 4/5-style "bad" — it's simply unranked.
 
 def _normalize_college(name: str) -> str:
     n = name.strip().lower()
@@ -110,24 +96,34 @@ def _normalize_college(name: str) -> str:
     return n
 
 
-def _static_tier_lookup(name: str) -> Optional[int]:
+def _static_nirf_lookup(name: str) -> Optional[tuple[str, "int | str"]]:
+    """Returns (kind, value): ("rank", 1-100) or ("band", "101-150"), or None
+    if the college isn't in the static NIRF list at all."""
     n = _normalize_college(name)
-    if any(key in n for key in _TIER1_COLLEGES):
-        return 1
-    if any(key in n for key in _TIER2_COLLEGES):
-        return 2
+    for alias, rank in RANK_BY_ALIAS.items():
+        if alias in n or n in alias:
+            return ("rank", rank)
+    for alias in BAND_101_150_ALIASES:
+        if alias in n or n in alias:
+            return ("band", BAND_101_150)
     return None
 
 
-async def classify_college_tier(college_name: str) -> tuple[int, str, Optional[str]]:
-    """Returns (tier 1-5, source, reasoning). source is 'static', 'ai', or
-    'default'. Tier 4/5 (auto-reject) is only ever assigned by the static list
-    (it has none) or by an actual AI judgement — never by a bare "we don't
-    recognise this name" default, so a missing Azure OpenAI config can never
-    itself cause a rejection."""
-    static_tier = _static_tier_lookup(college_name)
-    if static_tier is not None:
-        return static_tier, "static", None
+async def classify_college_nirf(college_name: str) -> dict:
+    """Returns {rank, band, ai_score, source, reasoning}. `source` is
+    'static', 'ai', or 'unranked'. Only ever informs the college SCORE
+    (see _college_score_from_nirf) — never a rejection signal on its own,
+    regardless of source, per the 2026-09-27 instruction."""
+    static = _static_nirf_lookup(college_name or "")
+    if static:
+        kind, value = static
+        return {
+            "rank": value if kind == "rank" else None,
+            "band": value if kind == "band" else None,
+            "ai_score": None,
+            "source": "static",
+            "reasoning": None,
+        }
 
     from app.config import settings
 
@@ -135,17 +131,18 @@ async def classify_college_tier(college_name: str) -> tuple[int, str, Optional[s
         try:
             import httpx
 
-            prompt = f"""You are helping an Indian tech recruiter classify a candidate's college into a
-hiring tier used broadly across Indian tech recruiting:
-- Tier 1: IITs, IISc, top IIITs (Hyderabad/Bangalore/Delhi), BITS Pilani, flagship NITs (Trichy/Warangal/Surathkal/Karnataka), DTU.
-- Tier 2: Other NITs/IIITs, well-regarded state/private engineering colleges with strong placement records (e.g. VIT, SRM, Manipal, Thapar, PES, RVCE, BMS, PSG Tech, COEP, VJTI, Anna University-affiliated top colleges, Amrita, KIIT, NSUT).
-- Tier 3: Reputable but average state/private engineering colleges — decent but unremarkable placement records.
-- Tier 4: Weak or largely unknown private engineering colleges with poor placement records.
-- Tier 5: Diploma-only / polytechnic / unaccredited institutions, or clearly not a real degree-granting engineering college.
+            prompt = f"""You are helping an Indian tech recruiter judge a candidate's college. It is NOT
+in India's official NIRF 2025 Engineering rankings (top 150) — {NIRF_SOURCE} — so score it on general
+reputation instead (teaching quality, research output, placement record, general standing), the same
+kind of judgement NIRF itself would weigh.
 
 College name given by the candidate: "{college_name}"
 
-Respond with JSON only: {{"tier": <1-5 integer>, "reasoning": "one sentence explaining the classification"}}"""
+Respond with JSON only: {{"score": <0-100 integer>, "reasoning": "one sentence explaining the score"}}
+
+Guidance: 0-100 is a REPUTATION score, not a pass/fail gate — this candidate cannot be rejected for
+their college, only scored, so judge fairly and avoid extreme low scores (below 20) unless the name
+given clearly isn't a real accredited engineering institution at all."""
 
             url = (
                 f"{settings.AZURE_OPENAI_ENDPOINT.rstrip('/')}/openai/deployments/"
@@ -163,13 +160,44 @@ Respond with JSON only: {{"tier": <1-5 integer>, "reasoning": "one sentence expl
                 resp.raise_for_status()
                 raw = resp.json()["choices"][0]["message"]["content"]
                 result = json.loads(raw)
-                tier = int(result.get("tier", 3))
-                tier = min(5, max(1, tier))
-                return tier, "ai", result.get("reasoning")
+                score = min(100.0, max(0.0, float(result.get("score", 50))))
+                return {
+                    "rank": None, "band": None, "ai_score": score,
+                    "source": "ai", "reasoning": result.get("reasoning"),
+                }
         except Exception as exc:
-            logger.warning(f"College tier AI classification failed, defaulting to tier 3: {exc}")
+            logger.warning(f"College NIRF AI scoring failed, defaulting to a neutral score: {exc}")
 
-    return 3, "default", "College not recognised and AI unavailable — defaulted to Tier 3 (benefit of the doubt); needs manual review."
+    return {
+        "rank": None, "band": None, "ai_score": None, "source": "unranked",
+        "reasoning": (
+            "College not in the NIRF 2025 Engineering top 150 and AI unavailable — scored at a "
+            "neutral default (never a rejection reason); recommend manual review of the institution."
+        ),
+    }
+
+
+def _college_score_from_nirf(nirf: dict) -> float:
+    if nirf["rank"] is not None:
+        # Rank 1 -> 100, rank 100 -> 55, linear. Never below 55 for a top-100
+        # published rank — the floor is deliberately well above the
+        # unranked/AI-default score so real ranking precision is rewarded.
+        return round(100.0 - (nirf["rank"] - 1) * (45.0 / 99.0), 2)
+    if nirf["band"] == BAND_101_150:
+        return 48.0
+    if nirf["ai_score"] is not None:
+        return nirf["ai_score"]
+    return 35.0  # unranked, AI unavailable — neutral, not punitive
+
+
+def _college_tier_from_nirf(nirf: dict) -> Optional[int]:
+    """Coarse 1-3 bucket kept only for the existing HR "Tier X" badge — no
+    gating meaning. None means unranked (badge hidden)."""
+    if nirf["rank"] is not None:
+        return 1 if nirf["rank"] <= 25 else 2
+    if nirf["band"] == BAND_101_150:
+        return 3
+    return None
 
 
 # ── Skills / project scoring ─────────────────────────────────────────────────
@@ -323,10 +351,6 @@ def _cgpa_score(cgpa: float) -> float:
     return round(min(100.0, 50 + ((cgpa - CGPA_HARD_MIN) / (10.0 - CGPA_HARD_MIN)) * 50), 2)
 
 
-def _college_score(tier: int) -> float:
-    return {1: 100.0, 2: 80.0, 3: 50.0}.get(tier, 0.0)
-
-
 def _recommendation(score: float) -> str:
     if score >= 75:
         return "strong_fit"
@@ -343,31 +367,30 @@ async def score_screening_response(
 ) -> None:
     """Mutates resp in place with every scoring field. Does not commit —
     caller is responsible for the transaction."""
-    tier, tier_source, tier_reasoning = await classify_college_tier(resp.college_name or "")
+    nirf = await classify_college_nirf(resp.college_name or "")
+    college_score = _college_score_from_nirf(nirf)
     cgpa = float(resp.cgpa) if resp.cgpa is not None else 0.0
 
-    resp.college_tier = tier
-    reasons = []
+    resp.college_tier = _college_tier_from_nirf(nirf)
+    resp.college_nirf_rank = nirf["rank"]
+    resp.college_nirf_band = nirf["band"]
+    resp.college_score = college_score
 
-    if tier >= 4:
-        reasons.append(
-            f"College '{resp.college_name}' classified as Tier {tier} ({tier_source} "
-            f"classification) — below the Tier 1-3 bar for this role."
-        )
+    # College is scoring-only — see the module docstring. Only CGPA gates here.
+    reasons = []
     if cgpa < CGPA_HARD_MIN:
         reasons.append(f"CGPA {cgpa:.2f} is below the required minimum of {CGPA_HARD_MIN:.1f}.")
 
     if reasons:
         resp.auto_reject = True
         resp.auto_reject_reason = " ".join(reasons)
-        resp.college_score = _college_score(tier) if tier <= 3 else 0.0
         resp.cgpa_score = _cgpa_score(cgpa) if cgpa >= CGPA_HARD_MIN else 0.0
         resp.skills_score = None
         resp.project_score = None
         resp.overall_score = None
         resp.recommendation = None
-        resp.ai_reasoning = {"college": tier_reasoning} if tier_reasoning else None
-        resp.is_ai_scored = tier_source == "ai"
+        resp.ai_reasoning = {"college": nirf["reasoning"]} if nirf["reasoning"] else None
+        resp.is_ai_scored = nirf["source"] == "ai"
         resp.scored_at = datetime.now(timezone.utc)
         return
 
@@ -393,9 +416,8 @@ async def score_screening_response(
     else:
         skills_score, skills_reasoning = _fallback_skills_score(skills)
         project_score, project_reasoning = _fallback_project_score(projects)
-        is_ai_scored = tier_source == "ai"  # still AI-scored overall if only the tier call succeeded
+        is_ai_scored = nirf["source"] == "ai"  # still AI-scored overall if only the college call succeeded
 
-    college_score = _college_score(tier)
     cgpa_score = _cgpa_score(cgpa)
     overall = (
         college_score * WEIGHT_COLLEGE
@@ -404,7 +426,6 @@ async def score_screening_response(
         + project_score * WEIGHT_PROJECTS
     )
 
-    resp.college_score = college_score
     resp.cgpa_score = cgpa_score
     resp.skills_score = skills_score
     resp.project_score = project_score
@@ -420,7 +441,7 @@ async def score_screening_response(
         resp.auto_reject = False
         resp.auto_reject_reason = None
     resp.ai_reasoning = {
-        "college": tier_reasoning,
+        "college": nirf["reasoning"],
         "skills": skills_reasoning,
         "projects": project_reasoning,
     }
@@ -443,6 +464,8 @@ def _to_dict(resp: ScreeningResponse) -> dict:
         "achievements": resp.achievements,
         "github_profile_url": resp.github_profile_url,
         "college_tier": resp.college_tier,
+        "college_nirf_rank": resp.college_nirf_rank,
+        "college_nirf_band": resp.college_nirf_band,
         "college_score": float(resp.college_score) if resp.college_score is not None else None,
         "cgpa_score": float(resp.cgpa_score) if resp.cgpa_score is not None else None,
         "skills_score": float(resp.skills_score) if resp.skills_score is not None else None,
@@ -591,7 +614,7 @@ async def submit_screening(db: AsyncSession, token: str, data) -> dict:
                 application.id,
                 "rejected",
                 moved_by=None,
-                notes="Automatically rejected by the screening questionnaire (college tier / CGPA gate).",
+                notes="Automatically rejected by the screening questionnaire (CGPA / overall score gate).",
                 rejection_reason=(
                     "Thank you for completing our screening questionnaire. After reviewing your "
                     "responses against the requirements for this role, we won't be moving forward "
@@ -599,6 +622,7 @@ async def submit_screening(db: AsyncSession, token: str, data) -> dict:
                     "profile and to apply again in the future."
                 ),
                 drop_category="profile_mismatch",
+                notify_delay=REJECTION_EMAIL_DELAY,
             )
         except HTTPException:
             # Stage may have already moved on (e.g. HR acted manually first) —
@@ -689,6 +713,7 @@ async def auto_reject_expired(db: AsyncSession) -> int:
                     "application at this time."
                 ),
                 drop_category="other",
+                notify_delay=REJECTION_EMAIL_DELAY,
             )
             rejected += 1
         except HTTPException:

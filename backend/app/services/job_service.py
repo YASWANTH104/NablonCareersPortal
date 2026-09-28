@@ -15,8 +15,10 @@ JOB_STATUS_TRANSITIONS = {
     "draft": ["published"],
     "published": ["paused", "closed"],
     "paused": ["published", "closed"],
-    "closed": ["archived"],
-    "archived": [],
+    # "published" here is reactivation — closed/archived reqs get reopened for
+    # the same role later (added 2026-09-27; previously both were dead ends).
+    "closed": ["archived", "published"],
+    "archived": ["published"],
 }
 
 
@@ -188,6 +190,69 @@ async def update_job(db: AsyncSession, job_id: uuid.UUID, data: JobUpdate) -> Jo
     return job
 
 
+async def duplicate_job(db: AsyncSession, job_id: uuid.UUID, posted_by: uuid.UUID) -> Job:
+    """Clones a job posting as a new draft — for reposting the same role in a
+    different location (and/or later) without retyping the JD (added
+    2026-09-27: "we might need same folks in different location at different
+    time"). Location is intentionally cleared, since that's the whole reason
+    to duplicate rather than just reactivate the original; everything else
+    about the role (JD, requirements, skills, screening config, questions)
+    carries over, and HR reviews/edits the new draft before publishing it,
+    same as any other draft."""
+    source = await db.get(Job, job_id)
+    if not source:
+        raise HTTPException(404, "Job not found")
+
+    clone = Job(
+        title=source.title,
+        slug=generate_slug(source.title),
+        department_id=source.department_id,
+        location=None,
+        location_type=source.location_type,
+        employment_type=source.employment_type,
+        experience_min=source.experience_min,
+        experience_max=source.experience_max,
+        salary_min=source.salary_min,
+        salary_max=source.salary_max,
+        salary_currency=source.salary_currency,
+        show_salary=source.show_salary,
+        description=source.description,
+        requirements=source.requirements,
+        benefits=source.benefits,
+        skills_required=list(source.skills_required) if source.skills_required else None,
+        jd_pdf_url=source.jd_pdf_url,
+        jd_pdf_name=source.jd_pdf_name,
+        openings=source.openings,
+        status="draft",
+        is_internal=source.is_internal,
+        allow_referrals=source.allow_referrals,
+        allow_outsiders=source.allow_outsiders,
+        criticality=source.criticality,
+        screening_enabled=source.screening_enabled,
+        posted_by=posted_by,
+        hiring_manager_id=source.hiring_manager_id,
+    )
+    db.add(clone)
+    await db.flush()
+
+    questions = (await db.execute(
+        select(JobQuestion).where(JobQuestion.job_id == job_id).order_by(JobQuestion.order_index)
+    )).scalars().all()
+    for q in questions:
+        db.add(JobQuestion(
+            job_id=clone.id,
+            question=q.question,
+            type=q.type,
+            options=q.options,
+            is_required=q.is_required,
+            order_index=q.order_index,
+        ))
+
+    await db.commit()
+    await db.refresh(clone)
+    return clone
+
+
 async def update_job_status(db: AsyncSession, job_id: uuid.UUID, new_status: str) -> Job:
     job = await db.get(Job, job_id)
     if not job:
@@ -197,17 +262,23 @@ async def update_job_status(db: AsyncSession, job_id: uuid.UUID, new_status: str
     if new_status not in allowed:
         raise HTTPException(400, f"Cannot transition from '{job.status}' to '{new_status}'")
 
+    was_closed_or_archived = job.status in ("closed", "archived")
     job.status = new_status
     job.updated_at = datetime.utcnow()
-    is_first_publish = new_status == "published" and not job.published_at
+    # Treated as a fresh opening, not a resume from pause: reactivating a
+    # closed/archived req refreshes "posted X ago" and re-announces it, the
+    # same as a true first publish — colleagues who saw it close shouldn't
+    # have to notice it reopened on their own.
+    is_first_publish = new_status == "published" and (not job.published_at or was_closed_or_archived)
     if is_first_publish:
         job.published_at = datetime.utcnow()
 
     await db.commit()
 
-    # Announce to the internal team once, on the job's first-ever publish —
-    # not on every pause/resume — and only when it's actually open to referrals
-    # (an internal-only or referrals-off job has nothing for them to act on).
+    # Announce to the internal team on first-ever publish and on reactivation
+    # from closed/archived — not on every plain pause/resume — and only when
+    # it's actually open to referrals (an internal-only or referrals-off job
+    # has nothing for them to act on).
     if is_first_publish and not job.is_internal and job.allow_referrals:
         from app.tasks.email_tasks import send_new_job_posted_email
         send_new_job_posted_email.delay(str(job.id))

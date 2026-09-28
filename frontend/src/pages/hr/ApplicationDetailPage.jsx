@@ -2896,6 +2896,17 @@ export default function ApplicationDetailPage() {
                   <div>
                     <p className="text-sm font-semibold text-red-800">Automatically rejected by the screening gate</p>
                     <p className="text-xs text-red-600 mt-1">{screeningData.auto_reject_reason}</p>
+                    {app.rejection_email_sent_at ? (
+                      <p className="text-xs text-gray-500 mt-2">
+                        Rejection email sent to the candidate on {new Date(app.rejection_email_sent_at).toLocaleString()}.
+                      </p>
+                    ) : app.rejection_notify_at ? (
+                      <p className="text-xs text-gray-500 mt-2">
+                        Not sent yet — the candidate's rejection email is scheduled for{' '}
+                        {new Date(app.rejection_notify_at).toLocaleString()} (held briefly rather than
+                        sent instantly).
+                      </p>
+                    ) : null}
                   </div>
                 </div>
               ) : (
@@ -2918,7 +2929,14 @@ export default function ApplicationDetailPage() {
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {[
-                  { label: 'College', score: screeningData.college_score, extra: screeningData.college_tier ? `Tier ${screeningData.college_tier}` : null },
+                  {
+                    label: 'College', score: screeningData.college_score,
+                    extra: screeningData.college_nirf_rank
+                      ? `NIRF #${screeningData.college_nirf_rank}`
+                      : screeningData.college_nirf_band
+                        ? `NIRF ${screeningData.college_nirf_band}`
+                        : 'Unranked',
+                  },
                   { label: 'CGPA', score: screeningData.cgpa_score, extra: screeningData.cgpa != null ? screeningData.cgpa.toFixed(2) : null },
                   { label: 'Skills', score: screeningData.skills_score },
                   { label: 'Projects', score: screeningData.project_score },

@@ -39,6 +39,16 @@ class Application(Base):
     # rejection_reason above is reused as the free-text note across all three.
     drop_category: Mapped[str | None] = mapped_column(String(50))
 
+    # Decoupled rejection notification (added 2026-09-27, screening flow only).
+    # move_stage(..., notify_delay=...) sets these instead of emailing the
+    # candidate immediately — a Celery beat sweep
+    # (screening_tasks.send_delayed_screening_rejection_emails) sends the
+    # actual email once rejection_notify_at has passed. NULL for every other
+    # rejection path, which still emails immediately as before.
+    rejection_notify_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rejection_notify_from_stage: Mapped[str | None] = mapped_column(String(50))
+    rejection_email_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     source: Mapped[str] = mapped_column(String(50), default="direct")
     agency_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("agencies.id"))
     # The internal user who uploaded this candidate (HR/TA single upload, bulk
