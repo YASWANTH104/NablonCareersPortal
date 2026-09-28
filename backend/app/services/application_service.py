@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -84,6 +84,8 @@ def _app_to_dict(app: Application) -> dict:
         "stage": app.stage,
         "rejection_reason": app.rejection_reason,
         "drop_category": app.drop_category,
+        "rejection_notify_at": app.rejection_notify_at,
+        "rejection_email_sent_at": app.rejection_email_sent_at,
         "source": app.source,
         "agency_id": app.agency_id,
         "rating": app.rating,
@@ -943,7 +945,14 @@ async def move_stage(
     notes: Optional[str] = None,
     rejection_reason: Optional[str] = None,
     drop_category: Optional[str] = None,
+    notify_delay: Optional[timedelta] = None,
 ) -> Application:
+    """notify_delay: when moving to "rejected", hold the candidate-facing
+    email for this long instead of sending it immediately — the stage move
+    itself is never delayed. Used only by the screening auto-reject flow
+    (see screening_service.REJECTION_EMAIL_DELAY); every other caller leaves
+    this None and keeps the original immediate-send behavior. Actual delayed
+    send is a Celery beat sweep, screening_tasks.send_delayed_screening_rejection_emails."""
     app = await db.get(Application, application_id)
     if not app:
         raise HTTPException(404, "Application not found")
@@ -986,6 +995,10 @@ async def move_stage(
         if drop_category:
             app.drop_category = drop_category
 
+    if new_stage == "rejected" and notify_delay:
+        app.rejection_notify_at = datetime.utcnow() + notify_delay
+        app.rejection_notify_from_stage = from_stage
+
     try:
         from app.models.notification import Notification
         label = STAGE_LABELS.get(new_stage, new_stage.replace("_", " ").title())
@@ -1010,11 +1023,14 @@ async def move_stage(
         except Exception:
             pass
 
-    try:
-        from app.tasks.email_tasks import send_stage_update_email
-        send_stage_update_email.delay(str(application_id), new_stage, from_stage)
-    except Exception:
-        pass
+    if new_stage == "rejected" and notify_delay:
+        pass  # held — screening_tasks.send_delayed_screening_rejection_emails sends it later
+    else:
+        try:
+            from app.tasks.email_tasks import send_stage_update_email
+            send_stage_update_email.delay(str(application_id), new_stage, from_stage)
+        except Exception:
+            pass
 
     if app.agency_id:
         try:

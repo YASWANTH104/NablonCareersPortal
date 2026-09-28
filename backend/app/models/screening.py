@@ -35,7 +35,14 @@ class ScreeningResponse(Base):
     github_profile_url: Mapped[str | None] = mapped_column(Text)
 
     # ── Scoring output (see screening_service.SCORE_WEIGHTS) ─────────────────
-    college_tier: Mapped[int | None] = mapped_column(Integer)  # 1 (best) .. 5 (worst)
+    # College is scored against NIRF India Rankings 2025 (Engineering) — see
+    # app/constants/nirf_rankings.py. college_tier is now a coarse derived
+    # bucket kept only for the existing HR badge (1 = NIRF top 25, 2 = NIRF
+    # top 100, 3 = NIRF 101-150 band, None = unranked) — it has no gating
+    # meaning; college_nirf_rank/band carry the real published figure.
+    college_tier: Mapped[int | None] = mapped_column(Integer)
+    college_nirf_rank: Mapped[int | None] = mapped_column(Integer)  # exact rank 1-100, if published
+    college_nirf_band: Mapped[str | None] = mapped_column(String(20))  # e.g. "101-150", if only banded
     college_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
     cgpa_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
     skills_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
@@ -44,8 +51,11 @@ class ScreeningResponse(Base):
     recommendation: Mapped[str | None] = mapped_column(String(30))
     # strong_fit | moderate_fit | weak_fit — unset when auto_reject is True
 
-    # Hard-gate rejection (college tier 4/5, or CGPA < 8) — deterministic, not
-    # AI-judged, so it behaves identically whether or not Azure OpenAI is configured.
+    # Hard-gate rejection (CGPA below the floor, or overall composite score
+    # below the floor) — deterministic, not AI-judged, so it behaves
+    # identically whether or not Azure OpenAI is configured. College is
+    # scoring-only (NIRF-based) and never gates rejection on its own — see
+    # screening_service.score_screening_response.
     auto_reject: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     auto_reject_reason: Mapped[str | None] = mapped_column(Text)  # internal/HR-facing detail
 

@@ -11,6 +11,7 @@ import { usersApi } from '@/api/users';
 import RichTextEditor from '@/components/shared/RichTextEditor';
 import DraftWithAiModal from '@/components/shared/DraftWithAiModal';
 import ImportJdPdfModal from '@/components/shared/ImportJdPdfModal';
+import LocationCombobox from '@/components/shared/LocationCombobox';
 import { LOCATION_TYPES, EMPLOYMENT_TYPES } from '@/constants/jobOptions';
 
 const toOptionalInt = (v) => (v === '' || v === null || v === undefined ? undefined : parseInt(v, 10));
@@ -250,6 +251,14 @@ export default function JobEditPage() {
     }
   };
 
+  // Saves whatever was edited on a closed/archived job, then republishes it
+  // in one action — see the JOB_STATUS_TRANSITIONS "closed"/"archived" ->
+  // "published" paths added on the backend for this.
+  const onReactivate = async (values) => {
+    await updateMutation.mutateAsync(buildPayload(values));
+    await statusMutation.mutateAsync('published');
+  };
+
   if (isEdit && loadingJob) {
     return (
       <div className="max-w-3xl animate-pulse">
@@ -316,9 +325,27 @@ export default function JobEditPage() {
                 Resume
               </button>
             )}
+            {['closed', 'archived'].includes(existing.status) && (
+              <button
+                onClick={handleSubmit(onReactivate)}
+                disabled={isSubmitting || statusMutation.isPending}
+                className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-60 transition-colors"
+              >
+                Reactivate &amp; publish
+              </button>
+            )}
           </div>
         )}
       </div>
+
+      {isEdit && existing && ['closed', 'archived'].includes(existing.status) && (
+        <div className="mb-6 -mt-3 p-3 rounded-xl border border-amber-200 bg-amber-50 text-xs text-amber-800">
+          This position is {existing.status}. Review and update the details below (location, dates,
+          openings, etc.) for the reopened round, then <strong>Reactivate &amp; publish</strong> —
+          or use <strong>Duplicate</strong> from the jobs list instead if you need this role open in a
+          different location at the same time as the existing one.
+        </div>
+      )}
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
         {/* Basic info */}
@@ -360,7 +387,17 @@ export default function JobEditPage() {
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
               <FieldLabel>Location</FieldLabel>
-              <Input {...register('location')} placeholder="e.g. Bangalore, India" />
+              <Controller
+                name="location"
+                control={control}
+                render={({ field }) => (
+                  <LocationCombobox
+                    value={field.value}
+                    onChange={field.onChange}
+                    placeholder="e.g. Bangalore, Karnataka, India"
+                  />
+                )}
+              />
             </div>
             <div>
               <FieldLabel>Work mode</FieldLabel>

@@ -247,6 +247,16 @@ async def update_job_status(
     return await job_service.get_job_with_names(db, job)
 
 
+@router.post("/{job_id}/duplicate", response_model=JobResponse, status_code=201)
+async def duplicate_job(
+    job_id: uuid.UUID,
+    user=Depends(require_roles(Role.HR_MANAGER, Role.ADMIN, Role.SUPER_ADMIN)),
+    db: AsyncSession = Depends(get_db),
+):
+    job = await job_service.duplicate_job(db, job_id, posted_by=user.id)
+    return await job_service.get_job_with_names(db, job)
+
+
 @router.delete("/{job_id}", status_code=204)
 async def delete_job(
     job_id: uuid.UUID,

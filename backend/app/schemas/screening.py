@@ -61,6 +61,8 @@ class ScreeningResponseOut(BaseModel):
     achievements: Optional[str] = None
     github_profile_url: Optional[str] = None
     college_tier: Optional[int] = None
+    college_nirf_rank: Optional[int] = None
+    college_nirf_band: Optional[str] = None
     college_score: Optional[float] = None
     cgpa_score: Optional[float] = None
     skills_score: Optional[float] = None

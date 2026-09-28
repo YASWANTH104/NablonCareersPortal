@@ -34,6 +34,10 @@ conf = dict(
             "task": "auto_reject_expired_screening_requests",
             "schedule": 1800,  # every 30 minutes
         },
+        "send-delayed-screening-rejection-emails": {
+            "task": "send_delayed_screening_rejection_emails",
+            "schedule": 1800,  # every 30 minutes
+        },
     },
 )
 

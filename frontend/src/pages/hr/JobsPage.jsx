@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { Plus, Search, MoreHorizontal, Pencil, Pause, Play, XCircle, Archive, Eye, X } from 'lucide-react';
+import { Plus, Search, MoreHorizontal, Pencil, Pause, Play, XCircle, Archive, Eye, X, Copy, RotateCcw } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
 import { jobsApi } from '@/api/jobs';
@@ -34,7 +34,7 @@ function formatEmploymentType(val) {
   return val?.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) ?? '—';
 }
 
-function JobRowMenu({ job, onStatusChange }) {
+function JobRowMenu({ job, onStatusChange, onDuplicate }) {
   const [open, setOpen] = useState(false);
   const [menuPos, setMenuPos] = useState({ top: 0, right: 0 });
   const btnRef = useRef(null);
@@ -89,6 +89,20 @@ function JobRowMenu({ job, onStatusChange }) {
                 <Eye className="w-4 h-4 text-gray-400" /> View public
               </a>
             )}
+            <button
+              onClick={() => { setOpen(false); onDuplicate(job.id); }}
+              className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"
+            >
+              <Copy className="w-4 h-4 text-gray-400" /> Duplicate for new location
+            </button>
+            {['closed', 'archived'].includes(job.status) && (
+              <button
+                onClick={() => { setOpen(false); navigate(`/hr/jobs/${job.id}/edit`); }}
+                className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"
+              >
+                <RotateCcw className="w-4 h-4 text-gray-400" /> Reactivate
+              </button>
+            )}
             {actions.map(({ label, icon: Icon, status }) => (
               <button
                 key={status}
@@ -128,6 +142,16 @@ export default function HRJobsPage() {
       toast.success('Job status updated');
     },
     onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to update status'),
+  });
+
+  const duplicateMutation = useMutation({
+    mutationFn: (id) => jobsApi.duplicate(id),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['hr-jobs'] });
+      toast.success('Duplicated as a new draft — set the location and review before publishing');
+      navigate(`/hr/jobs/${res.data.id}/edit`);
+    },
+    onError: (err) => toast.error(err.response?.data?.detail ?? 'Failed to duplicate job'),
   });
 
   const handleTabChange = (val) => {
@@ -257,6 +281,7 @@ export default function HRJobsPage() {
                     <JobRowMenu
                       job={job}
                       onStatusChange={(id, status) => statusMutation.mutate({ id, status })}
+                      onDuplicate={(id) => duplicateMutation.mutate(id)}
                     />
                   </td>
                 </tr>

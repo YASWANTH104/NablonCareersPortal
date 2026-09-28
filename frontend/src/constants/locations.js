@@ -1,0 +1,62 @@
+// Curated India + US location list for the job posting "Location" field —
+// a typeahead suggestion source, not an enforced enum. HR can still type any
+// free-text location; this just makes the common cases fast to pick (added
+// 2026-09-27 — "Dropdown for all locations in India/US, filter as you type").
+export const INDIA_LOCATIONS = [
+  'Bangalore, Karnataka, India',
+  'Hyderabad, Telangana, India',
+  'Chennai, Tamil Nadu, India',
+  'Pune, Maharashtra, India',
+  'Mumbai, Maharashtra, India',
+  'Delhi, India',
+  'Gurugram, Haryana, India',
+  'Noida, Uttar Pradesh, India',
+  'Kolkata, West Bengal, India',
+  'Ahmedabad, Gujarat, India',
+  'Coimbatore, Tamil Nadu, India',
+  'Kochi, Kerala, India',
+  'Thiruvananthapuram, Kerala, India',
+  'Indore, Madhya Pradesh, India',
+  'Jaipur, Rajasthan, India',
+  'Chandigarh, India',
+  'Nagpur, Maharashtra, India',
+  'Bhubaneswar, Odisha, India',
+  'Mysuru, Karnataka, India',
+  'Visakhapatnam, Andhra Pradesh, India',
+  'Vadodara, Gujarat, India',
+  'Nashik, Maharashtra, India',
+  'Mangaluru, Karnataka, India',
+  'Lucknow, Uttar Pradesh, India',
+  'Bhopal, Madhya Pradesh, India',
+  'Surat, Gujarat, India',
+];
+
+export const US_LOCATIONS = [
+  'San Francisco, CA, USA',
+  'San Jose, CA, USA',
+  'Mountain View, CA, USA',
+  'Palo Alto, CA, USA',
+  'Los Angeles, CA, USA',
+  'San Diego, CA, USA',
+  'Seattle, WA, USA',
+  'New York, NY, USA',
+  'Austin, TX, USA',
+  'Dallas, TX, USA',
+  'Houston, TX, USA',
+  'Boston, MA, USA',
+  'Chicago, IL, USA',
+  'Denver, CO, USA',
+  'Atlanta, GA, USA',
+  'Washington, DC, USA',
+  'Raleigh, NC, USA',
+  'Charlotte, NC, USA',
+  'Portland, OR, USA',
+  'Miami, FL, USA',
+  'Phoenix, AZ, USA',
+  'Minneapolis, MN, USA',
+  'Philadelphia, PA, USA',
+  'Salt Lake City, UT, USA',
+  'Jersey City, NJ, USA',
+];
+
+export const ALL_LOCATIONS = [...INDIA_LOCATIONS, ...US_LOCATIONS];
