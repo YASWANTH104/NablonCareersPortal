@@ -77,12 +77,12 @@ jobs:
           OUTPUT=$(timeout 180 script -qec "sh $GITHUB_WORKSPACE/.github/scripts/run_migration.sh" /dev/null 2>&1) || true
           echo "$OUTPUT"
 
-          if echo "$OUTPUT" | grep -q "MIGRATION_FAILED"; then
-            echo "::error::alembic upgrade head failed inside careers-backend — see output above"
-            exit 1
-          fi
+          # backend/scripts/ci_migrate.sh runs with `set -e` and only ever
+          # prints MIGRATION_OK as its last line, and only if `alembic
+          # upgrade head` itself exited 0 — so its absence means the upgrade
+          # failed (or the exec session itself never got that far).
           if ! echo "$OUTPUT" | grep -q "MIGRATION_OK"; then
-            echo "::error::Could not confirm the migration completed (no MIGRATION_OK marker seen). Verify and, if needed, run it manually: az containerapp exec -n careers-backend -g $RG --command \"alembic upgrade head\""
+            echo "::error::Could not confirm the migration completed (no MIGRATION_OK marker seen) — see output above. Verify and, if needed, run it manually: az containerapp exec -n careers-backend -g $RG --command \"sh /app/scripts/ci_migrate.sh\""
             exit 1
           fi
           echo "Migrations applied successfully."
