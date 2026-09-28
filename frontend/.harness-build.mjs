@@ -27,6 +27,7 @@ const mockClientPlugin = {
   },
 };
 
+
 await esbuild.build({
   entryPoints: ['.harness-entry.jsx'],
   bundle: true,
