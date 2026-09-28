@@ -67,11 +67,14 @@ jobs:
             sleep 10
           done
 
-          echo "Running alembic upgrade head on careers-backend..."
-          OUTPUT=$(timeout 180 az containerapp exec \
-            --name careers-backend \
-            --resource-group "${{ env.RG }}" \
-            --command "sh -c 'alembic upgrade head && echo MIGRATION_OK || echo MIGRATION_FAILED'" 2>&1) || true
+          # az containerapp exec always tries to put the local terminal into
+          # raw mode (Python's tty.setcbreak on stdin), which hard-crashes
+          # with "Inappropriate ioctl for device" when there's no real TTY —
+          # which a GitHub Actions runner never has. `script` allocates a
+          # pseudo-terminal for the child process so that call succeeds.
+          # (See .github/scripts/run_migration.sh for the actual command.)
+          echo "Running alembic upgrade head on careers-backend (via a fake tty)..."
+          OUTPUT=$(timeout 180 script -qec "sh $GITHUB_WORKSPACE/.github/scripts/run_migration.sh" /dev/null 2>&1) || true
           echo "$OUTPUT"
 
           if echo "$OUTPUT" | grep -q "MIGRATION_FAILED"; then
@@ -79,7 +82,7 @@ jobs:
             exit 1
           fi
           if ! echo "$OUTPUT" | grep -q "MIGRATION_OK"; then
-            echo "::error::Could not confirm the migration completed (no MIGRATION_OK marker seen). az containerapp exec can be unreliable for scripted use — verify and, if needed, run it manually: az containerapp exec -n careers-backend -g ${{ env.RG }} --command \"alembic upgrade head\""
+            echo "::error::Could not confirm the migration completed (no MIGRATION_OK marker seen). Verify and, if needed, run it manually: az containerapp exec -n careers-backend -g $RG --command \"alembic upgrade head\""
             exit 1
           fi
           echo "Migrations applied successfully."
