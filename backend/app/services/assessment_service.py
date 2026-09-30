@@ -5,7 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.models.assessment import Assessment
-from app.schemas.assessment import AssessmentCreate, AssessmentUpdate, AssessmentResponse
+from app.schemas.assessment import AssessmentCreate, AssessmentUpdate, AssessmentResponse, AssessmentBulkCreate
+
+MAX_BULK_ASSESSMENTS = 200
 
 
 async def create_assessment(
@@ -51,6 +53,61 @@ async def create_assessment(
         pass
 
     return assessment
+
+
+async def bulk_create_assessments(
+    db: AsyncSession,
+    data: AssessmentBulkCreate,
+    created_by: uuid.UUID,
+    *,
+    allowed_application_ids: Optional[set[uuid.UUID]] = None,
+) -> list[dict]:
+    """Schedule the same assessment for every application in data.application_ids.
+
+    Each row goes through create_assessment() independently — same isolate-
+    per-row-failure shape as application_service.bulk_submit_from_excel — so
+    one already-assessed or unknown application_id doesn't block the rest of
+    a placement drive's batch. create_assessment already queues the
+    candidate's own email via Celery (send_assessment_scheduled_email), so a
+    batch of N application_ids here IS the bulk-email action; nothing extra
+    to dispatch.
+
+    `allowed_application_ids`, when given, restricts the batch to a caller-
+    verified set (e.g. only candidates belonging to one campus's job
+    assignment) — a public portal token must never be able to schedule an
+    assessment for an application_id outside what it was handed.
+    """
+    if not data.application_ids:
+        return []
+    if len(data.application_ids) > MAX_BULK_ASSESSMENTS:
+        raise HTTPException(400, f"Please schedule at most {MAX_BULK_ASSESSMENTS} assessments at a time.")
+
+    from app.models.application import Application
+
+    per_application = data.model_dump(exclude={"application_ids"})
+    results: list[dict] = []
+
+    for application_id in data.application_ids:
+        if allowed_application_ids is not None and application_id not in allowed_application_ids:
+            results.append({"application_id": application_id, "status": "error", "error": "Not part of this assignment."})
+            continue
+        try:
+            app = await db.get(Application, application_id)
+            if not app:
+                results.append({"application_id": application_id, "status": "error", "error": "Application not found."})
+                continue
+            assessment = await create_assessment(
+                db, AssessmentCreate(application_id=application_id, **per_application), created_by,
+            )
+            results.append({"application_id": application_id, "status": "success", "assessment_id": assessment.id})
+        except HTTPException as exc:
+            await db.rollback()
+            results.append({"application_id": application_id, "status": "error", "error": str(exc.detail)})
+        except Exception:
+            await db.rollback()
+            results.append({"application_id": application_id, "status": "error", "error": "Unexpected error scheduling this assessment."})
+
+    return results
 
 
 async def list_assessments(

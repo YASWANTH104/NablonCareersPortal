@@ -51,6 +51,9 @@ class Application(Base):
 
     source: Mapped[str] = mapped_column(String(50), default="direct")
     agency_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("agencies.id"))
+    # Set alongside source="campus" — same shape as agency_id above, for a
+    # candidate sourced through a college placement drive.
+    campus_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("campuses.id"))
     # The internal user who uploaded this candidate (HR/TA single upload, bulk
     # resume upload, or bulk Excel). `source` says HOW a candidate arrived and
     # `agency_id` says WHICH agency, but for a talent_acquisition upload there

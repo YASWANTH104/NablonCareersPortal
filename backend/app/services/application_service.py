@@ -88,6 +88,7 @@ def _app_to_dict(app: Application) -> dict:
         "rejection_email_sent_at": app.rejection_email_sent_at,
         "source": app.source,
         "agency_id": app.agency_id,
+        "campus_id": app.campus_id,
         "rating": app.rating,
         "is_starred": app.is_starred,
         "assigned_to": app.assigned_to,
@@ -157,12 +158,21 @@ async def submit_application(
     agency_ref = data.agency_ref
     if agency_ref:
         from app.models.agency import JobAgencyAssignment
-        from app.models.application import Application as App
         assignment = (await db.execute(
             select(JobAgencyAssignment).where(JobAgencyAssignment.ref_token == agency_ref)
         )).scalar_one_or_none()
         if assignment and str(assignment.job_id) == str(data.job_id):
             agency_id = assignment.agency_id
+
+    campus_id = None
+    campus_ref = data.campus_ref
+    if campus_ref:
+        from app.models.campus import JobCampusAssignment
+        campus_assignment = (await db.execute(
+            select(JobCampusAssignment).where(JobCampusAssignment.ref_token == campus_ref)
+        )).scalar_one_or_none()
+        if campus_assignment and str(campus_assignment.job_id) == str(data.job_id):
+            campus_id = campus_assignment.campus_id
 
     # Persist candidate profile fields (profile is the source of truth)
     from app.schemas.application import PROFILE_FIELDS
@@ -213,7 +223,7 @@ async def submit_application(
             db, user=user, full_name=user.full_name,
         )
 
-    source = "referral" if referral else ("agency" if agency_id else "direct")
+    source = "referral" if referral else ("agency" if agency_id else ("campus" if campus_id else "direct"))
 
     # Job-level visibility gate: an internal-only job has no external apply
     # route at all; a non-internal job still needs its matching flag on for
@@ -228,11 +238,12 @@ async def submit_application(
     if source == "direct" and (job.is_internal or not job.allow_outsiders):
         raise HTTPException(403, "This job is not open to public applications")
 
-    create_data = data.model_dump(exclude={"agency_ref", "referral_id", *PROFILE_FIELDS})
+    create_data = data.model_dump(exclude={"agency_ref", "campus_ref", "referral_id", *PROFILE_FIELDS})
     application = Application(
         applicant_id=applicant_id,
         source=source,
         agency_id=agency_id,
+        campus_id=campus_id,
         referral_id=referral.id if referral else None,
         duplicate_flag=duplicate_flag,
         duplicate_reason=duplicate_reason,
@@ -276,6 +287,7 @@ async def submit_sourced_application(
     resume_url: str,
     source: str,
     agency_id: Optional[uuid.UUID] = None,
+    campus_id: Optional[uuid.UUID] = None,
     sourced_by: Optional[uuid.UUID] = None,
     phone: Optional[str] = None,
     linkedin_url: Optional[str] = None,
@@ -385,6 +397,7 @@ async def submit_sourced_application(
         resume_url=resume_url,
         source=source,
         agency_id=agency_id,
+        campus_id=campus_id,
         sourced_by=sourced_by,
         cover_letter=cover_letter,
         linkedin_url=linkedin_url,
@@ -433,6 +446,7 @@ async def bulk_submit_from_resumes(
     source: str,
     files: list[tuple[str, bytes, str]],
     agency_id: Optional[uuid.UUID] = None,
+    campus_id: Optional[uuid.UUID] = None,
     sourced_by: Optional[uuid.UUID] = None,
 ) -> list[dict]:
     """Parse each uploaded resume and create a sourced application from it —
@@ -467,6 +481,7 @@ async def bulk_submit_from_resumes(
                 resume_url=resume_url,
                 source=source,
                 agency_id=agency_id,
+                campus_id=campus_id,
                 sourced_by=sourced_by,
                 phone=parsed.get("phone"),
                 linkedin_url=parsed.get("linkedin_url"),
@@ -514,6 +529,44 @@ EXCEL_COLUMN_ALIASES = {
     "expected ctc": "expected_ctc", "expected_ctc": "expected_ctc",
     "notice period": "notice_period", "notice_period": "notice_period",
 }
+
+
+def build_bulk_upload_template(*, student: bool = False) -> bytes:
+    """The downloadable spreadsheet template for parse_bulk_excel/bulk_submit_from_excel.
+    `student=True` swaps the sheet title and example row for a campus roster
+    (no experience/CTC filled in) — the column set is identical either way,
+    since parse_bulk_excel doesn't distinguish who's uploading."""
+    import io
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Students" if student else "Candidates"
+    headers = [
+        "Full Name", "Email", "Phone", "Current Location", "Total Experience",
+        "Current Company", "Current Designation", "Education", "Skills",
+        "LinkedIn", "Current CTC", "Expected CTC", "Notice Period",
+    ]
+    ws.append(headers)
+    if student:
+        ws.append([
+            "Jordan Lee", "jordan.lee@example.edu", "+91 98765 43210", "Chennai, India", "",
+            "", "", "B.Tech, CSE, SRM Institute of Science and Technology", "Python, DSA, SQL",
+            "https://linkedin.com/in/jordanlee", "", "", "",
+        ])
+    else:
+        ws.append([
+            "Jordan Lee", "jordan.lee@example.com", "+91 98765 43210", "Bengaluru, India", "5 years",
+            "Acme Corp", "Senior Data Scientist", "B.Tech, CSE, IIT Delhi", "Python, PyTorch, LLMs",
+            "https://linkedin.com/in/jordanlee", "18 LPA", "24 LPA", "30 days",
+        ])
+    for col_idx in range(1, len(headers) + 1):
+        ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = 20
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
 
 
 def parse_bulk_excel(content: bytes) -> list[dict]:
@@ -575,6 +628,7 @@ async def bulk_submit_from_excel(
     source: str,
     rows: list[dict],
     agency_id: Optional[uuid.UUID] = None,
+    campus_id: Optional[uuid.UUID] = None,
     sourced_by: Optional[uuid.UUID] = None,
 ) -> list[dict]:
     """Create a sourced application per spreadsheet row. No resume is required
@@ -600,6 +654,7 @@ async def bulk_submit_from_excel(
                 resume_url="",
                 source=source,
                 agency_id=agency_id,
+                campus_id=campus_id,
                 sourced_by=sourced_by,
                 phone=row.get("phone"),
                 linkedin_url=row.get("linkedin_url"),
@@ -714,6 +769,7 @@ async def get_all_applications(
     stage: Optional[str] = None,
     search: Optional[str] = None,
     agency_id: Optional[uuid.UUID] = None,
+    campus_id: Optional[uuid.UUID] = None,
     source: Optional[str] = None,
     page: int = 1,
     limit: int = 20,
@@ -721,6 +777,7 @@ async def get_all_applications(
 ) -> dict:
     from app.models.user import User
     from app.models.agency import Agency
+    from app.models.campus import Campus
     from app.models.screening import ScreeningResponse
     from app.services import job_service
     from sqlalchemy.orm import aliased
@@ -730,11 +787,13 @@ async def get_all_applications(
     base = (
         select(
             Application, User.full_name, User.email, User.avatar_url, Agency.name.label("agency_name"),
+            Campus.name.label("campus_name"),
             ScreeningResponse.overall_score, ScreeningResponse.auto_reject,
             _Sourcer.full_name.label("sourced_by_name"),
         )
         .join(User, User.id == Application.applicant_id)
         .join(Agency, Agency.id == Application.agency_id, isouter=True)
+        .join(Campus, Campus.id == Application.campus_id, isouter=True)
         .join(ScreeningResponse, ScreeningResponse.application_id == Application.id, isouter=True)
         # Second alias of users — Application already joins users once for the
         # applicant, so the uploader needs its own alias or the join collides.
@@ -773,6 +832,8 @@ async def get_all_applications(
         filters.append(User.full_name.ilike(f"%{search}%"))
     if agency_id:
         filters.append(Application.agency_id == agency_id)
+    if campus_id:
+        filters.append(Application.campus_id == campus_id)
     if source:
         filters.append(Application.source == source)
 
@@ -793,10 +854,11 @@ async def get_all_applications(
     )).all()
 
     items = []
-    for (app, full_name, email, avatar_url, agency_name,
+    for (app, full_name, email, avatar_url, agency_name, campus_name,
          screening_score, screening_auto_reject, sourced_by_name) in rows:
         d = _app_to_dict(app)
         d["agency_name"] = agency_name
+        d["campus_name"] = campus_name
         d["sourced_by_name"] = sourced_by_name
         d["screening_score"] = float(screening_score) if screening_score is not None else None
         d["screening_auto_reject"] = screening_auto_reject
@@ -819,6 +881,7 @@ async def get_application_by_id(
     from app.models.interview import Interview
     from app.models.candidate_profile import CandidateProfile
     from app.models.agency import Agency
+    from app.models.campus import Campus
     from app.models.referral import Referral
     from app.services import job_service
 
@@ -828,11 +891,13 @@ async def get_application_by_id(
     row = (await db.execute(
         select(
             Application, User.full_name, User.email, User.phone, User.avatar_url, User.date_of_birth,
-            Agency.name.label("agency_name"), Referrer.full_name.label("referrer_name"),
+            Agency.name.label("agency_name"), Campus.name.label("campus_name"),
+            Referrer.full_name.label("referrer_name"),
             Sourcer.full_name.label("sourced_by_name"),
         )
         .join(User, User.id == Application.applicant_id)
         .join(Agency, Agency.id == Application.agency_id, isouter=True)
+        .join(Campus, Campus.id == Application.campus_id, isouter=True)
         .join(Referral, Referral.id == Application.referral_id, isouter=True)
         .join(Referrer, Referrer.id == Referral.referred_by, isouter=True)
         .join(Sourcer, Sourcer.id == Application.sourced_by, isouter=True)
@@ -843,7 +908,7 @@ async def get_application_by_id(
         raise HTTPException(404, "Application not found")
 
     (app, full_name, email, phone, avatar_url, date_of_birth,
-     agency_name, referrer_name, sourced_by_name) = row
+     agency_name, campus_name, referrer_name, sourced_by_name) = row
 
     # Same relaxed-gate reasoning as get_all_applications above — a caller
     # who isn't HR only reaches this function at all because the router now
@@ -873,6 +938,7 @@ async def get_application_by_id(
 
     d = _app_to_dict(app)
     d["agency_name"] = agency_name
+    d["campus_name"] = campus_name
     d["sourced_by_name"] = sourced_by_name
     d["referrer_name"] = referrer_name
     d["applicant"] = {

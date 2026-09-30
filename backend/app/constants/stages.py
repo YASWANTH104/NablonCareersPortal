@@ -34,10 +34,15 @@ AGENCY_VALID_TRANSITIONS = {
 def valid_transitions_for(source: str | None) -> dict:
     """Which VALID_TRANSITIONS table governs an application's stage moves.
 
-    Keep this as the only place that branches on source == "agency" for stage
-    order — every caller (HR move_stage, any future stage-gating check) should
-    go through this rather than re-checking app.source itself."""
-    return AGENCY_VALID_TRANSITIONS if source == "agency" else VALID_TRANSITIONS
+    Keep this as the only place that branches on source for stage order —
+    every caller (HR move_stage, any future stage-gating check) should go
+    through this rather than re-checking app.source itself.
+
+    "campus" reuses the agency override: a campus placement drive's bulk
+    assessment IS the pre-screen, sat before the HR screening call, same
+    reasoning as an agency's own pre-screen — see AGENCY_VALID_TRANSITIONS.
+    """
+    return AGENCY_VALID_TRANSITIONS if source in ("agency", "campus") else VALID_TRANSITIONS
 
 
 STAGE_LABELS = {

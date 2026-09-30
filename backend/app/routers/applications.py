@@ -42,7 +42,7 @@ async def submit_application(
     return await application_service.submit_application(db, data, applicant_id=current_user.id)
 
 
-_HR_SUBMIT_SOURCES = {"talent_acquisition", "direct", "agency"}
+_HR_SUBMIT_SOURCES = {"talent_acquisition", "direct", "agency", "campus"}
 
 
 @router.post("/hr-submit", status_code=201)
@@ -136,30 +136,8 @@ async def bulk_upload_template(
     user=Depends(require_roles(*_HR_ROLES)),
 ):
     """Downloadable spreadsheet template for the Excel bulk-upload path."""
-    from openpyxl import Workbook
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Candidates"
-    headers = [
-        "Full Name", "Email", "Phone", "Current Location", "Total Experience",
-        "Current Company", "Current Designation", "Education", "Skills",
-        "LinkedIn", "Current CTC", "Expected CTC", "Notice Period",
-    ]
-    ws.append(headers)
-    ws.append([
-        "Jordan Lee", "jordan.lee@example.com", "+91 98765 43210", "Bengaluru, India", "5 years",
-        "Acme Corp", "Senior Data Scientist", "B.Tech, CSE, IIT Delhi", "Python, PyTorch, LLMs",
-        "https://linkedin.com/in/jordanlee", "18 LPA", "24 LPA", "30 days",
-    ])
-    for col_idx in range(1, len(headers) + 1):
-        ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = 20
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
     return Response(
-        content=buf.getvalue(),
+        content=application_service.build_bulk_upload_template(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=candidate_bulk_upload_template.xlsx"},
     )
@@ -224,6 +202,7 @@ async def list_applications(
     stage: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     agency_id: Optional[uuid.UUID] = Query(None),
+    campus_id: Optional[uuid.UUID] = Query(None),
     source: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=500),
@@ -238,8 +217,8 @@ async def list_applications(
     if current_user.role == Role.APPLICANT.value:
         raise HTTPException(403, "Not authorized")
     return await application_service.get_all_applications(
-        db, job_id=job_id, stage=stage, search=search, agency_id=agency_id, source=source,
-        page=page, limit=limit, current_user=current_user,
+        db, job_id=job_id, stage=stage, search=search, agency_id=agency_id, campus_id=campus_id,
+        source=source, page=page, limit=limit, current_user=current_user,
     )
 
 
