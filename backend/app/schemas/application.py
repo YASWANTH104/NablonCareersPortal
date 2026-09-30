@@ -24,6 +24,7 @@ class ApplicationCreate(BaseModel):
     answers: dict = {}
     referral_id: Optional[uuid.UUID] = None
     agency_ref: Optional[str] = None
+    campus_ref: Optional[str] = None
 
     # Candidate profile — required at apply (skills optional)
     date_of_birth: date
@@ -167,6 +168,8 @@ class ApplicationResponse(BaseModel):
     source: str
     agency_id: Optional[uuid.UUID] = None
     agency_name: Optional[str] = None
+    campus_id: Optional[uuid.UUID] = None
+    campus_name: Optional[str] = None
     # Who uploaded this candidate, when an internal recruiter did. `source`
     # says how they arrived; this says who put them in. NULL for self-applied.
     sourced_by_name: Optional[str] = None

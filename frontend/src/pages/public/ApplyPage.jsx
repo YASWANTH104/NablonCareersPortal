@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
+import { useParams, useNavigate, Link, useSearchParams, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -34,6 +34,8 @@ const schema = z.object({
 export default function ApplyPage() {
   const { slug } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const isCampusMode = location.pathname.startsWith('/campus-apply');
   const [searchParams] = useSearchParams();
   const { accessToken, user } = useAuthStore();
   const queryClient = useQueryClient();
@@ -53,7 +55,8 @@ export default function ApplyPage() {
   useEffect(() => {
     const ref = searchParams.get('ref');
     const referralRef = searchParams.get('referral');
-    if (ref) localStorage.setItem('agency_ref', ref);
+    if (ref && isCampusMode) localStorage.setItem('campus_ref', ref);
+    else if (ref) localStorage.setItem('agency_ref', ref);
     if (referralRef) localStorage.setItem('referral_ref', referralRef);
   }, [searchParams]);
 
@@ -204,10 +207,11 @@ export default function ApplyPage() {
       const resumeUrl = uploadRes.data.url;
 
       // Picked up from JobDetailPage (or this page's own mount effect above),
-      // which capture ?ref=/?referral= off an agency or referral invite link
-      // into localStorage before the sign-in/register detour — this is the
-      // only place either value is ever read back out.
+      // which capture ?ref=/?referral= off an agency, campus or referral
+      // invite link into localStorage before the sign-in/register detour —
+      // this is the only place any of these is ever read back out.
       const agencyRef = localStorage.getItem('agency_ref') || undefined;
+      const campusRef = localStorage.getItem('campus_ref') || undefined;
       const referralRef = localStorage.getItem('referral_ref') || undefined;
 
       await applicationsApi.submit({
@@ -228,10 +232,12 @@ export default function ApplyPage() {
         portfolio_url: values.portfolio_url || undefined,
         github_url: values.github_url || undefined,
         agency_ref: agencyRef,
+        campus_ref: campusRef,
         referral_id: referralRef,
       });
 
       localStorage.removeItem('agency_ref');
+      localStorage.removeItem('campus_ref');
       localStorage.removeItem('referral_ref');
 
       queryClient.invalidateQueries({ queryKey: ['my-applications'] });

@@ -53,6 +53,10 @@ import AgencyDetailPage from '@/pages/hr/AgencyDetailPage';
 import AgencyPortalPage from '@/pages/public/AgencyPortalPage';
 import InterviewFeedbackPage from '@/pages/public/InterviewFeedbackPage';
 import AgencyApplyLayout from '@/components/layout/AgencyApplyLayout';
+import CampusesPage from '@/pages/hr/CampusesPage';
+import CampusDetailPage from '@/pages/hr/CampusDetailPage';
+import CampusPortalPage from '@/pages/public/CampusPortalPage';
+import CampusApplyLayout from '@/components/layout/CampusApplyLayout';
 
 const router = createBrowserRouter([
   // ── PUBLIC ──────────────────────────────────────────────────
@@ -124,6 +128,8 @@ const router = createBrowserRouter([
           { path: '/hr/settings', element: <SettingsPage /> },
           { path: '/hr/agencies', element: <AgenciesPage /> },
           { path: '/hr/agencies/:agencyId', element: <AgencyDetailPage /> },
+          { path: '/hr/campuses', element: <CampusesPage /> },
+          { path: '/hr/campuses/:campusId', element: <CampusDetailPage /> },
         ],
       },
     ],
@@ -187,6 +193,19 @@ const router = createBrowserRouter([
   {
     path: '/agency-apply',
     element: <AgencyApplyLayout />,
+    children: [
+      { path: ':slug', element: <JobDetailPage /> },
+      { path: ':slug/apply', element: <ApplyPage /> },
+    ],
+  },
+
+  // ── CAMPUS PORTAL ────────────────────────────────────────────
+  { path: '/campus/:portalToken', element: <CampusPortalPage /> },
+
+  // ── CAMPUS APPLY (focused, no nav) ──────────────────────────
+  {
+    path: '/campus-apply',
+    element: <CampusApplyLayout />,
     children: [
       { path: ':slug', element: <JobDetailPage /> },
       { path: ':slug/apply', element: <ApplyPage /> },

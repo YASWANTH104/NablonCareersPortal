@@ -113,6 +113,8 @@ export default function JobDetailPage() {
   const [searchParams] = useSearchParams();
   const { accessToken } = useAuthStore();
   const isAgencyMode = location.pathname.startsWith('/agency-apply');
+  const isCampusMode = location.pathname.startsWith('/campus-apply');
+  const isExternalMode = isAgencyMode || isCampusMode;
   const [showJdModal, setShowJdModal] = useState(false);
 
   useEffect(() => {
@@ -123,9 +125,15 @@ export default function JobDetailPage() {
     // tab/window with its own blank sessionStorage — losing the referral id
     // right before they come back to actually submit. localStorage is shared
     // across tabs for the same origin, so it survives that detour.
-    if (ref) localStorage.setItem('agency_ref', ref);
+    //
+    // Which key a bare ?ref= belongs to is decided by which focused layout
+    // it arrived on — a campus placement link always points straight at
+    // /campus-apply/:slug (never the generic /jobs/:slug), so this branch
+    // never needs to guess between agency and campus.
+    if (ref && isCampusMode) localStorage.setItem('campus_ref', ref);
+    else if (ref) localStorage.setItem('agency_ref', ref);
     if (referralRef) localStorage.setItem('referral_ref', referralRef);
-    if ((ref || referralRef) && !isAgencyMode) {
+    if ((ref || referralRef) && !isExternalMode) {
       // Redirect to the focused apply layout — used for any external invite
       // link (agency or referral), not agency-exclusive despite the route name.
       navigate(`/agency-apply/${slug}`, { replace: true });
@@ -138,9 +146,13 @@ export default function JobDetailPage() {
   });
 
   const handleApply = () => {
-    const applyPath = isAgencyMode ? `/agency-apply/${slug}/apply` : `/jobs/${slug}/apply`;
+    const applyPath = isCampusMode
+      ? `/campus-apply/${slug}/apply`
+      : isAgencyMode
+      ? `/agency-apply/${slug}/apply`
+      : `/jobs/${slug}/apply`;
     if (!accessToken) {
-      localStorage.setItem('agency_return_to', applyPath);
+      localStorage.setItem('external_return_to', applyPath);
       navigate('/register', { state: { from: { pathname: applyPath } } });
     } else {
       navigate(applyPath);
@@ -197,7 +209,7 @@ export default function JobDetailPage() {
 
         <div className="relative max-w-5xl mx-auto px-4 sm:px-6 pt-24 pb-24 sm:pb-28">
           {/* Back — hidden in agency focused mode */}
-          {!isAgencyMode && (
+          {!isExternalMode && (
             <Link
               to="/jobs"
               className="inline-flex items-center gap-1.5 text-sm text-brand-200/80 hover:text-white transition-colors mb-8"
@@ -375,7 +387,7 @@ export default function JobDetailPage() {
               </div>
 
               {/* Process reassurance */}
-              {!isAgencyMode && (
+              {!isExternalMode && (
                 <div className="mt-4 bg-brand-50/70 border border-brand-100 rounded-2xl p-5">
                   <p className="text-sm font-semibold text-brand-800 mb-1.5">Transparent process</p>
                   <p className="text-xs text-brand-700/80 leading-relaxed">
