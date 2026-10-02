@@ -40,6 +40,33 @@ _STAGE_TO_REFERRAL_STATUS = {
 }
 
 
+# What a referrer sees for their referral's live application. In-pipeline
+# stages are shown as-is; every closed outcome is one neutral "closed" —
+# the referrer is a colleague, not the candidate, and shouldn't learn whether
+# it was a rejection, a drop-out or a withdrawal. Done here (not just in the
+# UI) so the raw reason never reaches their browser either.
+_REFERRER_STAGES = {
+    "applied": "Applied",
+    "screening": "Screening",
+    "assessment": "Assessment",
+    "tr1": "Technical Round 1",
+    "tr2": "Technical Round 2",
+    "final_tr": "Final Technical Round",
+    "hr": "HR Interview",
+    "offer": "Offer stage",
+    "hired": "Hired",
+}
+_CLOSED_STAGES = {"rejected", "interview_drop", "offer_drop", "withdrawn"}
+
+
+def _referrer_stage(application_stage: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    if application_stage is None:
+        return None, None
+    if application_stage in _CLOSED_STAGES:
+        return "closed", "Application closed"
+    return application_stage, _REFERRER_STAGES.get(application_stage, application_stage.replace("_", " ").title())
+
+
 def _derived_status_expr():
     """SQL mirror of _STAGE_TO_REFERRAL_STATUS, for filtering/counting on the
     same derived status _to_dict() displays — keeps the status tabs on
@@ -95,6 +122,7 @@ def _to_dict(row) -> dict:
     application_stage = getattr(row, "application_stage", None)
     if application_stage is not None:
         d["status"] = _STAGE_TO_REFERRAL_STATUS.get(application_stage, d["status"])
+    d["stage"], d["stage_label"] = _referrer_stage(application_stage)
     d["application_id"] = getattr(row, "application_id", None)
     return d
 

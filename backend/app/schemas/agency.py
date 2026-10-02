@@ -37,7 +37,11 @@ class JobAgencyAssignmentCreate(BaseModel):
 
 
 class JobAgencyAssignmentUpdate(BaseModel):
+    # Only fields actually sent are applied (exclude_unset), so an explicit
+    # null still means "unlimited" / "no end date" while an omitted field is
+    # left as-is.
     max_submissions: Optional[int] = None
+    expires_at: Optional[datetime] = None
 
 
 class JobAgencyAssignmentResponse(BaseModel):

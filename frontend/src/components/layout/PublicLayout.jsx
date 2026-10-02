@@ -12,6 +12,27 @@ function usesDarkHero(pathname) {
   return /^\/jobs\/[^/]+$/.test(pathname); // /jobs/:slug but NOT /jobs/:slug/apply
 }
 
+// One transparent PNG used as a mask, filled white over the dark hero and
+// logo-blue elsewhere — logo.jpg has a solid white background that shows as
+// a box on translucent glass. 2060x375 source, so width = height x 5.49.
+function Wordmark({ light }) {
+  const mask = {
+    WebkitMaskImage: 'url(/nablon-logo-white.png)',
+    maskImage: 'url(/nablon-logo-white.png)',
+    WebkitMaskSize: 'contain',
+    maskSize: 'contain',
+    WebkitMaskRepeat: 'no-repeat',
+    maskRepeat: 'no-repeat',
+  };
+  return (
+    <span
+      aria-hidden="true"
+      className={`block h-[18px] w-[99px] transition-colors duration-300 ${light ? 'bg-white' : 'bg-[#0237DD]'}`}
+      style={mask}
+    />
+  );
+}
+
 export default function PublicLayout() {
   const { user, accessToken } = useAuthStore();
   const { pathname } = useLocation();
@@ -38,144 +59,125 @@ export default function PublicLayout() {
   }, [menuOpen]);
 
   const overHero = usesDarkHero(pathname);
-  // Transparent, light-on-dark treatment only while sitting on a hero, unscrolled — never while the menu is open.
+  // Dark-tinted glass with white text while sitting on a dark hero, unscrolled;
+  // frosted white glass everywhere else (and whenever the menu is open).
   const ghost = overHero && !scrolled && !menuOpen;
 
-  const navLinkClass = ({ isActive }) => {
-    const base = 'text-sm font-medium px-3 py-2 rounded-lg transition-colors';
-    if (ghost) {
-      return `${base} ${
-        isActive ? 'text-white bg-white/15' : 'text-brand-50/90 hover:text-white hover:bg-white/10'
-      }`;
-    }
-    return `${base} ${
-      isActive ? 'text-brand-600 bg-brand-50' : 'text-gray-600 hover:text-gray-900 hover:bg-surface-100'
+  // Capsule tint: dark glass + white text over the dark hero, frosted white
+  // everywhere else. A touch more opaque once scrolled over page content.
+  const glass = `liquid-glass ${ghost ? 'liquid-glass--dark' : `liquid-glass--light ${scrolled ? 'is-raised' : ''}`}`;
+  const link = 'text-[13px] font-medium px-3.5 h-9 inline-flex items-center rounded-full transition-colors duration-200';
+  const quietLink = ghost
+    ? 'text-white/80 hover:text-white hover:bg-white/10'
+    : 'text-gray-600 hover:text-gray-900 hover:bg-black/[0.04]';
+  const navLinkClass = ({ isActive }) =>
+    `${link} ${
+      isActive
+        ? ghost ? 'text-white bg-white/[0.14]' : 'text-gray-900 bg-black/[0.06]'
+        : quietLink
     }`;
-  };
+  const cta =
+    'text-[13px] font-semibold text-white px-4 h-9 inline-flex items-center rounded-full bg-brand-500 hover:bg-brand-600 ' +
+    'shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] transition-colors duration-200 active:scale-[0.98]';
+  const portalPath = accessToken && user ? getHomeRoute(user.role) : null;
 
   return (
     <div className="min-h-screen bg-surface-50 flex flex-col">
-      <header
-        className={`fixed top-0 inset-x-0 z-40 transition-all duration-300 ${
-          ghost
-            ? 'bg-transparent border-b border-transparent'
-            : 'bg-white/90 backdrop-blur-md border-b border-surface-200 shadow-sm'
-        }`}
-      >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2.5 flex-shrink-0 group">
-            {ghost ? (
-              // White wordmark over the dark hero — no chip, blends into the hero.
-              <img src="/nablon-logo-white.png" alt="Nablon AI" className="h-7 w-auto object-contain" />
-            ) : (
-              <img
-                src="/logo.jpg"
-                alt="Nablon AI"
-                className="h-8 w-auto rounded-lg object-contain shadow-sm ring-1 ring-black/5"
-              />
-            )}
+      <header className="fixed top-0 inset-x-0 z-40 pt-3 pointer-events-none">
+        {/* Same container as the page content. The capsule bleeds 12px past it
+            on each side (-mx-3) and pads the logo back in (pl-3), so the logo
+            sits exactly on the hero copy's left edge. */}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+          <div className={`${glass} pointer-events-auto h-14 -mx-3 pl-3 pr-2 flex items-center justify-between gap-3`}>
+          <Link
+            to="/"
+            aria-label="Nablon AI Careers — home"
+            className="h-full flex items-center gap-3 flex-shrink-0"
+          >
+            <Wordmark light={ghost} />
+            <span className={`hidden sm:block h-4 w-px ${ghost ? 'bg-white/20' : 'bg-black/10'}`} />
             <span
-              className={`font-display font-bold hidden sm:block transition-colors ${
-                ghost ? 'text-white/90' : 'text-gray-900'
+              className={`hidden sm:block text-[13px] font-semibold tracking-tight transition-colors ${
+                ghost ? 'text-white/85' : 'text-gray-700'
               }`}
             >
               Careers
             </span>
           </Link>
 
-          {/* Desktop nav */}
-          <nav className="hidden sm:flex items-center gap-1.5 sm:gap-2">
-            <NavLink to="/jobs" className={navLinkClass}>
-              All Jobs
-            </NavLink>
-
-            {accessToken && user ? (
-              <Link
-                to={getHomeRoute(user.role)}
-                className="text-sm font-medium px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors ml-1 shadow-sm shadow-brand-500/30"
-              >
-                Go to Portal
-              </Link>
-            ) : (
-              <div className="flex items-center gap-1.5 sm:gap-2 ml-1">
-                <Link
-                  to="/login"
-                  className={`text-sm font-medium px-3 py-2 rounded-lg transition-colors ${
-                    ghost
-                      ? 'text-white/90 hover:text-white hover:bg-white/10'
-                      : 'text-gray-600 hover:text-gray-900 hover:bg-surface-100'
-                  }`}
-                >
-                  Sign in
+          <div className="flex items-center gap-0.5">
+            {/* Desktop */}
+            <nav className="hidden sm:flex items-center gap-0.5">
+              <NavLink to="/jobs" className={navLinkClass}>
+                All Jobs
+              </NavLink>
+              {portalPath ? (
+                <Link to={portalPath} className={`${cta} ml-1`}>
+                  Go to Portal
                 </Link>
-                <Link
-                  to="/register"
-                  className="text-sm font-medium px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors shadow-sm shadow-brand-500/30"
-                >
-                  Create account
-                </Link>
-              </div>
-            )}
-          </nav>
+              ) : (
+                <>
+                  <Link to="/login" className={`${link} ${quietLink}`}>
+                    Sign in
+                  </Link>
+                  <Link to="/register" className={`${cta} ml-1`}>
+                    Create account
+                  </Link>
+                </>
+              )}
+            </nav>
 
-          {/* Mobile: single primary CTA + hamburger toggle */}
-          <div className="flex sm:hidden items-center gap-2">
-            {accessToken && user ? (
-              <Link
-                to={getHomeRoute(user.role)}
-                className="text-sm font-medium px-3.5 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors shadow-sm shadow-brand-500/30"
-              >
-                Portal
+            {/* Mobile */}
+            <div className="flex sm:hidden items-center gap-0.5">
+              <Link to={portalPath ?? '/register'} className={cta}>
+                {portalPath ? 'Portal' : 'Create account'}
               </Link>
-            ) : (
-              <Link
-                to="/register"
-                className="text-sm font-medium px-3.5 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors shadow-sm shadow-brand-500/30"
+              <button
+                type="button"
+                onClick={() => setMenuOpen((v) => !v)}
+                aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+                aria-expanded={menuOpen}
+                className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${
+                  ghost ? 'text-white hover:bg-white/10' : 'text-gray-700 hover:bg-black/[0.05]'
+                }`}
               >
-                Create account
-              </Link>
-            )}
-            <button
-              type="button"
-              onClick={() => setMenuOpen((v) => !v)}
-              aria-label={menuOpen ? 'Close menu' : 'Open menu'}
-              aria-expanded={menuOpen}
-              className={`p-2 rounded-lg transition-colors ${
-                ghost ? 'text-white hover:bg-white/10' : 'text-gray-700 hover:bg-surface-100'
-              }`}
-            >
-              {menuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-            </button>
+                {menuOpen ? <X className="w-[18px] h-[18px]" /> : <Menu className="w-[18px] h-[18px]" />}
+              </button>
+            </div>
+          </div>
           </div>
         </div>
 
-        {/* Mobile dropdown panel — always opaque so it reads over any hero */}
+        {/* Mobile menu — a glass sheet under the capsule, same width */}
         {menuOpen && (
-          <nav className="sm:hidden bg-white border-t border-surface-200 shadow-lg px-4 py-3 space-y-1">
-            <NavLink
-              to="/jobs"
-              className={({ isActive }) =>
-                `block text-sm font-medium px-3 py-2.5 rounded-lg transition-colors ${
-                  isActive ? 'text-brand-600 bg-brand-50' : 'text-gray-700 hover:bg-surface-100'
-                }`
-              }
-            >
-              All Jobs
-            </NavLink>
-            {!(accessToken && user) && (
-              <Link
-                to="/login"
-                className="block text-sm font-medium px-3 py-2.5 rounded-lg text-gray-700 hover:bg-surface-100 transition-colors"
+          <div className="sm:hidden max-w-7xl mx-auto px-4">
+            <nav className="liquid-glass liquid-glass--light is-raised rounded-3xl pointer-events-auto mt-2 -mx-3 p-1.5 animate-in fade-in slide-in-from-top-2 duration-200">
+              <NavLink
+                to="/jobs"
+                className={({ isActive }) =>
+                  `block text-sm font-medium px-4 py-2.5 rounded-2xl transition-colors ${
+                    isActive ? 'text-gray-900 bg-black/[0.06]' : 'text-gray-700 hover:bg-black/[0.04]'
+                  }`
+                }
               >
-                Sign in
-              </Link>
-            )}
-          </nav>
+                All Jobs
+              </NavLink>
+              {!portalPath && (
+                <Link
+                  to="/login"
+                  className="block text-sm font-medium px-4 py-2.5 rounded-2xl text-gray-700 hover:bg-black/[0.04] transition-colors"
+                >
+                  Sign in
+                </Link>
+              )}
+            </nav>
+          </div>
         )}
       </header>
 
-      {/* Hero pages slide under the transparent bar; other pages need clearance. */}
-      <main className={`flex-1 ${overHero ? '' : 'pt-16'}`}>
+      {/* Hero pages slide under the floating bar; other pages need clearance
+          (12px offset + 56px capsule + breathing room). */}
+      <main className={`flex-1 ${overHero ? '' : 'pt-20'}`}>
         <Outlet />
       </main>
 

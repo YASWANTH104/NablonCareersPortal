@@ -9,6 +9,12 @@ class PanelistCreate(BaseModel):
     role: str = "interviewer"  # interviewer | observer
 
 
+class PanelistAdd(BaseModel):
+    """Adding someone to an interview that's already scheduled."""
+    user_id: uuid.UUID
+    role: Literal["interviewer", "observer"] = "observer"
+
+
 class InterviewCreate(BaseModel):
     application_id: uuid.UUID
     round_number: int = 1

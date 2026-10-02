@@ -8,6 +8,7 @@ export const interviewsApi = {
   mine: (params) => client.get('/interviews/mine', { params }),
   getById: (id) => client.get(`/interviews/${id}`),
   update: (id, data) => client.patch(`/interviews/${id}`, data),
+  addPanelist: (id, data) => client.post(`/interviews/${id}/panelists`, data),
   complete: (id, data = {}) => client.patch(`/interviews/${id}/complete`, data),
   cancel: (id) => client.delete(`/interviews/${id}`),
   submitFeedback: (id, data) => client.post(`/interviews/${id}/feedback`, data),

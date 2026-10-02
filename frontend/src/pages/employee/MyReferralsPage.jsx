@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Award, UserCheck, Clock, TrendingUp } from 'lucide-react';
 import { format } from 'date-fns';
 import { referralsApi } from '@/api/referrals';
+import { STAGE_MAP } from '@/constants/pipelineStages';
 
 const STATUS_CONFIG = {
   pending:     { label: 'Pending',     dot: 'bg-gray-400',   text: 'text-gray-600',   bg: 'bg-gray-100' },
@@ -10,11 +11,12 @@ const STATUS_CONFIG = {
   applied:     { label: 'Applied',     dot: 'bg-indigo-400', text: 'text-indigo-700', bg: 'bg-indigo-50' },
   in_progress: { label: 'In Progress', dot: 'bg-yellow-400', text: 'text-yellow-700', bg: 'bg-yellow-50' },
   hired:       { label: 'Hired',       dot: 'bg-green-500',  text: 'text-green-700',  bg: 'bg-green-50' },
-  rejected:    { label: 'Rejected',    dot: 'bg-red-400',    text: 'text-red-600',    bg: 'bg-red-50' },
+  rejected:    { label: 'Closed',      dot: 'bg-gray-400',   text: 'text-gray-600',   bg: 'bg-gray-100' },
   expired:     { label: 'Expired',     dot: 'bg-surface-300',text: 'text-gray-400',   bg: 'bg-surface-100' },
 };
 
 const STATUS_TABS = ['all', 'pending', 'invited', 'applied', 'in_progress', 'hired', 'rejected'];
+const TAB_LABELS = { in_progress: 'In Progress', rejected: 'Closed' };
 
 function StatusBadge({ status }) {
   const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.pending;
@@ -22,6 +24,22 @@ function StatusBadge({ status }) {
     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${cfg.bg} ${cfg.text}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
       {cfg.label}
+    </span>
+  );
+}
+
+// Once the candidate has applied, show where their application actually is
+// ("Technical Round 1") rather than a generic "In Progress". The backend
+// already folds every closed outcome into a neutral "closed".
+function ReferralStage({ referral }) {
+  if (!referral.stage) return <StatusBadge status={referral.status} />;
+  const color = referral.stage === 'closed'
+    ? 'bg-gray-100 text-gray-600'
+    : STAGE_MAP[referral.stage]?.color ?? 'bg-gray-100 text-gray-600';
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap ${color}`}>
+      <span className="w-1.5 h-1.5 rounded-full bg-current opacity-60" />
+      {referral.stage_label}
     </span>
   );
 }
@@ -82,7 +100,7 @@ export default function MyReferralsPage() {
               activeTab === tab ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
             }`}
           >
-            {tab === 'in_progress' ? 'In Progress' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {TAB_LABELS[tab] ?? tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
         ))}
       </div>
@@ -103,7 +121,7 @@ export default function MyReferralsPage() {
               <tr className="border-b border-surface-200 bg-surface-50">
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Candidate</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Role</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Stage</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Referred</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Bonus</th>
               </tr>
@@ -116,7 +134,7 @@ export default function MyReferralsPage() {
                     <p className="text-xs text-gray-400">{r.candidate_email}</p>
                   </td>
                   <td className="px-4 py-3 text-gray-600">{r.job_title}</td>
-                  <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
+                  <td className="px-4 py-3"><ReferralStage referral={r} /></td>
                   <td className="px-4 py-3 text-gray-400 text-xs">
                     {format(new Date(r.created_at), 'dd MMM yyyy')}
                   </td>

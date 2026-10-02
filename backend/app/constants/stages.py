@@ -66,6 +66,25 @@ STAGE_LABELS = {
 # the rule belongs here so every booking path gets it.
 TERMINAL_STAGES = {"rejected", "withdrawn", "interview_drop", "offer_drop", "hired"}
 
+# "Not proceeding" in every outcome count (agency/campus portals, HR agency
+# reports). Matches the frontends' TERMINAL_STAGES set. Before this existed
+# each count picked its own subset, so drops/withdrawals showed as "In
+# progress" in one place and "Not proceeding" in another for the same people.
+NOT_PROCEEDING_STAGES = TERMINAL_STAGES - {"hired"}
+
+
+def outcome_counts(stage_counts: dict[str, int]) -> dict[str, int]:
+    """{stage: count} -> {total, hired, not_proceeding, in_progress}."""
+    total = sum(stage_counts.values())
+    hired = stage_counts.get("hired", 0)
+    not_proceeding = sum(stage_counts.get(s, 0) for s in NOT_PROCEEDING_STAGES)
+    return {
+        "total": total,
+        "hired": hired,
+        "not_proceeding": not_proceeding,
+        "in_progress": total - hired - not_proceeding,
+    }
+
 # Stages that require a reason (category + optional free-text note) on transition.
 REASON_REQUIRED_STAGES = {"rejected", "interview_drop", "offer_drop"}
 
@@ -167,6 +186,12 @@ ROUND_ORDER = {
     "final_tr": 3,
     "hr": 4,
 }
+
+# A person who was the *interviewer* (not an observer) on one round may not be
+# the interviewer on a different round for the same candidate — a second round
+# exists to get a second, independent read. The one exception is this pair:
+# HR runs both the screening call and the HR round, often the same person.
+INTERVIEWER_REPEAT_ALLOWED_ROUNDS = frozenset({"screening", "hr"})
 
 # Round labels as an agency sees them in their portal. Same wording as
 # STAGE_LABELS for tr1/tr2, but "HR Screening Call" vs "HR Interview" is the

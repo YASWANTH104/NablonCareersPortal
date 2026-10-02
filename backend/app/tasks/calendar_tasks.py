@@ -143,6 +143,44 @@ async def _create_teams_meeting_async(interview_id: str, cc_emails: list[str] | 
 
 
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=30)
+def add_teams_attendee_task(self, interview_id: str, user_id: str):
+    try:
+        asyncio.run(_add_teams_attendee_async(interview_id, user_id))
+    except Exception as exc:
+        logger.error(f"Teams attendee add failed: interview={interview_id}, user={user_id}: {exc}")
+        from app.tasks.email_tasks import send_interview_scheduled_notifications
+        if _notify_only_when_exhausted(
+            self, send_interview_scheduled_notifications, interview_id, only_panelist_id=user_id,
+        ):
+            return
+        raise self.retry(exc=exc)
+
+
+async def _add_teams_attendee_async(interview_id: str, user_id: str):
+    """A panelist added after scheduling: put them on the existing Teams event
+    (if there is one), then send their own "Interview Assigned" email — and
+    only theirs; the candidate and the rest of the panel already have theirs."""
+    from app.models.interview import Interview
+    from app.models.user import User
+    from app.services import ms_graph_service
+    from app.tasks.email_tasks import send_interview_scheduled_notifications
+
+    async with _task_session() as db:
+        interview = await db.get(Interview, uuid.UUID(interview_id))
+        user = await db.get(User, uuid.UUID(user_id))
+        if not interview or not user:
+            return
+
+        if interview.ms_graph_event_id and interview.ms_graph_organizer_email:
+            await ms_graph_service.add_attendee(
+                interview.ms_graph_organizer_email, interview.ms_graph_event_id, user.email,
+            )
+            logger.info(f"Teams attendee added: interview={interview_id}, user={user.email}")
+
+    send_interview_scheduled_notifications.delay(interview_id, only_panelist_id=user_id)
+
+
+@celery_app.task(bind=True, max_retries=2, default_retry_delay=30)
 def update_teams_meeting_task(self, interview_id: str):
     try:
         asyncio.run(_update_teams_meeting_async(interview_id))

@@ -30,7 +30,7 @@ def _trend_rows(data: list[dict]) -> tuple[list[str], list[list]]:
 
 
 def _job_rows(data: list[dict]) -> tuple[list[str], list[list]]:
-    headers = ["Job", "Department", "Status", "Total Applications", "In Progress", "Hired", "Rejected", "Conversion %"]
+    headers = ["Job", "Department", "Status", "Total Applications", "In Progress", "Hired", "Not Proceeding", "Conversion %"]
     rows = [
         [j["title"], j["department"], j["status"], j["total_applications"],
          j["in_progress"], j["hired"], j["rejected"], j["conversion_rate"]]
@@ -60,7 +60,7 @@ def _tth_rows(data: list[dict]) -> tuple[list[str], list[list]]:
 
 
 def _agency_rows(data: list[dict]) -> tuple[list[str], list[list]]:
-    headers = ["Agency", "Contact Email", "Submitted", "In Progress", "Hired", "Rejected", "Conversion %"]
+    headers = ["Agency", "Contact Email", "Submitted", "In Progress", "Hired", "Not Proceeding", "Conversion %"]
     rows = [
         [a["agency_name"], a["contact_email"], a["total_submitted"], a["in_progress"],
          a["hired"], a["rejected"], a["conversion_rate"]]

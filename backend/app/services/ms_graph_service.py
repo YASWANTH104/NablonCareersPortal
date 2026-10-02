@@ -137,6 +137,31 @@ async def update_teams_meeting(
     return {"join_url": (event.get("onlineMeeting") or {}).get("joinUrl")}
 
 
+async def add_attendee(organizer_email: str, event_id: str, attendee_email: str) -> bool:
+    """Adds one required attendee to an existing event; Exchange sends them the
+    invite. Reads the current list first and appends — PATCH replaces the
+    whole attendees collection, so rebuilding it from our DB would drop anyone
+    the organiser added in Outlook. Returns False if Graph isn't configured."""
+    if not is_configured():
+        return False
+
+    token = await _get_app_token()
+    url = f"{GRAPH_BASE}/users/{organizer_email}/events/{event_id}"
+    headers = {"Authorization": f"Bearer {token}"}
+    async with httpx.AsyncClient(timeout=20) as client:
+        resp = await client.get(url, headers=headers, params={"$select": "attendees"})
+        resp.raise_for_status()
+        attendees = resp.json().get("attendees", [])
+
+        if any((a.get("emailAddress") or {}).get("address", "").lower() == attendee_email.lower() for a in attendees):
+            return True
+
+        attendees.append({"emailAddress": {"address": attendee_email}, "type": "required"})
+        resp = await client.patch(url, headers=headers, json={"attendees": attendees})
+        resp.raise_for_status()
+    return True
+
+
 def _parse_graph_dt(value: str) -> datetime:
     """Graph returns scheduleItem start/end as a naive dateTime string (we asked for
     UTC), sometimes with 7-digit fractional seconds Python's fromisoformat can't

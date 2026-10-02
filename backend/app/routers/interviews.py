@@ -14,7 +14,7 @@ from app.schemas.interview import (
     CandidateSelfFeedbackCreate, CandidateSelfFeedbackResponse,
     CandidateInterviewSummary,
     AvailabilityCheckRequest, PanelistAvailability,
-    PanelistScheduleRequest, PanelistDaySchedule,
+    PanelistScheduleRequest, PanelistDaySchedule, PanelistAdd,
 )
 
 
@@ -149,6 +149,18 @@ async def update_interview(
     db: AsyncSession = Depends(get_db),
 ):
     return await interview_service.update_interview(db, interview_id, data)
+
+
+@router.post("/{interview_id}/panelists", response_model=InterviewResponse, status_code=201)
+async def add_panelist(
+    interview_id: uuid.UUID,
+    data: PanelistAdd,
+    user=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await interview_service.add_panelist(
+        db, interview_id, data.user_id, data.role, added_by=user.id,
+    )
 
 
 @router.patch("/{interview_id}/complete", response_model=InterviewResponse)

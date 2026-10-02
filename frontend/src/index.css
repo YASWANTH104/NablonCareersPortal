@@ -171,6 +171,50 @@
 }
 
 /* ────────────────────────────────────────────────────────────────
+   Liquid glass — the public navbar (components/layout/PublicLayout.jsx).
+   One floating capsule: blurred + saturated backdrop, a hairline edge, an
+   inner top highlight, and a diffuse shadow. Kept deliberately quiet — a
+   bright rim makes it read as a bordered box, not glass.
+   In @layer components so Tailwind utilities (e.g. rounded-3xl) override.
+   ──────────────────────────────────────────────────────────────── */
+@layer components {
+  .liquid-glass {
+    position: relative;
+    isolation: isolate;
+    border-radius: 9999px;
+    -webkit-backdrop-filter: blur(24px) saturate(170%);
+    backdrop-filter: blur(24px) saturate(170%);
+    transition: background-color 0.35s ease, box-shadow 0.35s ease;
+  }
+  .liquid-glass--light {
+    background: rgba(255, 255, 255, 0.64);
+    box-shadow:
+      0 0 0 1px rgba(15, 23, 42, 0.06),
+      inset 0 1px 0 rgba(255, 255, 255, 0.95),
+      0 8px 28px -12px rgba(15, 23, 42, 0.28);
+  }
+  .liquid-glass--light.is-raised {
+    background: rgba(255, 255, 255, 0.76);
+  }
+  .liquid-glass--dark {
+    background: rgba(255, 255, 255, 0.07);
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.1),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2),
+      0 10px 32px -14px rgba(0, 0, 0, 0.6);
+  }
+
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .liquid-glass--light, .liquid-glass--light.is-raised { background: rgba(255, 255, 255, 0.96); }
+    .liquid-glass--dark { background: rgba(17, 24, 39, 0.88); }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    .liquid-glass--light, .liquid-glass--light.is-raised { background: rgba(255, 255, 255, 0.96); }
+    .liquid-glass--dark { background: rgba(17, 24, 39, 0.92); }
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────
    TipTap rich text editor (see components/shared/RichTextEditor.jsx)
    ──────────────────────────────────────────────────────────────── */
 .ProseMirror { outline: none; }

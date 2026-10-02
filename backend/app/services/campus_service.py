@@ -328,14 +328,13 @@ async def get_all_campus_portals(
     for job_id, stage, count in stage_rows:
         stage_by_job.setdefault(job_id, {})[stage] = count
 
+    from app.constants.stages import outcome_counts
+
     assignments_data = []
     total_submitted = total_hired = total_in_progress = total_rejected = 0
     for assignment, job_title, job_slug in rows:
-        stage_map = stage_by_job.get(assignment.job_id, {})
-        count = sum(stage_map.values())
-        hired = stage_map.get("hired", 0)
-        rejected = stage_map.get("rejected", 0) + stage_map.get("withdrawn", 0)
-        in_progress = count - hired - rejected
+        oc = outcome_counts(stage_by_job.get(assignment.job_id, {}))
+        count, hired, rejected, in_progress = oc["total"], oc["hired"], oc["not_proceeding"], oc["in_progress"]
         total_submitted += count
         total_hired += hired
         total_in_progress += in_progress
