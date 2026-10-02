@@ -10,6 +10,7 @@ from app.schemas.interview import InterviewCreate, PanelistCreate
 from app.schemas.interview_slot import SlotResponse, AvailableSlotGroup
 from app.constants.stages import (
     ROUND_ELIGIBLE_STAGE, ROUND_LABELS, ROUND_ORDER, STAGE_LABELS, TERMINAL_STAGES,
+    INTERVIEWER_REPEAT_ALLOWED_ROUNDS,
 )
 
 # CC'd on every candidate/interviewer email that results from booking a
@@ -502,6 +503,74 @@ async def get_booked_rounds(
     return booked
 
 
+async def get_blocked_interviewers(
+    db: AsyncSession, application_id: uuid.UUID, round_type: str
+) -> dict[uuid.UUID, str]:
+    """{user_id: round_type} for everyone who was the interviewer (role
+    "interviewer", never "observer") on a live interview for this application
+    in a round OTHER than `round_type` — i.e. people who may not interview
+    this candidate again for `round_type`. Same "live" definition as
+    get_booked_rounds: cancelling the earlier interview lifts the block.
+    Rows without a round_type (legacy) can't be attributed and are ignored."""
+    from app.models.interview import Interview, InterviewPanelist
+
+    rows = (await db.execute(
+        select(InterviewPanelist.user_id, Interview.round_type)
+        .join(Interview, Interview.id == InterviewPanelist.interview_id)
+        .where(
+            Interview.application_id == application_id,
+            Interview.round_type.is_not(None),
+            Interview.round_type != round_type,
+            Interview.status.not_in(BLOCKING_INTERVIEW_STATUSES_EXCLUDED),
+            InterviewPanelist.role == "interviewer",
+        )
+    )).all()
+
+    blocked: dict[uuid.UUID, str] = {}
+    for user_id, prior_round in rows:
+        if round_type in INTERVIEWER_REPEAT_ALLOWED_ROUNDS and prior_round in INTERVIEWER_REPEAT_ALLOWED_ROUNDS:
+            continue
+        blocked.setdefault(user_id, prior_round)
+    return blocked
+
+
+async def assert_interviewers_not_repeated(
+    db: AsyncSession, *, application_id: uuid.UUID, round_type: str,
+    interviewer_ids: list[uuid.UUID], anonymous: bool = False,
+) -> None:
+    """Raises 400 if any of `interviewer_ids` already interviewed this
+    candidate in a different round (see get_blocked_interviewers).
+    `anonymous=True` is for the agency portal, which must never learn who a
+    slot's interviewer is — the message then names neither person nor round."""
+    if not interviewer_ids:
+        return
+    blocked = await get_blocked_interviewers(db, application_id, round_type)
+    repeats = [uid for uid in interviewer_ids if uid in blocked]
+    if not repeats:
+        return
+
+    if anonymous:
+        raise HTTPException(
+            400,
+            "The interviewer free at this time has already interviewed this candidate in an "
+            "earlier round, and each round needs a different interviewer. Please pick another time.",
+        )
+
+    from app.models.user import User
+    names = dict((await db.execute(
+        select(User.id, User.full_name).where(User.id.in_(repeats))
+    )).all())
+    detail = "; ".join(
+        f"{names.get(uid, 'This interviewer')} already ran {_round_label(blocked[uid])}"
+        for uid in repeats
+    )
+    raise HTTPException(
+        400,
+        f"{detail} for this candidate. {_round_label(round_type)} needs a different "
+        f"interviewer — they can still join as an observer.",
+    )
+
+
 async def get_booked_rounds_for_job(db: AsyncSession, job_id: uuid.UUID) -> dict[str, list[str]]:
     """{application_id: [round_type, ...]} for every application on a job, so
     HR's candidate pickers can hide someone who already has that round booked
@@ -608,21 +677,37 @@ async def book_slot(
     # back. With slot_id the round isn't known from the arguments, so it's read
     # off the slot row first.
     gate_round = round_type
-    if gate_round is None and slot_id is not None:
-        # A scalar read, deliberately not db.get(): loading the ORM object here
+    slot_interviewer_id = None
+    if slot_id is not None:
+        # Scalar reads, deliberately not db.get(): loading the ORM object here
         # would put it in the identity map immediately before the claiming
         # UPDATE...RETURNING below hands back the same row, and whether that
         # instance then reflects the new status depends on session-
-        # synchronization behaviour we don't need to depend on. The round is
-        # all this needs, so fetch only the round.
-        gate_round = (await db.execute(
-            select(InterviewSlot.round_type).where(InterviewSlot.id == slot_id)
-        )).scalar_one_or_none()
+        # synchronization behaviour we don't need to depend on. The round and
+        # interviewer are all this needs, so fetch only those.
+        row = (await db.execute(
+            select(InterviewSlot.round_type, InterviewSlot.interviewer_id).where(InterviewSlot.id == slot_id)
+        )).first()
+        if row:
+            gate_round = gate_round or row.round_type
+            slot_interviewer_id = row.interviewer_id
+
+    blocked_interviewers: dict[uuid.UUID, str] = {}
     if gate_round:
         await assert_round_bookable(
             db, application_id=application_id, round_type=gate_round,
             enforce_stage_gate=enforce_stage_gate,
         )
+        # After assert_round_bookable, so this reads under its application
+        # row lock — two concurrent bookings for one candidate can't both see
+        # "no prior interviewer" and land the same person on two rounds.
+        blocked_interviewers = await get_blocked_interviewers(db, application_id, gate_round)
+        if slot_interviewer_id in blocked_interviewers:
+            await assert_interviewers_not_repeated(
+                db, application_id=application_id, round_type=gate_round,
+                interviewer_ids=[slot_interviewer_id],
+                anonymous=booked_by_agency_id is not None,
+            )
 
     # Hard floor, not just a list-filtering concern: even if the caller's
     # slot list was fetched a moment ago while still upcoming, the clock may
@@ -644,16 +729,35 @@ async def book_slot(
         if duration_mins is not None:
             criteria.append(InterviewSlot.duration_mins == duration_mins)
 
+    # Round+time bookings (the agency portal) don't pick an interviewer — any
+    # open slot at that time will do — so steer the claim away from anyone
+    # who already interviewed this candidate in another round. If another
+    # interviewer is free at the same time, they get it instead.
+    claim_criteria = list(criteria)
+    if not slot_id and blocked_interviewers:
+        claim_criteria.append(InterviewSlot.interviewer_id.not_in(list(blocked_interviewers)))
+
     claim_stmt = (
         update(InterviewSlot)
         .where(InterviewSlot.id.in_(
-            select(InterviewSlot.id).where(and_(*criteria)).with_for_update(skip_locked=True).limit(1)
+            select(InterviewSlot.id).where(and_(*claim_criteria)).with_for_update(skip_locked=True).limit(1)
         ))
         .values(status="booked")
         .returning(InterviewSlot)
     )
     slot = (await db.execute(claim_stmt)).scalar_one_or_none()
     if not slot:
+        if len(claim_criteria) > len(criteria):
+            # Distinguish "taken" from "only the repeat interviewer is free
+            # then" — the second needs a different time, not a retry.
+            still_open = (await db.execute(
+                select(InterviewSlot.interviewer_id).where(and_(*criteria)).limit(1)
+            )).scalar_one_or_none()
+            if still_open is not None:
+                await assert_interviewers_not_repeated(
+                    db, application_id=application_id, round_type=gate_round,
+                    interviewer_ids=[still_open], anonymous=booked_by_agency_id is not None,
+                )
         raise HTTPException(409, SLOT_CONFLICT_MESSAGE)
 
     # The slot_id path (HR booking directly) has no job/round in its match
@@ -746,6 +850,14 @@ async def book_unassigned_slot(
         db, application_id=application_id, round_type=round_type,
         enforce_stage_gate=enforce_stage_gate,
     )
+    slot_interviewer_id = (await db.execute(
+        select(InterviewSlot.interviewer_id).where(InterviewSlot.id == slot_id)
+    )).scalar_one_or_none()
+    if slot_interviewer_id is not None:
+        await assert_interviewers_not_repeated(
+            db, application_id=application_id, round_type=round_type,
+            interviewer_ids=[slot_interviewer_id],
+        )
 
     claim_stmt = (
         update(InterviewSlot)

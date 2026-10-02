@@ -134,9 +134,17 @@ function EditAgencyModal({ agency, onClose }) {
   );
 }
 
-function AssignmentCard({ assignment, jobSlug, onRemove, onUpdateCap, updating }) {
+// "Access until 10 Oct" should mean the agency can still submit on 10 Oct, so
+// a picked date is stored as the end of that day in IST, not its midnight start.
+function endOfDayIST(dateStr) {
+  return dateStr ? `${dateStr}T23:59:59+05:30` : null;
+}
+
+function AssignmentCard({ assignment, jobSlug, onRemove, onUpdateCap, updating, onUpdateExpiry, updatingExpiry }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
+  const [editingExpiry, setEditingExpiry] = useState(false);
+  const [expiryDraft, setExpiryDraft] = useState('');
 
   // /agency-apply is the focused, nav-free layout built for exactly this;
   // /jobs/:slug?ref=… only redirects there anyway. Falls back to the job id when
@@ -156,6 +164,22 @@ function AssignmentCard({ assignment, jobSlug, onRemove, onUpdateCap, updating }
     }
     onUpdateCap(assignment.id, value);
     setEditing(false);
+  }
+
+  const todayIST = formatIST(new Date(), 'yyyy-MM-dd');
+
+  function startExpiryEdit() {
+    setExpiryDraft(expiresAt ? formatIST(expiresAt, 'yyyy-MM-dd') : '');
+    setEditingExpiry(true);
+  }
+
+  function saveExpiry(clear = false) {
+    if (!clear && expiryDraft && expiryDraft < todayIST) {
+      toast.error('Pick today or a later date');
+      return;
+    }
+    onUpdateExpiry(assignment.id, clear ? null : endOfDayIST(expiryDraft));
+    setEditingExpiry(false);
   }
 
   return (
@@ -207,20 +231,49 @@ function AssignmentCard({ assignment, jobSlug, onRemove, onUpdateCap, updating }
                   <Pencil className="w-2.5 h-2.5 opacity-60" />
                 </button>
               )}
-              {expiresAt && (
-                <span
+              {editingExpiry ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <input
+                    type="date"
+                    autoFocus
+                    min={todayIST}
+                    value={expiryDraft}
+                    onChange={(e) => setExpiryDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') { e.preventDefault(); saveExpiry(); }
+                      if (e.key === 'Escape') setEditingExpiry(false);
+                    }}
+                    className="text-xs border border-brand-400 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                  <button onClick={() => saveExpiry()} disabled={updatingExpiry || !expiryDraft} aria-label="Save end date" className="text-emerald-600 hover:text-emerald-700 disabled:opacity-40">
+                    {updatingExpiry ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                  </button>
+                  {expiresAt && (
+                    <button onClick={() => saveExpiry(true)} disabled={updatingExpiry} title="Remove the end date" className="text-[11px] font-medium text-gray-500 hover:text-brand-700 disabled:opacity-40">
+                      No end date
+                    </button>
+                  )}
+                  <button onClick={() => setEditingExpiry(false)} aria-label="Cancel" className="text-gray-400 hover:text-gray-600">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </span>
+              ) : (
+                <button
+                  onClick={startExpiryEdit}
+                  title={expiresAt ? 'Extend or change the access window' : 'Set an end date'}
                   className={cn(
-                    'inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border',
+                    'inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border transition-colors',
                     expired
-                      ? 'bg-rose-50 text-rose-700 border-rose-200'
+                      ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
                       : expiringSoon
-                      ? 'bg-amber-50 text-amber-700 border-amber-200'
-                      : 'bg-surface-100 text-gray-600 border-transparent'
+                      ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+                      : 'bg-surface-100 text-gray-600 border-transparent hover:bg-brand-50 hover:text-brand-700'
                   )}
                 >
                   <CalendarClock className="w-3 h-3" />
-                  {expired ? 'Expired' : 'Until'} {formatIST(expiresAt, 'd MMM yyyy')}
-                </span>
+                  {expiresAt ? <>{expired ? 'Expired' : 'Until'} {formatIST(expiresAt, 'd MMM yyyy')}</> : 'No end date'}
+                  <Pencil className="w-2.5 h-2.5 opacity-60" />
+                </button>
               )}
             </div>
           </div>
@@ -233,11 +286,19 @@ function AssignmentCard({ assignment, jobSlug, onRemove, onUpdateCap, updating }
           </button>
         </div>
 
-        {expired && (
-          <p className="flex items-start gap-1.5 text-[11px] text-rose-700 mt-3">
-            <AlertCircle className="w-3 h-3 shrink-0 mt-px" />
-            Every submission against this is refused until you extend or remove it.
-          </p>
+        {expired && !editingExpiry && (
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-rose-700 mt-3">
+            <p className="flex items-start gap-1.5">
+              <AlertCircle className="w-3 h-3 shrink-0 mt-px" />
+              Every submission against this is refused until you extend or remove it.
+            </p>
+            <button
+              onClick={startExpiryEdit}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-semibold text-white bg-rose-500 hover:bg-rose-600 transition-colors"
+            >
+              <CalendarClock className="w-3 h-3" /> Extend access
+            </button>
+          </div>
         )}
 
         <CopyLink
@@ -312,6 +373,15 @@ export default function AgencyDetailPage() {
     mutationFn: ({ assignmentId, maxSubmissions }) => agenciesApi.updateAssignment(assignmentId, maxSubmissions),
     onSuccess: () => { toast.success('Submission cap updated'); refetchAssignments(); },
     onError: (err) => toast.error(err.response?.data?.detail ?? 'Could not update the cap'),
+  });
+
+  const expiryMutation = useMutation({
+    mutationFn: ({ assignmentId, expiresAt }) => agenciesApi.extendAssignment(assignmentId, expiresAt),
+    onSuccess: (_res, { expiresAt }) => {
+      toast.success(expiresAt ? 'Access window updated — the agency can submit again' : 'End date removed');
+      refetchAssignments();
+    },
+    onError: (err) => toast.error(err.response?.data?.detail ?? 'Could not update the access window'),
   });
 
   const toggleMutation = useMutation({
@@ -568,7 +638,7 @@ export default function AgencyDetailPage() {
                   assignMutation.mutate({
                     agency_id: agency.id,
                     max_submissions: maxSubs ? parseInt(maxSubs, 10) : undefined,
-                    expires_at: expiresAt || undefined,
+                    expires_at: endOfDayIST(expiresAt) || undefined,
                   });
                 }}
                 disabled={assignMutation.isPending || !selectedJob}
@@ -611,6 +681,8 @@ export default function AgencyDetailPage() {
                 onRemove={setPendingRemove}
                 onUpdateCap={(assignmentId, maxSubmissions) => capMutation.mutate({ assignmentId, maxSubmissions })}
                 updating={capMutation.isPending}
+                onUpdateExpiry={(assignmentId, expiresAt) => expiryMutation.mutate({ assignmentId, expiresAt })}
+                updatingExpiry={expiryMutation.isPending}
               />
             ))}
           </div>

@@ -53,6 +53,10 @@ class ReferralResponse(BaseModel):
     # Set once the candidate has a real application — lets HR jump straight to
     # the actual pipeline entry instead of managing status from this page.
     application_id: Optional[uuid.UUID] = None
+    # The linked application's stage, referrer-safe: an in-pipeline stage key
+    # (e.g. "tr1") or "closed" for any closed outcome. None until they apply.
+    stage: Optional[str] = None
+    stage_label: Optional[str] = None
 
 
 class ReferralListResponse(BaseModel):

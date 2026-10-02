@@ -17,6 +17,9 @@ from app.constants.stages import ROUND_ELIGIBLE_STAGE, ROUND_LABELS, ROUND_ORDER
 from app.utils.rounds import round_display_label
 
 _HR_ROLES = ("hr_manager", "admin", "super_admin")
+# Who can sit on an interview panel — also what the panelist picker lists
+# (routers/users.py, panel_eligible=true).
+PANEL_ROLES = {"interviewer", "hr_manager", "admin", "super_admin"}
 
 
 async def _users_by_id(db: AsyncSession, user_ids: set) -> dict:
@@ -604,7 +607,7 @@ async def create_interview(
     # prevent. The STAGE rule stays a slot-booking concern (HR legitimately
     # schedules ahead of a stage move); the duplicate rule applies to everyone.
     if check_round and round_type:
-        from app.services.interview_slot_service import get_booked_rounds
+        from app.services.interview_slot_service import get_booked_rounds, assert_interviewers_not_repeated
         from app.constants.stages import ROUND_LABELS as _RL
         booked = await get_booked_rounds(db, [data.application_id])
         if round_type in booked.get(data.application_id, set()):
@@ -613,6 +616,12 @@ async def create_interview(
                 f"This candidate already has a live {_RL.get(round_type, round_type)} "
                 f"interview. Cancel it first if it needs to move.",
             )
+        # Observers may sit in on any number of rounds; only the interviewer
+        # role is held to "a different person each round".
+        await assert_interviewers_not_repeated(
+            db, application_id=data.application_id, round_type=round_type,
+            interviewer_ids=[p.user_id for p in data.panelists if p.role == "interviewer"],
+        )
 
     # One sorted lock over every person involved — interviewers and candidate —
     # before either calendar is read. See _lock_people: splitting this into two
@@ -749,6 +758,88 @@ def dispatch_interview_created_tasks(
             send_interview_scheduled_notifications.delay(str(interview.id), cc_emails=cc_emails)
     except Exception:
         pass
+
+
+async def add_panelist(
+    db: AsyncSession,
+    interview_id: uuid.UUID,
+    user_id: uuid.UUID,
+    role: str,
+    added_by: Optional[uuid.UUID] = None,
+) -> InterviewResponse:
+    """Adds an interviewer or observer to an interview that's already
+    scheduled. Same rules as scheduling: panel-eligible user, no calendar
+    clash, and an interviewer may not repeat across rounds for one candidate
+    (observers may). Only the new panelist is notified — added to the Teams
+    invite if one exists, and sent their own "Interview Assigned" email."""
+    from app.models.user import User
+    from app.models.application import Application
+    from app.models.notification import Notification
+    from app.services.interview_slot_service import assert_interviewers_not_repeated
+
+    interview = await db.get(Interview, interview_id)
+    if not interview:
+        raise HTTPException(404, "Interview not found")
+    if interview.status not in ("scheduled", "rescheduled"):
+        raise HTTPException(400, "Panelists can only be added to an upcoming interview.")
+
+    user = await db.get(User, user_id)
+    if not user or not user.is_active or user.role not in PANEL_ROLES:
+        raise HTTPException(400, "This person can't be added to an interview panel.")
+
+    existing = (await db.execute(
+        select(InterviewPanelist).where(
+            InterviewPanelist.interview_id == interview_id,
+            InterviewPanelist.user_id == user_id,
+        )
+    )).scalar_one_or_none()
+    if existing:
+        raise HTTPException(409, f"{user.full_name} is already on this panel as {existing.role}.")
+
+    if role == "interviewer" and interview.round_type:
+        await assert_interviewers_not_repeated(
+            db, application_id=interview.application_id, round_type=interview.round_type,
+            interviewer_ids=[user_id],
+        )
+
+    await _lock_people(db, [user_id])
+    conflicts = await _check_panelist_conflicts(
+        db, [user_id], interview.scheduled_at, interview.duration_mins, lock=False,
+    )
+    if conflicts:
+        raise HTTPException(409, f"Scheduling conflict: {user.full_name} already has an interview at this time.")
+
+    db.add(InterviewPanelist(interview_id=interview_id, user_id=user_id, role=role))
+
+    app = await db.get(Application, interview.application_id)
+    await _claim_open_slot_for_panelist(
+        db, interviewer_id=user_id, start_time=interview.scheduled_at,
+        interview_id=interview.id, job_id=app.job_id if app else None,
+        round_type=interview.round_type, duration_mins=interview.duration_mins, booked_by=added_by,
+    )
+
+    candidate = await db.get(User, app.applicant_id) if app else None
+    db.add(Notification(
+        user_id=user_id,
+        type="interview_assigned",
+        title="You've been added to an interview",
+        body=(
+            f"You've been added as {role} for {candidate.full_name if candidate else 'a candidate'}'s "
+            f"interview on {format_ist(interview.scheduled_at)}."
+        ),
+        link="/hr/interviews",
+    ))
+
+    await db.commit()
+
+    # After commit, same reason as dispatch_interview_created_tasks.
+    try:
+        from app.tasks.calendar_tasks import add_teams_attendee_task
+        add_teams_attendee_task.delay(str(interview_id), str(user_id))
+    except Exception:
+        pass
+
+    return await get_interview(db, interview_id)
 
 
 async def list_my_interviews(

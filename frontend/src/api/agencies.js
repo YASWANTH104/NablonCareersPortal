@@ -9,6 +9,9 @@ export const agenciesApi = {
   listAgencyAssignments: (agencyId) => client.get(`/agencies/${agencyId}/assignments`),
   updateAssignment: (assignmentId, maxSubmissions) =>
     client.patch(`/agencies/assignments/${assignmentId}`, { max_submissions: maxSubmissions }),
+  // expiresAt: ISO datetime, or null to make the assignment open-ended.
+  extendAssignment: (assignmentId, expiresAt) =>
+    client.patch(`/agencies/assignments/${assignmentId}`, { expires_at: expiresAt }),
   removeAssignment: (assignmentId) => client.delete(`/agencies/assignments/${assignmentId}`),
   portal: (portalToken) => client.get(`/agency-portal/${portalToken}`),
   portalAssignment: (portalToken, assignmentId) =>

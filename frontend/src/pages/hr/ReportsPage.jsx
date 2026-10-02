@@ -589,7 +589,7 @@ function JobPerformanceReport({ days }) {
               <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Applications</th>
               <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">In Progress</th>
               <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Hired</th>
-              <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Rejected</th>
+              <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Not Proceeding</th>
               <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Conversion</th>
               <th className="py-2.5 px-3 text-xs font-medium text-gray-500">Pipeline</th>
               <th className="py-2.5 px-3 w-8" />
@@ -922,7 +922,7 @@ function AgencyPerformanceReport({ days }) {
               <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Submitted</th>
               <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">In Progress</th>
               <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Hired</th>
-              <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Rejected</th>
+              <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Not Proceeding</th>
               <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Conversion</th>
               <th className="py-2.5 px-3 text-xs font-medium text-gray-500">Pipeline</th>
             </tr>

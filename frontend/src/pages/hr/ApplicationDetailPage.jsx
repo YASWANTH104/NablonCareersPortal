@@ -11,7 +11,7 @@ import {
   Clock, User, Github, Linkedin, Globe, ChevronDown, Plus, Loader2,
   Video, Phone, MapPin, CheckCircle2, AlertCircle, Send, FolderOpen, Download, Eye, X,
   Pencil, Wallet, Briefcase, GraduationCap, AlertTriangle, Pause, PlayCircle, ArrowRightLeft,
-  Paperclip, XCircle, Trash2, Layers,
+  Paperclip, XCircle, Trash2, Layers, UserPlus, Users,
 } from 'lucide-react';
 import { PendingAttachmentChip, NoteAttachmentGallery } from '@/components/shared/NoteAttachments';
 import FilePreviewModal from '@/components/shared/FilePreviewModal';
@@ -1083,6 +1083,146 @@ const rescheduleSchema = z.object({
   location: z.string().optional(),
 }).superRefine(refineMeetingDetails);
 
+function AddPanelistDialog({ interview, onClose, onSuccess }) {
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState(null);
+  const [role, setRole] = useState('observer');
+  const [availability, setAvailability] = useState(null);
+  const [checking, setChecking] = useState(false);
+
+  const { data: eligibleUsers = [] } = useQuery({
+    queryKey: ['panel-eligible-users'],
+    queryFn: () => usersApi.panelEligible().then((r) => r.data),
+  });
+
+  const onPanel = new Set((interview.panelists ?? []).map((p) => String(p.user_id)));
+  const candidates = eligibleUsers.filter(
+    (u) => !onPanel.has(String(u.id))
+      && (!search || u.full_name.toLowerCase().includes(search.toLowerCase()))
+  );
+
+  // Informational only, same as the schedule dialog — the backend is the gate.
+  useEffect(() => {
+    if (!selected) { setAvailability(null); return undefined; }
+    let cancelled = false;
+    setChecking(true);
+    interviewsApi
+      .checkAvailability({
+        panelist_ids: [selected.id],
+        scheduled_at: interview.scheduled_at,
+        duration_mins: interview.duration_mins ?? 60,
+        exclude_interview_id: interview.id,
+      })
+      .then((res) => { if (!cancelled) setAvailability(res.data[0] ?? null); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setChecking(false); });
+    return () => { cancelled = true; };
+  }, [selected, interview.id, interview.scheduled_at, interview.duration_mins]);
+
+  const addMutation = useMutation({
+    mutationFn: () => interviewsApi.addPanelist(interview.id, { user_id: selected.id, role }),
+    onSuccess: () => {
+      toast.success(`${selected.full_name} added as ${role} — they'll get the invite by email`);
+      onSuccess();
+      onClose();
+    },
+    onError: (err) => toast.error(err.response?.data?.detail ?? 'Could not add this panelist'),
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-modal w-full max-w-md max-h-[92dvh] overflow-y-auto">
+        <div className="px-5 py-4 border-b border-surface-200">
+          <h3 className="font-display font-bold text-gray-900">Add a panelist</h3>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {interviewRoundLabel(interview)} · {format(toIST(interview.scheduled_at), 'EEE d MMM, h:mm a')} IST
+          </p>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {selected ? (
+            <div className="flex items-center gap-2 bg-surface-50 border border-surface-200 rounded-lg pl-2 pr-1.5 py-1.5">
+              <span className="w-7 h-7 rounded-full bg-brand-100 text-brand-700 text-xs font-semibold flex items-center justify-center flex-shrink-0">
+                {selected.full_name.charAt(0).toUpperCase()}
+              </span>
+              <span className="text-sm text-gray-800 flex-1 min-w-0 truncate">{selected.full_name}</span>
+              <AvailabilityChip status={availability?.status} label={availability?.label} loading={checking} />
+              <button type="button" onClick={() => setSelected(null)} aria-label="Change person" className="text-gray-400 hover:text-red-500 px-1">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
+            <div>
+              <input
+                type="text"
+                autoFocus
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by name…"
+                className="w-full px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              />
+              <div className="mt-2 max-h-56 overflow-y-auto border border-surface-200 rounded-lg divide-y divide-surface-100">
+                {candidates.length === 0 ? (
+                  <p className="px-3 py-3 text-xs text-gray-400">No one else is available to add.</p>
+                ) : (
+                  candidates.slice(0, 50).map((u) => (
+                    <button
+                      key={u.id}
+                      type="button"
+                      onClick={() => setSelected(u)}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"
+                    >
+                      {u.full_name}
+                      <span className="text-xs text-gray-400 ml-1.5">{u.email}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <p className="text-sm font-medium text-gray-700 mb-1.5">Joins as</p>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { value: 'observer', label: 'Observer', hint: 'Sits in, no feedback asked' },
+                { value: 'interviewer', label: 'Interviewer', hint: 'Asked for feedback' },
+              ].map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setRole(opt.value)}
+                  className={cn(
+                    'text-left px-3 py-2 rounded-lg border transition-colors',
+                    role === opt.value ? 'border-brand-400 bg-brand-50 ring-2 ring-brand-100' : 'border-surface-200 hover:border-surface-300',
+                  )}
+                >
+                  <span className="block text-sm font-semibold text-gray-900">{opt.label}</span>
+                  <span className="block text-[11px] text-gray-500">{opt.hint}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 px-5 py-3 border-t border-surface-100 bg-surface-50/60">
+          <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-surface-100 rounded-lg transition-colors">
+            Cancel
+          </button>
+          <button
+            onClick={() => addMutation.mutate()}
+            disabled={!selected || addMutation.isPending}
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-brand-500 text-white text-sm font-semibold rounded-lg hover:bg-brand-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            {addMutation.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
+            Add to panel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RescheduleInterviewDialog({ interview, onClose, onSuccess }) {
   const existingDate = utcToISTInputValue(interview.scheduled_at);
   const needsPhone = interview.interview_type === 'phone';
@@ -1511,6 +1651,7 @@ export default function ApplicationDetailPage() {
   const [showScheduleDialog, setShowScheduleDialog] = useState(false);
   const [showScheduleAssessment, setShowScheduleAssessment] = useState(false);
   const [showRescheduleFor, setShowRescheduleFor] = useState(null);
+  const [addPanelistFor, setAddPanelistFor] = useState(null);
   const [showFeedbackFor, setShowFeedbackFor] = useState(null);
   const [pendingReasonStage, setPendingReasonStage] = useState(null); // stage name awaiting a reason, or null
   const [editingDetails, setEditingDetails] = useState(false);
@@ -2347,6 +2488,37 @@ export default function ApplicationDetailPage() {
                       )}
                     </div>
                   ) : null}
+
+                  {((interview.panelists?.length ?? 0) > 0 || (canManage && isLive)) && (
+                    <div className="px-5 pb-4 -mt-1 flex items-center gap-1.5 flex-wrap">
+                      <Users className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                      {(interview.panelists ?? []).map((p) => (
+                        <span
+                          key={p.user_id}
+                          className="inline-flex items-center gap-1.5 pl-1 pr-2 py-0.5 rounded-full bg-surface-50 border border-surface-200 text-xs text-gray-700"
+                        >
+                          <span className="w-5 h-5 rounded-full bg-brand-100 text-brand-700 text-[10px] font-semibold flex items-center justify-center">
+                            {(p.full_name ?? '?').charAt(0).toUpperCase()}
+                          </span>
+                          {p.full_name ?? 'Unknown'}
+                          <span className={cn(
+                            'text-[10px] font-semibold uppercase tracking-wide',
+                            p.role === 'observer' ? 'text-gray-400' : 'text-brand-600',
+                          )}>
+                            {p.role === 'observer' ? 'Observer' : 'Interviewer'}
+                          </span>
+                        </span>
+                      ))}
+                      {canManage && isLive && (
+                        <button
+                          onClick={() => setAddPanelistFor(interview)}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold text-brand-600 hover:bg-brand-50 transition-colors"
+                        >
+                          <UserPlus className="w-3.5 h-3.5" /> Add panelist
+                        </button>
+                      )}
+                    </div>
+                  )}
 
                   {interview.notes && (
                     <p className="mx-5 mb-4 text-xs text-gray-600 bg-surface-50 border border-surface-100 rounded-lg p-3 leading-relaxed whitespace-pre-wrap">
@@ -3233,6 +3405,14 @@ export default function ApplicationDetailPage() {
         <RescheduleInterviewDialog
           interview={showRescheduleFor}
           onClose={() => setShowRescheduleFor(null)}
+          onSuccess={() => refetchInterviews()}
+        />
+      )}
+
+      {addPanelistFor && (
+        <AddPanelistDialog
+          interview={addPanelistFor}
+          onClose={() => setAddPanelistFor(null)}
           onSuccess={() => refetchInterviews()}
         />
       )}

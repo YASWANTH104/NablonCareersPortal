@@ -739,15 +739,23 @@ async def _send_batch(sends) -> None:
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
-def send_interview_scheduled_notifications(self, interview_id: str, cc_emails: list[str] | None = None):
+def send_interview_scheduled_notifications(
+    self, interview_id: str, cc_emails: list[str] | None = None, only_panelist_id: str | None = None,
+):
     try:
-        asyncio.run(_send_interview_scheduled_async(interview_id, cc_emails=cc_emails))
+        asyncio.run(_send_interview_scheduled_async(
+            interview_id, cc_emails=cc_emails, only_panelist_id=only_panelist_id,
+        ))
     except Exception as exc:
         logger.error(f"Interview scheduled email failed: interview={interview_id}: {exc}")
         raise self.retry(exc=exc)
 
 
-async def _send_interview_scheduled_async(interview_id: str, cc_emails: list[str] | None = None):
+async def _send_interview_scheduled_async(
+    interview_id: str, cc_emails: list[str] | None = None, only_panelist_id: str | None = None,
+):
+    """`only_panelist_id`: a panelist added after scheduling — email just them,
+    not the candidate or the panel who were already notified."""
     from sqlalchemy import select
     from app.models.interview import Interview, InterviewPanelist
     from app.models.application import Application
@@ -786,7 +794,7 @@ async def _send_interview_scheduled_async(interview_id: str, cc_emails: list[str
         }
 
         sends = []
-        if candidate:
+        if candidate and not only_panelist_id:
             sends.append((candidate.email, lambda c=candidate: send_email(
                 to_email=c.email,
                 subject=f"Interview Scheduled – {job_title}",
@@ -795,9 +803,10 @@ async def _send_interview_scheduled_async(interview_id: str, cc_emails: list[str
                 cc_email=cc_emails,
             )))
 
-        panelists = (await db.execute(
-            select(InterviewPanelist).where(InterviewPanelist.interview_id == iv_uuid)
-        )).scalars().all()
+        panelist_q = select(InterviewPanelist).where(InterviewPanelist.interview_id == iv_uuid)
+        if only_panelist_id:
+            panelist_q = panelist_q.where(InterviewPanelist.user_id == uuid.UUID(only_panelist_id))
+        panelists = (await db.execute(panelist_q)).scalars().all()
         for p in panelists:
             interviewer = await db.get(User, p.user_id)
             if interviewer:

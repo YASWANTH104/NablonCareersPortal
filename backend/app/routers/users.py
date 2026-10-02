@@ -19,7 +19,7 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 _ADMIN_ROLES = (Role.ADMIN, Role.SUPER_ADMIN)
 _HR_ROLES = (Role.HR_MANAGER, Role.ADMIN, Role.SUPER_ADMIN)
-PANEL_ROLES = {"interviewer", "hr_manager", "admin", "super_admin"}
+from app.services.interview_service import PANEL_ROLES
 VALID_ROLES = {"super_admin", "admin", "hr_manager", "interviewer", "employee", "applicant"}
 
 
