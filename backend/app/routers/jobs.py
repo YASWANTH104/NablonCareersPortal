@@ -71,6 +71,15 @@ async def list_jobs(
             "rejects with a 403."
         ),
     ),
+    public_board: bool = Query(
+        False,
+        description=(
+            "Force the public job-board listing regardless of who is logged in. "
+            "The public /jobs page and landing page send the caller's token, so "
+            "without this an HR user got the admin list there — drafts/closed "
+            "roles shown and the location/employment filters silently ignored."
+        ),
+    ),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     current_user=Depends(get_optional_user),
@@ -80,7 +89,7 @@ async def list_jobs(
     is_hr = current_user and current_user.role in hr_roles
     is_internal_viewer = current_user is not None and current_user.role != Role.APPLICANT.value
 
-    if is_hr and not for_referral:
+    if is_hr and not for_referral and not public_board:
         return await job_service.list_jobs_hr(
             db, status=status, search=search, page=page, limit=limit
         )
@@ -92,7 +101,7 @@ async def list_jobs(
         employment_type=employment_type,
         page=page,
         limit=limit,
-        audience="referral" if is_internal_viewer else "public",
+        audience="referral" if is_internal_viewer and not public_board else "public",
     )
 
 

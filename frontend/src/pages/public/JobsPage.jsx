@@ -51,7 +51,7 @@ export default function JobsPage() {
     queryKey: ['public-jobs', { search, locationType, employmentType, page }],
     queryFn: () =>
       jobsApi
-        .list({
+        .listPublic({
           search: search || undefined,
           location_type: locationType || undefined,
           employment_type: employmentType || undefined,
