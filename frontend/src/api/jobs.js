@@ -1,7 +1,10 @@
 import client from './client';
 
 export const jobsApi = {
-  listPublic: (params) => client.get('/jobs', { params }),
+  // The public board (/jobs, landing page) must show exactly what an anonymous
+  // visitor sees — without `public_board` a logged-in HR user got the admin
+  // list (drafts included, location/employment filters ignored).
+  listPublic: (params) => client.get('/jobs', { params: { ...params, public_board: true } }),
   // Jobs the caller is actually allowed to refer someone for. HR hitting the
   // plain list gets the admin view (every job, any status, filters ignored),
   // which the Refer a Candidate page must never show — `for_referral` pins it

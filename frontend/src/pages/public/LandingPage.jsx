@@ -243,7 +243,7 @@ function FeaturedJobCard({ job }) {
 export default function LandingPage() {
   const { data: jobsData } = useQuery({
     queryKey: ['public-jobs', 'featured'],
-    queryFn: () => jobsApi.list({ page: 1, limit: 3 }).then((r) => r.data),
+    queryFn: () => jobsApi.listPublic({ page: 1, limit: 3 }).then((r) => r.data),
   });
 
   const openRoles = jobsData?.total ?? null;
