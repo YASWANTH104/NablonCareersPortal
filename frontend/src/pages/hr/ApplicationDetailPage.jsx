@@ -2341,7 +2341,7 @@ export default function ApplicationDetailPage() {
                   {appSource.label}
                   {appSource.by && (
                     <span className="block text-xs text-gray-500 mt-0.5">
-                      {app.source === 'talent_acquisition' ? `TA - ${appSource.by}` : `by ${appSource.by}`}
+                      {app.source === 'talent_acquisition' ? `TA - ${appSource.by}` : app.source === 'campus' ? appSource.by : `by ${appSource.by}`}
                     </span>
                   )}
                 </dd>

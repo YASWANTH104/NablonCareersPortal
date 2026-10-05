@@ -147,6 +147,9 @@ export function describeApplicationSource(app) {
   if (app.source === 'direct') {
     return { label: 'Applied directly', by: null };
   }
+  if (app.source === 'campus') {
+    return { label: 'Campus Placement', by: app.campus_name || null };
+  }
   // talent_acquisition and anything added later
   return { label: titleCase(app.source), by: app.sourced_by_name || null };
 }

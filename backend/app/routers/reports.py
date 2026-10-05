@@ -30,7 +30,7 @@ FUNNEL_STAGES = [
 
 PIPELINE_STAGES = FUNNEL_STAGES + ["rejected", "withdrawn"]
 
-KNOWN_SOURCES = ["direct", "referral", "agency", "talent_acquisition"]
+KNOWN_SOURCES = ["direct", "referral", "agency", "talent_acquisition", "campus"]
 
 _TREND_BUCKETS = {"day", "week", "month"}
 
