@@ -1,4 +1,6 @@
+import hashlib
 import logging
+import re
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 import os
 
@@ -38,6 +40,34 @@ async def send_email(
         return False
 
 
+_DATA_URI_IMG = re.compile(r'src="data:(image/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+)"')
+
+
+def _inline_data_uri_images(html_content: str) -> tuple[str, list[dict]]:
+    """Gmail strips and Outlook blocks <img src="data:..."> — the image just
+    doesn't render. Swap each one for a cid: reference and return the bytes
+    as inline Graph attachments, which every major client displays. Identical
+    images share one attachment."""
+    inline: dict[str, dict] = {}
+
+    def _swap(m: re.Match) -> str:
+        content_type, b64 = m.group(1), re.sub(r"\s", "", m.group(2))
+        cid = f"img-{hashlib.sha1(b64.encode()).hexdigest()[:16]}@nablon"
+        if cid not in inline:
+            ext = content_type.split("/")[1].split("+")[0]
+            inline[cid] = {
+                "@odata.type": "#microsoft.graph.fileAttachment",
+                "name": f"{cid.split('@')[0]}.{ext}",
+                "contentType": content_type,
+                "contentBytes": b64,
+                "contentId": cid,
+                "isInline": True,
+            }
+        return f'src="cid:{cid}"'
+
+    return _DATA_URI_IMG.sub(_swap, html_content), list(inline.values())
+
+
 async def _send_via_graph(
     to_email: str | list[str],
     subject: str,
@@ -59,6 +89,7 @@ async def _send_via_graph(
     from app.services import ms_graph_service
 
     token = await ms_graph_service._get_app_token()
+    html_content, inline_images = _inline_data_uri_images(html_content)
     recipients = [to_email] if isinstance(to_email, str) else to_email
     message = {
         "subject": subject,
@@ -68,16 +99,17 @@ async def _send_via_graph(
     if cc_email:
         cc_list = [cc_email] if isinstance(cc_email, str) else cc_email
         message["ccRecipients"] = [{"emailAddress": {"address": addr}} for addr in cc_list]
-    if attachments:
-        message["attachments"] = [
-            {
-                "@odata.type": "#microsoft.graph.fileAttachment",
-                "name": a["name"],
-                "contentType": a["contentType"],
-                "contentBytes": a["contentInBase64"],
-            }
-            for a in attachments
-        ]
+    graph_attachments = [
+        {
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            "name": a["name"],
+            "contentType": a["contentType"],
+            "contentBytes": a["contentInBase64"],
+        }
+        for a in (attachments or [])
+    ] + inline_images
+    if graph_attachments:
+        message["attachments"] = graph_attachments
 
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
