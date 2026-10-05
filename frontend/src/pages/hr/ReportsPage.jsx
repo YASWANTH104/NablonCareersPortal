@@ -36,10 +36,10 @@ const TABS = [
 // node scripts/validate_palette.js "#6366f1,#10b981,#f59e0b,#8b5cf6" --mode light → ALL PASS
 const SOURCE_LABELS = {
   direct: 'Direct', referral: 'Referral', agency: 'Agency',
-  talent_acquisition: 'Talent Acquisition',
+  talent_acquisition: 'Talent Acquisition', campus: 'Campus Placement',
 };
 const SOURCE_COLORS = {
-  direct: '#6366f1', referral: '#10b981', agency: '#f59e0b', talent_acquisition: '#8b5cf6',
+  direct: '#6366f1', referral: '#10b981', agency: '#f59e0b', talent_acquisition: '#8b5cf6', campus: '#ec4899',
 };
 const sourceLabel = (s) => SOURCE_LABELS[s] ?? s;
 const sourceColor = (s) => SOURCE_COLORS[s] ?? '#94a3b8';

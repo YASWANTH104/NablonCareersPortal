@@ -23,7 +23,7 @@ import { useAuthStore } from '@/store/authStore';
 import { HR_ROLES } from '@/utils/permissions';
 import { describeApplicationSource } from '@/utils/formatters';
 
-// Same 4 values as Application.source on the backend — kept here rather than a
+// Same 5 values as Application.source on the backend — kept here rather than a
 // shared constants file since only this page's filter dropdown needs the list
 // (ReportsPage keeps its own copy for chart labels/colors, ApplicantsPage's
 // add-candidate modal keeps its own narrower copy for submission — see
@@ -33,6 +33,7 @@ const SOURCE_FILTER_OPTIONS = [
   { value: 'referral', label: 'Referral' },
   { value: 'agency', label: 'Agency' },
   { value: 'talent_acquisition', label: 'Talent Acquisition' },
+  { value: 'campus', label: 'Campus Placement' },
 ];
 
 function initials(name) {
