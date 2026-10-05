@@ -33,37 +33,36 @@ def send_delayed_screening_rejection_emails():
     email was held (see application_service.move_stage(notify_delay=)) —
     so this only ever fires the email, never a stage change.
 
-    Idempotent: marks rejection_email_sent_at right after queuing so a
-    second sweep before the Celery task actually runs never double-queues
-    the same application (same mark-then-fire convention as
-    screening_service.create_and_queue_email)."""
+    Idempotent: claims each row with a conditional UPDATE and commits that
+    mark BEFORE queuing any email. Queuing first and committing after meant a
+    failed commit (it happened: an unregistered model broke the flush) left
+    every row unmarked, so the same candidates were re-emailed every sweep.
+    The conditional UPDATE also means two overlapping sweeps (e.g. old and
+    new beat revisions during a deploy) can never both claim the same row."""
     from datetime import datetime, timezone
-    from sqlalchemy import select
+    from sqlalchemy import update
     from app.models.application import Application
     from app.tasks.email_tasks import send_stage_update_email
 
     async def _run():
-        sent = 0
         async with _task_session() as db:
             now = datetime.now(timezone.utc)
-            rows = (await db.execute(
-                select(Application).where(
+            claimed = (await db.execute(
+                update(Application)
+                .where(
                     Application.stage == "rejected",
                     Application.rejection_notify_at.isnot(None),
                     Application.rejection_notify_at <= now,
                     Application.rejection_email_sent_at.is_(None),
                 )
-            )).scalars().all()
-
-            for app in rows:
-                send_stage_update_email.delay(
-                    str(app.id), "rejected", app.rejection_notify_from_stage
-                )
-                app.rejection_email_sent_at = now
-                sent += 1
-
+                .values(rejection_email_sent_at=now)
+                .returning(Application.id, Application.rejection_notify_from_stage)
+            )).all()
             await db.commit()
-        return sent
+
+        for app_id, from_stage in claimed:
+            send_stage_update_email.delay(str(app_id), "rejected", from_stage)
+        return len(claimed)
 
     count = asyncio.run(_run())
     return f"Sent {count} delayed screening rejection email(s)"

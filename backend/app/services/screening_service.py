@@ -14,8 +14,10 @@ composite score, via classify_college_nirf / app/constants/nirf_rankings.py
 (NIRF India Rankings 2025, Engineering category) — no college signal, however
 weak or unranked, can by itself reject a candidate.
 
-Applies uniformly regardless of source — referral-sourced applications are
-not exempt from the questionnaire (see create_and_queue_email).
+Skipped entirely for SCREENING_EXEMPT_SOURCES (TA-sourced, referral and
+campus placement applications) — those are already vetted by a person before
+they enter the pipeline. Direct and agency applications get the questionnaire
+(see create_and_queue_email).
 
 Everything else (college score for names outside the static NIRF list, and
 the skills/project judgement) is AI-assisted where available and degrades to
@@ -65,6 +67,13 @@ CGPA_HARD_MIN = 7.5
 # sends it — see the module docstring. The stage move to "rejected" itself
 # is NOT delayed, only the email.
 REJECTION_EMAIL_DELAY = timedelta(days=2)
+
+# Application sources that never get the screening questionnaire, even on a
+# job with screening_enabled=True. TA-sourced, referral and campus placement
+# candidates are hand-picked by a recruiter / employee / placement cell, so the
+# questionnaire is redundant for them. They stay at `applied` for HR to move on
+# manually.
+SCREENING_EXEMPT_SOURCES = frozenset({"talent_acquisition", "referral", "campus"})
 
 # Third hard gate, applied after the composite score is computed (college tier
 # and CGPA gates above run first and short-circuit before this is ever
@@ -518,12 +527,14 @@ async def create_and_queue_email(db: AsyncSession, application_id: uuid.UUID) ->
     since that would fire only after the stage had already flipped past
     `applied`.
 
-    Applies to every source, referrals included — no exemption for
-    referral-sourced applications."""
+    Skipped for SCREENING_EXEMPT_SOURCES (TA-sourced, referral, campus
+    placement). Direct and agency applications get it."""
     from app.models.application import Application
 
     application = await db.get(Application, application_id)
     if not application or application.stage != "applied":
+        return
+    if application.source in SCREENING_EXEMPT_SOURCES:
         return
 
     req = await get_or_create_request(db, application_id)
@@ -695,6 +706,10 @@ async def auto_reject_expired(db: AsyncSession) -> int:
     for req in expired:
         application = await db.get(Application, req.application_id)
         if not application or application.stage != "applied":
+            continue
+        # A TA/referral/campus candidate sent the questionnaire before the exemption
+        # existed must not be rejected for ignoring a form they no longer need.
+        if application.source in SCREENING_EXEMPT_SOURCES:
             continue
 
         try:
