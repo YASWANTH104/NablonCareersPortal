@@ -456,7 +456,7 @@ export default function JobEditPage() {
             <FieldLabel>Who can apply</FieldLabel>
             <label className="flex items-center gap-2 cursor-pointer mb-3">
               <input {...register('is_internal')} type="checkbox" className="rounded border-surface-300 text-brand-500 focus:ring-brand-500" />
-              <span className="text-sm text-gray-700">Internal team only (hidden from the public job board and referrals)</span>
+              <span className="text-sm text-gray-700">Internal team only (hidden from the public job board; open to employee referrals)</span>
             </label>
 
             {!watchIsInternal && (

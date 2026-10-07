@@ -516,7 +516,121 @@ async def agency_performance(
     return result
 
 
-ReportKey = Literal["funnel", "pipeline", "trend", "job", "source", "referral", "tth", "agency"]
+_INTERVIEW_ROUNDS = ["screening", "tr1", "tr2", "final_tr", "hr"]
+_POSITIVE_RECS = {"strong_yes", "yes"}
+_NEGATIVE_RECS = {"strong_no", "no"}
+
+
+@router.get("/interviewer-performance")
+async def interviewer_performance(
+    days: int = Query(90, ge=1, le=365),
+    _=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Per-interviewer interview load for interviews scheduled in the window.
+    Counts only panelists with role 'interviewer' (observers excluded).
+    'conducted' = interview status completed (set manually or by the
+    auto-complete task once the slot ends). Round breakdown is over conducted
+    interviews; round_type NULL lands in 'other'."""
+    from app.models.interview import Interview, InterviewPanelist, InterviewFeedback
+
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+
+    rows = (await db.execute(
+        select(
+            InterviewPanelist.user_id,
+            User.full_name,
+            User.email,
+            Interview.id.label("interview_id"),
+            Interview.status,
+            Interview.round_type,
+            Interview.scheduled_at,
+        )
+        .join(Interview, InterviewPanelist.interview_id == Interview.id)
+        .join(User, InterviewPanelist.user_id == User.id)
+        .where(
+            InterviewPanelist.role == "interviewer",
+            Interview.scheduled_at >= since,
+        )
+    )).all()
+
+    interview_ids = {r.interview_id for r in rows}
+    feedback: dict = {}
+    if interview_ids:
+        fb_rows = (await db.execute(
+            select(
+                InterviewFeedback.interview_id,
+                InterviewFeedback.submitted_by,
+                InterviewFeedback.recommendation,
+                InterviewFeedback.overall_rating,
+            ).where(InterviewFeedback.interview_id.in_(interview_ids))
+        )).all()
+        for f in fb_rows:
+            feedback[(f.interview_id, f.submitted_by)] = f
+
+    stats: dict = {}
+    for r in rows:
+        s = stats.setdefault(r.user_id, {
+            "interviewer_id": str(r.user_id),
+            "name": r.full_name,
+            "email": r.email,
+            "total_assigned": 0,
+            "conducted": 0,
+            "upcoming": 0,
+            "cancelled": 0,
+            "no_show": 0,
+            "feedback_submitted": 0,
+            "feedback_pending": 0,
+            "positive": 0,
+            "negative": 0,
+            "neutral": 0,
+            "_ratings": [],
+            "by_round": {k: 0 for k in _INTERVIEW_ROUNDS + ["other"]},
+            "last_interview_at": None,
+        })
+        s["total_assigned"] += 1
+        status = r.status
+        if status == "completed":
+            s["conducted"] += 1
+            rk = r.round_type if r.round_type in _INTERVIEW_ROUNDS else "other"
+            s["by_round"][rk] += 1
+            if s["last_interview_at"] is None or r.scheduled_at > s["last_interview_at"]:
+                s["last_interview_at"] = r.scheduled_at
+            fb = feedback.get((r.interview_id, r.user_id))
+            if fb:
+                s["feedback_submitted"] += 1
+                if fb.recommendation in _POSITIVE_RECS:
+                    s["positive"] += 1
+                elif fb.recommendation in _NEGATIVE_RECS:
+                    s["negative"] += 1
+                elif fb.recommendation:
+                    s["neutral"] += 1
+                if fb.overall_rating is not None:
+                    s["_ratings"].append(fb.overall_rating)
+            else:
+                s["feedback_pending"] += 1
+        elif status == "cancelled":
+            s["cancelled"] += 1
+        elif status == "no_show":
+            s["no_show"] += 1
+        elif status in ("scheduled", "rescheduled") and r.scheduled_at > now:
+            s["upcoming"] += 1
+
+    result = []
+    for s in stats.values():
+        ratings = s.pop("_ratings")
+        s["avg_rating"] = round(sum(ratings) / len(ratings), 1) if ratings else None
+        s["feedback_rate"] = round(s["feedback_submitted"] / s["conducted"] * 100, 1) if s["conducted"] else 0
+        s["by_round"] = [{"round": k, "count": v} for k, v in s["by_round"].items()]
+        s["last_interview_at"] = s["last_interview_at"].isoformat() if s["last_interview_at"] else None
+        result.append(s)
+
+    result.sort(key=lambda x: (x["conducted"], x["total_assigned"]), reverse=True)
+    return result
+
+
+ReportKey = Literal["funnel", "pipeline", "trend", "job", "source", "referral", "tth", "agency", "interviewer"]
 
 
 async def _fetch_report_data(report: str, *, db: AsyncSession, days: int, bucket: str = "day"):
@@ -542,6 +656,8 @@ async def _fetch_report_data(report: str, *, db: AsyncSession, days: int, bucket
         return await time_to_hire_report(days=days, _=None, db=db)
     if report == "agency":
         return await agency_performance(days=days, _=None, db=db)
+    if report == "interviewer":
+        return await interviewer_performance(days=days, _=None, db=db)
     raise HTTPException(400, f"Unknown report: {report}")
 
 

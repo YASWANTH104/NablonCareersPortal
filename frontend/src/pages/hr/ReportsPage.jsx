@@ -6,7 +6,7 @@ import {
 } from 'recharts';
 import {
   BarChart2, TrendingUp, UserCheck, Clock, Building2, Activity, LineChart, Inbox, Briefcase,
-  AlertTriangle, CheckCircle2, ChevronRight, Sparkles,
+  AlertTriangle, CheckCircle2, ChevronRight, Sparkles, Users,
 } from 'lucide-react';
 import { reportsApi } from '@/api/reports';
 import ReportExportBar from '@/components/shared/ReportExportBar';
@@ -30,6 +30,7 @@ const TABS = [
   { key: 'referral',  label: 'Referral Performance', icon: UserCheck },
   { key: 'tth',       label: 'Time to Hire',         icon: Clock },
   { key: 'agency',    label: 'Agency Performance',   icon: Building2 },
+  { key: 'interviewer', label: 'Interviewers',       icon: Users },
 ];
 
 // Categorical — one fixed hue per source identity. Validated:
@@ -985,6 +986,122 @@ function AgencyPerformanceReport({ days }) {
   );
 }
 
+const INTERVIEW_ROUND_LABELS = {
+  screening: 'Screening', tr1: 'TR1', tr2: 'TR2', final_tr: 'Final TR', hr: 'HR', other: 'Other',
+};
+
+function InterviewerPerformanceReport({ days }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['report-interviewer', days],
+    queryFn: () => reportsApi.interviewerPerformance({ days }).then((r) => r.data),
+    placeholderData: keepPreviousData,
+  });
+
+  if (isLoading) return <EmptyState text="Loading…" icon={Users} />;
+  if (!data?.length) return <EmptyState text="No interviews scheduled in this period" icon={Users} />;
+
+  const sum = (key) => data.reduce((s, i) => s + i[key], 0);
+  const conducted = sum('conducted');
+  const feedbackSubmitted = sum('feedback_submitted');
+  const roundKeys = Object.keys(INTERVIEW_ROUND_LABELS).filter((k) =>
+    data.some((i) => i.by_round.find((b) => b.round === k)?.count > 0),
+  );
+  const chartData = data.filter((i) => i.conducted > 0).slice(0, 15);
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="bg-surface-50 rounded-xl p-4 text-center">
+          <p className="text-2xl font-bold text-gray-900">{data.length}</p>
+          <p className="text-xs text-gray-500 mt-1">Interviewers</p>
+        </div>
+        <div className="bg-brand-50 rounded-xl p-4 text-center">
+          <p className="text-2xl font-bold text-brand-700">{conducted}</p>
+          <p className="text-xs text-brand-600 mt-1">Interviews Conducted</p>
+        </div>
+        <div className="bg-surface-50 rounded-xl p-4 text-center">
+          <p className="text-2xl font-bold text-gray-900">{sum('upcoming')}</p>
+          <p className="text-xs text-gray-500 mt-1">Upcoming</p>
+        </div>
+        <div className="bg-amber-50 rounded-xl p-4 text-center">
+          <p className="text-2xl font-bold text-amber-700">{sum('feedback_pending')}</p>
+          <p className="text-xs text-amber-600 mt-1">
+            Feedback Pending{conducted > 0 ? ` · ${Math.round((feedbackSubmitted / conducted) * 100)}% done` : ''}
+          </p>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto rounded-lg border border-surface-100">
+        <table className="w-full text-sm min-w-[820px]">
+          <thead>
+            <tr className="border-b border-surface-200 bg-surface-50">
+              <th className="text-left py-2.5 px-3 text-xs font-medium text-gray-500">Interviewer</th>
+              <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Conducted</th>
+              {roundKeys.map((k) => (
+                <th key={k} className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">{INTERVIEW_ROUND_LABELS[k]}</th>
+              ))}
+              <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Upcoming</th>
+              <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Cancelled / No-show</th>
+              <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Feedback</th>
+              <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Yes / No</th>
+              <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Avg Rating</th>
+              <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Last Interview</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-surface-100">
+            {data.map((i) => (
+              <tr key={i.interviewer_id} className="hover:bg-surface-50">
+                <td className="py-3 px-3">
+                  <p className="font-medium text-gray-900">{i.name}</p>
+                  <p className="text-xs text-gray-400">{i.email}</p>
+                </td>
+                <td className="py-3 px-3 text-right font-semibold text-gray-900">{i.conducted}</td>
+                {roundKeys.map((k) => (
+                  <td key={k} className="py-3 px-3 text-right text-gray-600">
+                    {i.by_round.find((b) => b.round === k)?.count || <span className="text-gray-300">–</span>}
+                  </td>
+                ))}
+                <td className="py-3 px-3 text-right text-blue-600">{i.upcoming}</td>
+                <td className="py-3 px-3 text-right text-gray-500">{i.cancelled} / {i.no_show}</td>
+                <td className="py-3 px-3 text-right">
+                  <span className={i.feedback_pending > 0 ? 'text-amber-600 font-medium' : 'text-green-600'}>
+                    {i.feedback_submitted}/{i.conducted}
+                  </span>
+                  {i.feedback_pending > 0 && <p className="text-[11px] text-amber-500">{i.feedback_pending} pending</p>}
+                </td>
+                <td className="py-3 px-3 text-right">
+                  <span className="text-green-600">{i.positive}</span>
+                  <span className="text-gray-300"> / </span>
+                  <span className="text-red-400">{i.negative}</span>
+                </td>
+                <td className="py-3 px-3 text-right text-gray-700">{i.avg_rating ?? '–'}</td>
+                <td className="py-3 px-3 text-right text-xs text-gray-500 whitespace-nowrap">
+                  {i.last_interview_at ? new Date(i.last_interview_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '–'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {chartData.length > 0 && (
+        <div>
+          <SectionHeading title="Interviews conducted per interviewer" subtitle={data.length > 15 ? 'Top 15 by interviews conducted' : undefined} />
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={chartData} margin={{ bottom: 20 }}>
+              <CartesianGrid {...gridProps} />
+              <XAxis dataKey="name" tick={tickProps} interval={0} angle={-20} textAnchor="end" height={48} />
+              <YAxis tick={tickProps} allowDecimals={false} />
+              <Tooltip contentStyle={tooltipStyle} />
+              <Bar dataKey="conducted" name="Conducted" fill="#6366f1" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ReportsPage() {
   const [activeTab, setActiveTab] = useState('pipeline');
   const [days, setDays] = useState(90);
@@ -1048,6 +1165,7 @@ export default function ReportsPage() {
         {activeTab === 'referral' && <ReferralPerformanceReport days={days} />}
         {activeTab === 'tth'      && <TimeToHireReport days={days} />}
         {activeTab === 'agency'   && <AgencyPerformanceReport days={days} />}
+        {activeTab === 'interviewer' && <InterviewerPerformanceReport days={days} />}
       </div>
     </div>
   );

@@ -67,7 +67,7 @@ async def list_jobs(
             "full admin list here (every job, any status, and the department/"
             "location/employment filters ignored), which is wrong for the Refer a "
             "Candidate page — an HR user browsing that page would be offered "
-            "drafts, closed and internal-only roles that create_referral then "
+            "drafts and closed roles that create_referral then "
             "rejects with a 403."
         ),
     ),
@@ -141,13 +141,13 @@ async def get_job(
     if not is_hr and job.status != "published":
         raise HTTPException(404, "Job not found")
 
-    # Same visibility rule as the listing: internal-only jobs are invisible to
-    # everyone outside HR; a non-internal job still needs its matching
-    # referral/outsider flag on for the viewer's audience.
+    # Same visibility rule as the listing: internal-only jobs are visible to
+    # internal staff (for referral) but never to applicants/anonymous; a
+    # non-internal job still needs its matching referral/outsider flag on.
     if not is_hr:
-        if job.is_internal:
+        if job.is_internal and not is_internal_viewer:
             raise HTTPException(404, "Job not found")
-        if is_internal_viewer and not job.allow_referrals:
+        if is_internal_viewer and not (job.is_internal or job.allow_referrals):
             raise HTTPException(404, "Job not found")
         if not is_internal_viewer and not job.allow_outsiders:
             raise HTTPException(404, "Job not found")
