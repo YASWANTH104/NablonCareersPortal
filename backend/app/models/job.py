@@ -44,6 +44,7 @@ class Job(Base):
     status: Mapped[str] = mapped_column(String(20), default="draft", index=True)
     # draft | published | paused | closed | archived
     is_internal: Mapped[bool] = mapped_column(Boolean, default=False)
+    # is_internal: hidden from the public board, open to employee referrals only.
     # Only meaningful when is_internal is False — govern which external routes
     # a candidate can use to reach this job. Both default True (today's fully
     # open behavior). If a non-internal job has both off, it has no external

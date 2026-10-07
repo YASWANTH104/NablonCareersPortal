@@ -69,6 +69,24 @@ def _agency_rows(data: list[dict]) -> tuple[list[str], list[list]]:
     return headers, rows
 
 
+def _interviewer_rows(data: list[dict]) -> tuple[list[str], list[list]]:
+    rounds = ["screening", "tr1", "tr2", "final_tr", "hr", "other"]
+    headers = ["Interviewer", "Email", "Assigned", "Conducted", "Upcoming", "Cancelled", "No Show",
+               *[f"Round: {r}" for r in rounds],
+               "Feedback Submitted", "Feedback Pending", "Feedback %", "Positive", "Negative", "Neutral",
+               "Avg Rating", "Last Interview"]
+    rows = []
+    for i in data:
+        by_round = {b["round"]: b["count"] for b in i["by_round"]}
+        rows.append([
+            i["name"], i["email"], i["total_assigned"], i["conducted"], i["upcoming"], i["cancelled"], i["no_show"],
+            *[by_round.get(r, 0) for r in rounds],
+            i["feedback_submitted"], i["feedback_pending"], i["feedback_rate"], i["positive"], i["negative"],
+            i["neutral"], i["avg_rating"], (i["last_interview_at"] or "")[:10],
+        ])
+    return headers, rows
+
+
 _BUILDERS = {
     "funnel": _funnel_rows,
     "pipeline": _pipeline_rows,
@@ -78,6 +96,7 @@ _BUILDERS = {
     "referral": _referral_rows,
     "tth": _tth_rows,
     "agency": _agency_rows,
+    "interviewer": _interviewer_rows,
 }
 
 REPORT_TITLES = {
@@ -89,6 +108,7 @@ REPORT_TITLES = {
     "referral": "Referral Performance",
     "tth": "Time to Hire",
     "agency": "Agency Performance",
+    "interviewer": "Interviewer Performance",
 }
 
 

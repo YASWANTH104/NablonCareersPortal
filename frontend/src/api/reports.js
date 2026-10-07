@@ -11,6 +11,7 @@ export const reportsApi = {
   referralPerformance: (params) => client.get('/reports/referral-performance', { params }),
   timeToHire: (params) => client.get('/reports/time-to-hire', { params }),
   agencyPerformance: (params) => client.get('/reports/agency-performance', { params }),
+  interviewerPerformance: (params) => client.get('/reports/interviewer-performance', { params }),
   exportReport: (report, params) =>
     client.get('/reports/export', { params: { report, ...params }, responseType: 'blob' }),
   emailReport: (report, to_emails, params) =>

@@ -133,7 +133,7 @@ async def create_referral(db: AsyncSession, data: ReferralCreate, referrer_id: u
     job = await db.get(Job, data.job_id)
     if not job:
         raise HTTPException(404, "Job not found")
-    if job.is_internal or not job.allow_referrals:
+    if not (job.is_internal or job.allow_referrals):
         raise HTTPException(403, "This job is not open to referrals")
 
     # Block referral if candidate was rejected within the last 6 months

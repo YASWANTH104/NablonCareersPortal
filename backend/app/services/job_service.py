@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, or_
 
 from app.models.job import Job, Department, JobQuestion
 from app.models.user import User
@@ -56,10 +56,14 @@ async def list_jobs_public(
     # "public": anonymous visitors / candidates on the public job board — only
     # jobs open to outside applicants. "referral": logged-in internal staff
     # (any non-applicant role) browsing what they're allowed to refer for.
-    # Internal-only jobs are excluded from both — there's no external route,
-    # referral or otherwise, once a job is marked internal-only.
-    filters = [Job.status == "published", Job.is_internal.is_(False)]
-    filters.append(Job.allow_referrals.is_(True) if audience == "referral" else Job.allow_outsiders.is_(True))
+    # Internal-only jobs are hidden from the public board but shown to internal
+    # staff for referral regardless of allow_referrals (that toggle is hidden in
+    # the edit form once a job is internal-only).
+    filters = [Job.status == "published"]
+    if audience == "referral":
+        filters.append(or_(Job.is_internal.is_(True), Job.allow_referrals.is_(True)))
+    else:
+        filters.extend([Job.is_internal.is_(False), Job.allow_outsiders.is_(True)])
 
     if search:
         filters.append(Job.title.ilike(f"%{search}%"))
@@ -277,9 +281,9 @@ async def update_job_status(db: AsyncSession, job_id: uuid.UUID, new_status: str
 
     # Announce to the internal team on first-ever publish and on reactivation
     # from closed/archived — not on every plain pause/resume — and only when
-    # it's actually open to referrals (an internal-only or referrals-off job
-    # has nothing for them to act on).
-    if is_first_publish and not job.is_internal and job.allow_referrals:
+    # it's actually open to referrals (internal-only jobs always are; a
+    # referrals-off public job has nothing for them to act on).
+    if is_first_publish and (job.is_internal or job.allow_referrals):
         from app.tasks.email_tasks import send_new_job_posted_email
         send_new_job_posted_email.delay(str(job.id))
 
