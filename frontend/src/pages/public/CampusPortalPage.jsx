@@ -380,6 +380,9 @@ function BulkScheduleModal({ portalToken, assignmentId, candidates, onClose }) {
         <p className="text-sm text-gray-600 mb-3">
           <span className="font-semibold text-emerald-600">{created} scheduled</span>
           {results.length - created > 0 && <span className="text-rose-500"> · {results.length - created} failed</span>}
+          {results.some((r) => r.stage_moved) && (
+            <span className="text-gray-600"> · {results.filter((r) => r.stage_moved).length} moved to Assessment</span>
+          )}
         </p>
         <div className="max-h-72 overflow-y-auto rounded-lg border border-surface-200 divide-y divide-surface-100">
           {results.map((r, i) => {
@@ -390,6 +393,11 @@ function BulkScheduleModal({ portalToken, assignmentId, candidates, onClose }) {
                 <div className="min-w-0 flex-1">
                   <p className="text-gray-800 font-medium truncate">{c?.candidate_name ?? r.application_id}</p>
                   {r.status === 'error' && <p className="text-rose-500 text-xs">{r.error}</p>}
+                  {r.status === 'success' && (
+                    <p className={r.stage_moved ? 'text-xs text-emerald-600' : 'text-xs text-amber-600'}>
+                      {r.stage_moved ? 'Moved to Assessment' : r.stage_note}
+                    </p>
+                  )}
                 </div>
               </div>
             );

@@ -516,6 +516,82 @@ async def agency_performance(
     return result
 
 
+# Campus stages after the assessment. Campus candidates sit the assessment
+# BEFORE the HR screening call (AGENCY_VALID_TRANSITIONS), so "screening" here
+# means they cleared it.
+_PAST_CAMPUS_ASSESSMENT = ("screening", "tr1", "tr2", "final_tr", "hr", "offer", "hired")
+
+
+@router.get("/campus-performance")
+async def campus_performance(
+    days: int = Query(365, ge=1, le=365),
+    _=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Per-campus drive output: students, how many were assessed and cleared
+    it, outcomes. Three grouped queries regardless of campus count (the
+    agency report's per-agency loop is N+1). Inactive campuses are included —
+    the Campuses page lists them under "All"/"Inactive" and their history is
+    still real."""
+    from app.models.campus import Campus, JobCampusAssignment
+    from app.models.assessment import Assessment
+    from app.constants.stages import outcome_counts
+
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    in_window = and_(Application.campus_id.isnot(None), Application.applied_at >= since)
+
+    stage_rows = (await db.execute(
+        select(Application.campus_id, Application.stage, func.count().label("n"))
+        .where(in_window)
+        .group_by(Application.campus_id, Application.stage)
+    )).all()
+
+    assessed = select(Assessment.application_id).where(Assessment.status != "cancelled").distinct().subquery()
+    assess_rows = (await db.execute(
+        select(
+            Application.campus_id,
+            func.count().label("assessed"),
+            func.count().filter(Application.stage.in_(_PAST_CAMPUS_ASSESSMENT)).label("cleared"),
+        )
+        .join(assessed, assessed.c.application_id == Application.id)
+        .where(in_window)
+        .group_by(Application.campus_id)
+    )).all()
+
+    drive_rows = (await db.execute(
+        select(JobCampusAssignment.campus_id, func.count().label("n"))
+        .where(JobCampusAssignment.created_at >= since)
+        .group_by(JobCampusAssignment.campus_id)
+    )).all()
+
+    stages: dict = {}
+    for r in stage_rows:
+        stages.setdefault(r.campus_id, {})[r.stage] = r.n
+    assess = {r.campus_id: r for r in assess_rows}
+    drives = {r.campus_id: r.n for r in drive_rows}
+
+    result = []
+    for campus in (await db.execute(select(Campus))).scalars().all():
+        oc = outcome_counts(stages.get(campus.id, {}))
+        a = assess.get(campus.id)
+        n_assessed = a.assessed if a else 0
+        result.append({
+            "campus_id": str(campus.id),
+            "campus_name": campus.name,
+            "drives": drives.get(campus.id, 0),
+            "total_students": oc["total"],
+            "in_progress": oc["in_progress"],
+            "hired": oc["hired"],
+            "rejected": oc["not_proceeding"],
+            "assessed": n_assessed,
+            "cleared_assessment": a.cleared if a else 0,
+            "assessment_clear_rate": round(a.cleared / n_assessed * 100, 1) if n_assessed else None,
+            "conversion_rate": round(oc["hired"] / oc["total"] * 100, 1) if oc["total"] else 0,
+        })
+    result.sort(key=lambda x: x["total_students"], reverse=True)
+    return result
+
+
 _INTERVIEW_ROUNDS = ["screening", "tr1", "tr2", "final_tr", "hr"]
 _POSITIVE_RECS = {"strong_yes", "yes"}
 _NEGATIVE_RECS = {"strong_no", "no"}

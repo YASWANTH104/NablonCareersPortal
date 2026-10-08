@@ -12,6 +12,7 @@ import toast from 'react-hot-toast';
 import { applicationsApi } from '@/api/applications';
 import { jobsApi } from '@/api/jobs';
 import { agenciesApi } from '@/api/agencies';
+import { campusesApi } from '@/api/campuses';
 import { uploadsApi } from '@/api/uploads';
 import CandidateIntakeForm from '@/components/shared/CandidateIntakeForm';
 import BulkUploadModal from '@/components/shared/BulkUploadModal';
@@ -635,6 +636,7 @@ export default function ApplicantsPage() {
   const selectedJobId = searchParams.get('jobId') || '';
   const stageFilter = searchParams.get('stage') || '';
   const agencyFilter = searchParams.get('agencyId') || '';
+  const campusFilter = searchParams.get('campusId') || '';
   const sourceFilter = searchParams.get('source') || '';
   const search = searchParams.get('search') || '';
   const page = Number(searchParams.get('page') || '1');
@@ -656,6 +658,17 @@ export default function ApplicantsPage() {
     return next;
   }, { replace: true });
 
+  // A specific campus only makes sense under source=campus, so picking one
+  // sets that source, and leaving "Campus Placement" clears the campus —
+  // otherwise a hidden campusId would keep silently filtering the list.
+  const setSourceFilter = (value) => setSearchParams((prev) => {
+    const next = new URLSearchParams(prev);
+    if (value) next.set('source', value); else next.delete('source');
+    if (value !== 'campus') next.delete('campusId');
+    next.delete('page');
+    return next;
+  }, { replace: true });
+
   const setPage = (updater) => setSearchParams((prev) => {
     const next = new URLSearchParams(prev);
     const current = Number(prev.get('page') || '1');
@@ -671,6 +684,14 @@ export default function ApplicantsPage() {
     // just 403 on this, and the agency filter dropdown already hides itself
     // when agenciesData is empty/undefined (see agenciesData?.length > 0 below).
     enabled: canManage,
+  });
+
+  const { data: campusesData } = useQuery({
+    queryKey: ['campuses'],
+    queryFn: () => campusesApi.list().then((r) => r.data),
+    // HR-only endpoint, same as agencies above; only needed once "Campus
+    // Placement" is the chosen source.
+    enabled: canManage && sourceFilter === 'campus',
   });
 
   // HR gets every job (unchanged). Anyone else must NOT fall through to
@@ -691,11 +712,12 @@ export default function ApplicantsPage() {
   const filters = {
     job_id: selectedJobId || undefined,
     agency_id: agencyFilter || undefined,
+    campus_id: campusFilter || undefined,
     source: sourceFilter || undefined,
     search: search || undefined,
   };
 
-  const queryParams = { jobId: selectedJobId, stage: stageFilter, agencyId: agencyFilter, source: sourceFilter, search, page };
+  const queryParams = { jobId: selectedJobId, stage: stageFilter, agencyId: agencyFilter, campusId: campusFilter, source: sourceFilter, search, page };
   const queryKey = ['hr-applications', queryParams];
 
   const { data, isLoading } = useQuery({
@@ -812,7 +834,7 @@ export default function ApplicantsPage() {
         {/* Source filter */}
         <select
           value={sourceFilter}
-          onChange={(e) => setFilter('source', e.target.value)}
+          onChange={(e) => setSourceFilter(e.target.value)}
           className="text-sm border border-surface-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 max-w-full min-w-0 flex-1 sm:flex-none"
         >
           <option value="">All sources</option>
@@ -820,6 +842,21 @@ export default function ApplicantsPage() {
             <option key={s.value} value={s.value}>{s.label}</option>
           ))}
         </select>
+
+        {/* Campus filter — appears once "Campus Placement" is the source */}
+        {sourceFilter === 'campus' && campusesData?.length > 0 && (
+          <select
+            value={campusFilter}
+            onChange={(e) => setFilter('campusId', e.target.value)}
+            aria-label="Filter by campus"
+            className="text-sm border border-surface-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 max-w-full min-w-0 flex-1 sm:flex-none"
+          >
+            <option value="">All campuses</option>
+            {campusesData.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}{c.is_active === false ? ' (inactive)' : ''}</option>
+            ))}
+          </select>
+        )}
 
         {/* Agency filter */}
         {agenciesData?.length > 0 && (

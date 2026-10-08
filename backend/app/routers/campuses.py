@@ -195,4 +195,5 @@ async def campus_portal_bulk_schedule_assessments(
         data.model_dump(exclude={"application_ids"}),
     )
     created = sum(1 for r in results if r["status"] == "success")
-    return {"results": results, "created": created, "failed": len(results) - created}
+    moved = sum(1 for r in results if r.get("stage_moved"))
+    return {"results": results, "created": created, "failed": len(results) - created, "moved_to_assessment": moved}
