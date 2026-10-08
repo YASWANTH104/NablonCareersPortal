@@ -31,6 +31,17 @@ AGENCY_VALID_TRANSITIONS = {
 }
 
 
+# Campus drives share the agency order (the drive's bulk assessment is the
+# pre-screen, so it comes before the HR screening call), with one difference:
+# for a campus batch the HR screening call is optional. Students who clear the
+# drive assessment can go straight to TR1; HR can still route individuals
+# through a screening call first.
+CAMPUS_VALID_TRANSITIONS = {
+    **AGENCY_VALID_TRANSITIONS,
+    "assessment":     ["screening", "tr1", "rejected", "interview_drop"],
+}
+
+
 def valid_transitions_for(source: str | None) -> dict:
     """Which VALID_TRANSITIONS table governs an application's stage moves.
 
@@ -38,11 +49,17 @@ def valid_transitions_for(source: str | None) -> dict:
     every caller (HR move_stage, any future stage-gating check) should go
     through this rather than re-checking app.source itself.
 
-    "campus" reuses the agency override: a campus placement drive's bulk
-    assessment IS the pre-screen, sat before the HR screening call, same
-    reasoning as an agency's own pre-screen — see AGENCY_VALID_TRANSITIONS.
+    "campus" uses CAMPUS_VALID_TRANSITIONS: the agency order (the drive's bulk
+    assessment is the pre-screen, sat before the HR screening call), except a
+    student who clears the assessment may skip the screening call and go
+    straight to TR1.
+
+    Mirrored by frontend/src/constants/pipelineStages.js getValidTransitions —
+    change both together, or the UI offers moves the API rejects.
     """
-    return AGENCY_VALID_TRANSITIONS if source in ("agency", "campus") else VALID_TRANSITIONS
+    if source == "campus":
+        return CAMPUS_VALID_TRANSITIONS
+    return AGENCY_VALID_TRANSITIONS if source == "agency" else VALID_TRANSITIONS
 
 
 STAGE_LABELS = {

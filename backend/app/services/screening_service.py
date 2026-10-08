@@ -652,7 +652,11 @@ async def submit_screening(db: AsyncSession, token: str, data) -> dict:
         # valid move for them, so hardcoding "screening" here would 400 and get
         # silently swallowed below, leaving a passed candidate stuck at
         # "applied" forever.
-        next_stage = "assessment" if application.source == "agency" else "screening"
+        # Campus runs the same order — derive the step from the shared table
+        # rather than branching on "agency" here, which left campus candidates
+        # trying the invalid applied -> screening move.
+        from app.constants.stages import valid_transitions_for
+        next_stage = valid_transitions_for(application.source)["applied"][0]
         try:
             from app.services import application_service
             await application_service.move_stage(
