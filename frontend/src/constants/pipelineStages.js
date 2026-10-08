@@ -47,11 +47,22 @@ export const AGENCY_VALID_TRANSITIONS = {
   screening:  ['tr1', 'rejected'],
 };
 
+// Campus drives follow the agency order, except a student who clears the
+// drive assessment can go straight to TR1; the HR screening call is optional.
+export const CAMPUS_VALID_TRANSITIONS = {
+  ...AGENCY_VALID_TRANSITIONS,
+  assessment: ['screening', 'tr1', 'rejected', 'interview_drop'],
+};
+
 // Which transition table governs a given application's stage moves — keep
-// this as the only place that branches on source === 'agency' for stage
-// order, mirroring backend/app/constants/stages.py's valid_transitions_for.
+// this as the only place that branches on source for stage order. It must
+// match backend/app/constants/stages.py's valid_transitions_for exactly, or
+// the UI offers moves the API rejects (campus used to fall through to the
+// direct table here while the backend used the agency one).
 export function getValidTransitions(application) {
-  return application?.source === 'agency' ? AGENCY_VALID_TRANSITIONS : VALID_TRANSITIONS;
+  if (application?.source === 'campus') return CAMPUS_VALID_TRANSITIONS;
+  if (application?.source === 'agency') return AGENCY_VALID_TRANSITIONS;
+  return VALID_TRANSITIONS;
 }
 
 export const REASON_REQUIRED_STAGES = new Set(['rejected', 'interview_drop', 'offer_drop']);
