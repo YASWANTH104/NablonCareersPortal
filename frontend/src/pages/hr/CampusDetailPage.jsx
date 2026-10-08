@@ -178,7 +178,14 @@ function BulkScheduleModal({ assignment, onClose }) {
     onSuccess: (data) => {
       setResults(data.results);
       queryClient.invalidateQueries({ queryKey: ['hr-applications'] });
-      if (data.created > 0) toast.success(`Assessment scheduled for ${data.created} candidate${data.created !== 1 ? 's' : ''} — emails are on their way.`);
+      queryClient.invalidateQueries({ queryKey: ['campus-assignment-candidates', assignment.id] });
+      if (data.created > 0) {
+        toast.success(
+          `Assessment scheduled for ${data.created} candidate${data.created !== 1 ? 's' : ''}`
+          + (data.moved_to_assessment ? `, ${data.moved_to_assessment} moved to Assessment` : '')
+          + '. Emails are on their way.',
+        );
+      }
     },
     onError: (err) => toast.error(err.response?.data?.detail ?? 'Bulk scheduling failed'),
   });
@@ -192,6 +199,9 @@ function BulkScheduleModal({ assignment, onClose }) {
         <p className="text-sm text-gray-600 mb-3">
           <span className="font-semibold text-emerald-600">{created} scheduled</span>
           {results.length - created > 0 && <span className="text-rose-500"> · {results.length - created} failed</span>}
+          {results.some((r) => r.stage_moved) && (
+            <span className="text-gray-600"> · {results.filter((r) => r.stage_moved).length} moved to Assessment</span>
+          )}
         </p>
         <div className="max-h-72 overflow-y-auto rounded-lg border border-surface-200 divide-y divide-surface-100">
           {results.map((r, i) => {
@@ -206,6 +216,11 @@ function BulkScheduleModal({ assignment, onClose }) {
                 <div className="min-w-0 flex-1">
                   <p className="text-gray-800 font-medium truncate">{candidate?.applicant?.full_name ?? r.application_id}</p>
                   {r.status === 'error' && <p className="text-rose-500 text-xs">{r.error}</p>}
+                  {r.status === 'success' && (
+                    <p className={r.stage_moved ? 'text-xs text-emerald-600' : 'text-xs text-amber-600'}>
+                      {r.stage_moved ? 'Moved to Assessment' : r.stage_note}
+                    </p>
+                  )}
                 </div>
               </div>
             );

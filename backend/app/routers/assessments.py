@@ -34,7 +34,8 @@ async def schedule_assessments_bulk(
     drive's roster. See assessment_service.bulk_create_assessments."""
     results = await assessment_service.bulk_create_assessments(db, data, current_user.id)
     created = sum(1 for r in results if r["status"] == "success")
-    return {"results": results, "created": created, "failed": len(results) - created}
+    moved = sum(1 for r in results if r.get("stage_moved"))
+    return {"results": results, "created": created, "failed": len(results) - created, "moved_to_assessment": moved}
 
 
 @router.get("", response_model=list[AssessmentResponse])

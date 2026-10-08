@@ -5,11 +5,13 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
-  GraduationCap, Plus, Search, X, Power, Loader2, AlertCircle,
-  ArrowUpDown, ArrowRight, Copy, Check, Mail,
+  GraduationCap, Plus, Search, X, Loader2, AlertCircle,
+  ArrowUpDown, ArrowRight, Copy, Check, Mail, Users, Award, Crown, CalendarDays, ClipboardCheck,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { campusesApi } from '@/api/campuses';
+import { reportsApi } from '@/api/reports';
+import PipelineFunnel from '@/components/shared/PipelineFunnel';
 import { useDebounced } from '@/hooks/useDebounced';
 import { agencyAccent, agencyInitials } from '@/constants/agencyAccents';
 import { Modal, EmptyState, Segmented } from '@/components/ui';
@@ -58,6 +60,15 @@ function KpiTile({ icon: Icon, label, value, accent }) {
   );
 }
 
+function Metric({ label, value, tone }) {
+  return (
+    <div className="min-w-0">
+      <p className={cn('font-display text-xl font-bold leading-none tabular-nums', tone ?? 'text-gray-900')}>{value}</p>
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mt-1.5 truncate">{label}</p>
+    </div>
+  );
+}
+
 function PortalCopyButton({ url }) {
   const [copied, setCopied] = useState(false);
 
@@ -90,8 +101,14 @@ function PortalCopyButton({ url }) {
   );
 }
 
-function CampusCard({ campus, onOpen, index }) {
+function CampusCard({ campus, perf, onOpen, index, isTopCampus }) {
   const accent = agencyAccent(campus.name, campus.is_active);
+  const students = perf?.total_students ?? 0;
+  const counts = {
+    inProgress: perf?.in_progress ?? 0,
+    hired: perf?.hired ?? 0,
+    rejected: perf?.rejected ?? 0,
+  };
   const portalUrl = `${window.location.origin}/campus/${campus.portal_token}`;
 
   return (
@@ -133,6 +150,14 @@ function CampusCard({ campus, onOpen, index }) {
               >
                 {campus.name}
               </h3>
+              {isTopCampus && (
+                <span
+                  title="Most hires in the last 12 months"
+                  className="shrink-0 inline-flex items-center gap-0.5 mt-0.5 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200"
+                >
+                  <Crown className="w-2.5 h-2.5" /> Top
+                </span>
+              )}
               {!campus.is_active && (
                 <span className="shrink-0 mt-0.5 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-surface-100 text-gray-500 border border-surface-200">
                   Off
@@ -147,6 +172,29 @@ function CampusCard({ campus, onOpen, index }) {
               <span className="truncate">{campus.contact_email}</span>
             </p>
           </div>
+        </div>
+
+        {/* Headline numbers */}
+        <div className="grid grid-cols-3 gap-3 mt-5">
+          <Metric label="Students" value={students} />
+          <Metric
+            label="Cleared test"
+            value={perf?.assessed ? `${perf.cleared_assessment}/${perf.assessed}` : '—'}
+            tone={perf?.assessed ? 'text-brand-600' : 'text-gray-300'}
+          />
+          <Metric label="Hired" value={counts.hired} tone={counts.hired > 0 ? 'text-emerald-600' : undefined} />
+        </div>
+
+        {/* Outcomes */}
+        <div className="mt-4 pt-4 border-t border-surface-100">
+          <div className="flex items-baseline justify-between mb-2">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Outcomes · 12 mo</p>
+            <p className="flex items-center gap-1 text-[11px] text-gray-400">
+              <CalendarDays className="w-3 h-3" />
+              {perf?.drives ?? 0} drive{perf?.drives === 1 ? '' : 's'}
+            </p>
+          </div>
+          <PipelineFunnel counts={counts} total={students} size="sm" />
         </div>
       </button>
 
@@ -240,12 +288,31 @@ export default function CampusesPage() {
   const [searchInput, setSearchInput] = useState('');
   const search = useDebounced(searchInput, 200);
   const [status, setStatus] = useState('active');
-  const [sort, setSort] = useState('name');
+  const [sort, setSort] = useState('students');
 
   const { data: campuses, isLoading, isError } = useQuery({
     queryKey: ['campuses'],
     queryFn: () => campusesApi.list().then((r) => r.data),
   });
+
+  const { data: performance } = useQuery({
+    queryKey: ['campus-performance-dashboard'],
+    queryFn: () => reportsApi.campusPerformance({ days: 365 }).then((r) => r.data),
+  });
+
+  const perfByCampus = useMemo(() => {
+    const map = {};
+    (performance ?? []).forEach((p) => { map[p.campus_id] = p; });
+    return map;
+  }, [performance]);
+
+  // Same rule as the agencies page: a "Top" badge only means something when
+  // at least two campuses have produced hires.
+  const topCampusId = useMemo(() => {
+    const withHires = (performance ?? []).filter((p) => p.hired > 0);
+    if (withHires.length < 2) return null;
+    return withHires.reduce((best, p) => (p.hired > best.hired ? p : best)).campus_id;
+  }, [performance]);
 
   const visible = useMemo(() => {
     let list = campuses ?? [];
@@ -264,14 +331,25 @@ export default function CampusesPage() {
 
     return [...list].sort((a, b) => {
       if (sort === 'name') return a.name.localeCompare(b.name);
-      return new Date(b.created_at) - new Date(a.created_at);
+      if (sort === 'recent') return new Date(b.created_at) - new Date(a.created_at);
+      const key = sort === 'hires' ? 'hired' : 'total_students';
+      const diff = (perfByCampus[b.id]?.[key] ?? 0) - (perfByCampus[a.id]?.[key] ?? 0);
+      return diff !== 0 ? diff : a.name.localeCompare(b.name);
     });
-  }, [campuses, status, search, sort]);
+  }, [campuses, status, search, sort, perfByCampus]);
 
-  const kpis = useMemo(() => ({
-    total: campuses?.length ?? 0,
-    active: campuses?.filter((c) => c.is_active).length ?? 0,
-  }), [campuses]);
+  // KPIs describe the whole roster, never the filtered view.
+  const kpis = useMemo(() => {
+    const sum = (k) => (performance ?? []).reduce((s, p) => s + p[k], 0);
+    return {
+      total: campuses?.length ?? 0,
+      active: campuses?.filter((c) => c.is_active).length ?? 0,
+      students: sum('total_students'),
+      assessed: sum('assessed'),
+      cleared: sum('cleared_assessment'),
+      hired: sum('hired'),
+    };
+  }, [campuses, performance]);
 
   const filtersActive = Boolean(search) || status !== 'active';
 
@@ -303,8 +381,8 @@ export default function CampusesPage() {
 
       {isLoading ? (
         <>
-          <div className="grid grid-cols-2 gap-3">
-            {[1, 2].map((i) => <div key={i} className="h-[76px] bg-white border border-surface-200 rounded-2xl animate-pulse" />)}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {[1, 2, 3, 4].map((i) => <div key={i} className="h-[76px] bg-white border border-surface-200 rounded-2xl animate-pulse" />)}
           </div>
           <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
             {[1, 2, 3].map((i) => <div key={i} className="h-56 bg-white border border-surface-200 rounded-2xl animate-pulse" />)}
@@ -336,9 +414,21 @@ export default function CampusesPage() {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-3">
-            <KpiTile icon={GraduationCap} label="Campuses" value={kpis.total} accent="bg-brand-50 text-brand-600" />
-            <KpiTile icon={Power} label="Active" value={kpis.active} accent="bg-emerald-50 text-emerald-600" />
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <KpiTile
+              icon={GraduationCap}
+              label={`Campuses · ${kpis.active} active`}
+              value={kpis.total}
+              accent="bg-brand-50 text-brand-600"
+            />
+            <KpiTile icon={Users} label="Students · 12 mo" value={kpis.students} accent="bg-violet-50 text-violet-600" />
+            <KpiTile
+              icon={ClipboardCheck}
+              label={kpis.assessed ? `Cleared assessment · of ${kpis.assessed}` : 'Cleared assessment'}
+              value={kpis.cleared}
+              accent="bg-sky-50 text-sky-600"
+            />
+            <KpiTile icon={Award} label="Hired · 12 mo" value={kpis.hired} accent="bg-amber-50 text-amber-600" />
           </div>
 
           <div className="flex flex-col lg:flex-row lg:items-center gap-2.5">
@@ -370,6 +460,8 @@ export default function CampusesPage() {
                   aria-label="Sort campuses"
                   className="text-sm bg-white border border-surface-200 rounded-2xl px-3 py-3 text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
                 >
+                  <option value="students">Most students</option>
+                  <option value="hires">Most hires</option>
                   <option value="name">Name (A–Z)</option>
                   <option value="recent">Recently added</option>
                 </select>
@@ -403,6 +495,8 @@ export default function CampusesPage() {
                     key={campus.id}
                     index={i}
                     campus={campus}
+                    perf={perfByCampus[campus.id]}
+                    isTopCampus={topCampusId != null && String(topCampusId) === String(campus.id)}
                     onOpen={() => navigate(`/hr/campuses/${campus.id}`)}
                   />
                 ))}

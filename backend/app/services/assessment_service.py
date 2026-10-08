@@ -10,6 +10,50 @@ from app.schemas.assessment import AssessmentCreate, AssessmentUpdate, Assessmen
 MAX_BULK_ASSESSMENTS = 200
 
 
+async def advance_to_assessment(
+    db: AsyncSession, application_id: uuid.UUID, moved_by: Optional[uuid.UUID],
+) -> dict:
+    """Move the candidate to the "assessment" stage because one was just
+    scheduled for them. Scheduling an assessment IS the decision to assess, so
+    HR shouldn't have to make a second, separate stage move per candidate
+    (painful for a 150-person campus drive).
+
+    Goes through application_service.move_stage, so the move is recorded in
+    the timeline, claims ownership for a human mover (moved_by=None from the
+    campus portal is a system move and claims nothing), and notifies an
+    agency. No duplicate candidate email: move_stage only emails candidates
+    on rejection; the assessment-scheduled email is the one they get.
+
+    Never raises — the assessment is already created; a stage that can't move
+    (on hold, already past assessment, closed) is reported, not fatal.
+    Returns {"moved": bool, "from_stage": str, "reason": str | None}.
+    """
+    from app.models.application import Application
+    from app.constants.stages import STAGE_LABELS, valid_transitions_for
+    from app.services import application_service
+
+    app = await db.get(Application, application_id)
+    if app is None:
+        return {"moved": False, "from_stage": None, "reason": "Application not found"}
+    from_stage = app.stage
+    if from_stage == "assessment":
+        return {"moved": False, "from_stage": from_stage, "reason": "Already in Assessment"}
+    if app.on_hold:
+        return {"moved": False, "from_stage": from_stage, "reason": "On hold, stage left unchanged"}
+    if "assessment" not in valid_transitions_for(app.source).get(from_stage, []):
+        label = STAGE_LABELS.get(from_stage, from_stage)
+        return {"moved": False, "from_stage": from_stage, "reason": f"Stage left at {label}"}
+    try:
+        await application_service.move_stage(
+            db, application_id, "assessment", moved_by,
+            notes="Moved automatically when an assessment was scheduled",
+        )
+    except HTTPException as exc:
+        await db.rollback()
+        return {"moved": False, "from_stage": from_stage, "reason": str(exc.detail)}
+    return {"moved": True, "from_stage": from_stage, "reason": None}
+
+
 async def create_assessment(
     db: AsyncSession,
     data: AssessmentCreate,
@@ -52,6 +96,8 @@ async def create_assessment(
     except Exception:
         pass
 
+    # Transient (unmapped) attribute — the bulk path reports it per candidate.
+    assessment.stage_move = await advance_to_assessment(db, data.application_id, created_by)
     return assessment
 
 
@@ -70,7 +116,8 @@ async def bulk_create_assessments(
     a placement drive's batch. create_assessment already queues the
     candidate's own email via Celery (send_assessment_scheduled_email), so a
     batch of N application_ids here IS the bulk-email action; nothing extra
-    to dispatch.
+    to dispatch. It also moves each candidate to the "assessment" stage
+    (advance_to_assessment) and reports per row whether that happened.
 
     `allowed_application_ids`, when given, restricts the batch to a caller-
     verified set (e.g. only candidates belonging to one campus's job
@@ -99,7 +146,11 @@ async def bulk_create_assessments(
             assessment = await create_assessment(
                 db, AssessmentCreate(application_id=application_id, **per_application), created_by,
             )
-            results.append({"application_id": application_id, "status": "success", "assessment_id": assessment.id})
+            move = assessment.stage_move
+            results.append({
+                "application_id": application_id, "status": "success", "assessment_id": assessment.id,
+                "stage_moved": move["moved"], "stage_note": move["reason"],
+            })
         except HTTPException as exc:
             await db.rollback()
             results.append({"application_id": application_id, "status": "error", "error": str(exc.detail)})

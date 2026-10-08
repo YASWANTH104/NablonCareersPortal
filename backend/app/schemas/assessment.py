@@ -47,6 +47,10 @@ class AssessmentBulkResultRow(BaseModel):
     status: str
     assessment_id: Optional[uuid.UUID] = None
     error: Optional[str] = None
+    # Whether the candidate was also moved to the "assessment" stage, and why
+    # not when they weren't (on hold, already past it, closed).
+    stage_moved: Optional[bool] = None
+    stage_note: Optional[str] = None
 
 
 class AssessmentResponse(BaseModel):
