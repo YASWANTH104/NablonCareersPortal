@@ -12,6 +12,9 @@ export const reportsApi = {
   timeToHire: (params) => client.get('/reports/time-to-hire', { params }),
   agencyPerformance: (params) => client.get('/reports/agency-performance', { params }),
   interviewerPerformance: (params) => client.get('/reports/interviewer-performance', { params }),
+  recruiterPerformance: (params) => client.get('/reports/recruiter-performance', { params }),
+  recruiterApplications: (userId, params) =>
+    client.get(`/reports/recruiter-performance/${userId}/applications`, { params }),
   exportReport: (report, params) =>
     client.get('/reports/export', { params: { report, ...params }, responseType: 'blob' }),
   emailReport: (report, to_emails, params) =>

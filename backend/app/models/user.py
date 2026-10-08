@@ -34,5 +34,10 @@ class User(Base):
     # several HR staff clicking the same interviewer doesn't spam them with
     # duplicate reminders within a few hours of each other.
     last_availability_request_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # IST calendar day the Action Center morning digest last went to this
+    # user — claimed with a conditional UPDATE before sending so a beat that
+    # double-fires (old + new revisions overlapping during a deploy) can't
+    # email the same person twice in one day.
+    last_action_digest_on: Mapped[date | None] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -1,13 +1,14 @@
 import ssl
 
 from celery import Celery
+from celery.schedules import crontab
 from app.config import settings
 
 celery_app = Celery(
     "nablon_careers",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=["app.tasks.email_tasks", "app.tasks.pdf_tasks", "app.tasks.interview_tasks", "app.tasks.calendar_tasks", "app.tasks.referral_tasks", "app.tasks.screening_tasks"],
+    include=["app.tasks.email_tasks", "app.tasks.pdf_tasks", "app.tasks.interview_tasks", "app.tasks.calendar_tasks", "app.tasks.referral_tasks", "app.tasks.screening_tasks", "app.tasks.action_center_tasks"],
 )
 
 conf = dict(
@@ -37,6 +38,11 @@ conf = dict(
         "send-delayed-screening-rejection-emails": {
             "task": "send_delayed_screening_rejection_emails",
             "schedule": 1800,  # every 30 minutes
+        },
+        "send-action-center-digests": {
+            "task": "send_action_center_digests",
+            # 03:30 UTC = 09:00 IST, Monday–Friday (beat runs in UTC, see timezone above).
+            "schedule": crontab(hour=3, minute=30, day_of_week="mon-fri"),
         },
     },
 )

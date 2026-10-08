@@ -47,6 +47,7 @@ import DirectorReviewPage from '@/pages/public/DirectorReviewPage';
 import DocumentUploadPage from '@/pages/public/DocumentUploadPage';
 import ScreeningFormPage from '@/pages/public/ScreeningFormPage';
 import ReportsPage from '@/pages/hr/ReportsPage';
+import ActionCenterPage from '@/pages/hr/ActionCenterPage';
 import SettingsPage from '@/pages/hr/SettingsPage';
 import AgenciesPage from '@/pages/hr/AgenciesPage';
 import AgencyDetailPage from '@/pages/hr/AgencyDetailPage';
@@ -125,6 +126,7 @@ const router = createBrowserRouter([
           { path: '/hr/offers/new/:applicationId', element: <OfferBuilderPage /> },
           { path: '/hr/offers/:offerId', element: <OfferBuilderPage /> },
           { path: '/hr/reports', element: <ReportsPage /> },
+          { path: '/hr/action-center', element: <ActionCenterPage /> },
           { path: '/hr/settings', element: <SettingsPage /> },
           { path: '/hr/agencies', element: <AgenciesPage /> },
           { path: '/hr/agencies/:agencyId', element: <AgencyDetailPage /> },

@@ -6,11 +6,14 @@ import {
 } from 'recharts';
 import {
   BarChart2, TrendingUp, UserCheck, Clock, Building2, Activity, LineChart, Inbox, Briefcase,
-  AlertTriangle, CheckCircle2, ChevronRight, Sparkles, Users,
+  AlertTriangle, CheckCircle2, ChevronRight, Sparkles, Users, UserCog, Info, ExternalLink,
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { reportsApi } from '@/api/reports';
 import ReportExportBar from '@/components/shared/ReportExportBar';
 import Modal from '@/components/ui/Modal';
+import Segmented from '@/components/ui/Segmented';
+import { STAGE_MAP } from '@/constants/pipelineStages';
 
 const DAYS_OPTIONS = [
   { label: 'Today', value: 1 },
@@ -31,6 +34,7 @@ const TABS = [
   { key: 'tth',       label: 'Time to Hire',         icon: Clock },
   { key: 'agency',    label: 'Agency Performance',   icon: Building2 },
   { key: 'interviewer', label: 'Interviewers',       icon: Users },
+  { key: 'recruiter', label: 'Recruiters',            icon: UserCog },
 ];
 
 // Categorical — one fixed hue per source identity. Validated:
@@ -1102,6 +1106,292 @@ function InterviewerPerformanceReport({ days }) {
   );
 }
 
+// ── Recruiters (TA ownership) ────────────────────────────────────────────────
+const REACH_STAGES = ['screening', 'assessment', 'tr1', 'tr2', 'final_tr', 'hr', 'offer', 'hired'];
+const REACH_LABELS = {
+  screening: 'Screening', assessment: 'Assess.', tr1: 'TR1', tr2: 'TR2', final_tr: 'Final TR',
+  hr: 'HR', offer: 'Offer', hired: 'Hired',
+};
+const fmtDays = (d) => (d == null ? '–' : `${d}d`);
+
+function RecruiterPerformanceReport({ days }) {
+  const [drill, setDrill] = useState(null); // { id, name, scope }
+  const { data, isLoading } = useQuery({
+    queryKey: ['report-recruiter', days],
+    queryFn: () => reportsApi.recruiterPerformance({ days }).then((r) => r.data),
+    placeholderData: keepPreviousData,
+  });
+
+  if (isLoading) return <EmptyState text="Loading…" icon={UserCog} />;
+  if (!data?.recruiters?.length) return <EmptyState text="No recruiter activity yet" icon={UserCog} />;
+
+  const { team, recruiters, stuck_threshold_days: stuckDays } = data;
+  const open = (r, scope = 'owned') => setDrill({ id: r.user_id, name: r.name, scope });
+
+  return (
+    <div className="space-y-6">
+      <div className="flex gap-2.5 items-start bg-surface-50 border border-surface-200 rounded-lg px-3.5 py-2.5 text-xs text-gray-600">
+        <Info className="w-4 h-4 text-gray-400 shrink-0 mt-px" />
+        <p>
+          A candidate <strong className="text-gray-800">belongs to the recruiter who first moves them</strong> out of a stage,
+          for good. Later moves by anyone else count as that person's <em>assists</em>, and the outcome stays with the owner.
+          <em> Sourced</em> is separate: it credits whoever uploaded the profile.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="bg-surface-50 rounded-xl p-4 text-center">
+          <p className="text-2xl font-bold text-gray-900">{team.sourced}</p>
+          <p className="text-xs text-gray-500 mt-1">Sourced by TA</p>
+        </div>
+        <div className="bg-brand-50 rounded-xl p-4 text-center">
+          <p className="text-2xl font-bold text-brand-700">{team.owned}</p>
+          <p className="text-xs text-brand-600 mt-1">Candidates claimed</p>
+        </div>
+        <div className="bg-green-50 rounded-xl p-4 text-center">
+          <p className="text-2xl font-bold text-green-700">{team.hired}</p>
+          <p className="text-xs text-green-600 mt-1">Hired (by owner)</p>
+        </div>
+        <div className="bg-surface-50 rounded-xl p-4 text-center">
+          <p className="text-2xl font-bold text-gray-900">{team.active_now}</p>
+          <p className="text-xs text-gray-500 mt-1">
+            Active now{team.stale_now > 0 && <span className="text-amber-600"> · {team.stale_now} stale</span>}
+          </p>
+        </div>
+        <div className={`rounded-xl p-4 text-center ${team.unclaimed_now > 0 ? 'bg-amber-50' : 'bg-surface-50'}`}>
+          <p className={`text-2xl font-bold ${team.unclaimed_now > 0 ? 'text-amber-700' : 'text-gray-900'}`}>{team.unclaimed_now}</p>
+          <p className={`text-xs mt-1 ${team.unclaimed_now > 0 ? 'text-amber-600' : 'text-gray-500'}`}>
+            Unclaimed now{team.unclaimed_oldest_days != null && ` · oldest ${Math.round(team.unclaimed_oldest_days)}d`}
+          </p>
+        </div>
+      </div>
+
+      <div>
+        <SectionHeading
+          title="Ownership & output"
+          subtitle={`Sourced and claimed in the selected period. "Now" columns are live, regardless of period. Stale = no stage move in ${stuckDays}+ days.`}
+        />
+        <div className="overflow-x-auto rounded-lg border border-surface-100">
+          <table className="w-full text-sm min-w-[980px]">
+            <thead>
+              <tr className="border-b border-surface-200 bg-surface-50">
+                <th className="text-left py-2.5 px-3 text-xs font-medium text-gray-500">Recruiter</th>
+                <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Sourced</th>
+                <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Owned</th>
+                <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">In progress</th>
+                <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Hired</th>
+                <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Not proceeding</th>
+                <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500" title="Hired ÷ owned">Conversion</th>
+                <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500" title="Average time from application to their first move">Pickup</th>
+                <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500" title="Stage moves made: on own candidates / assists on others'">Moves (own / assists)</th>
+                <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500" title="Moves other people made on this recruiter's candidates">Covered by others</th>
+                <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Load now</th>
+                <th className="py-2.5 px-3 w-8" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-surface-100">
+              {recruiters.map((r) => (
+                <tr key={r.user_id} className="hover:bg-surface-50 cursor-pointer" onClick={() => open(r)}>
+                  <td className="py-3 px-3">
+                    <p className="font-medium text-gray-900">
+                      {r.name}
+                      {!r.is_active && <span className="ml-1.5 text-[10px] font-semibold uppercase text-gray-400">inactive</span>}
+                    </p>
+                    <p className="text-xs text-gray-400">{r.email}</p>
+                  </td>
+                  <td className="py-3 px-3 text-right">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); open(r, 'sourced'); }}
+                      className="text-gray-900 hover:text-brand-600 hover:underline"
+                      disabled={!r.sourced}
+                    >
+                      {r.sourced}
+                    </button>
+                    {r.sourced_hired > 0 && <p className="text-[11px] text-green-600">{r.sourced_hired} hired</p>}
+                  </td>
+                  <td className="py-3 px-3 text-right font-semibold text-gray-900">{r.owned}</td>
+                  <td className="py-3 px-3 text-right text-blue-600">
+                    {r.active}
+                    {r.on_hold > 0 && <p className="text-[11px] text-gray-400">{r.on_hold} on hold</p>}
+                  </td>
+                  <td className="py-3 px-3 text-right text-green-600 font-medium">{r.hired}</td>
+                  <td className="py-3 px-3 text-right text-red-400">{r.not_proceeding}</td>
+                  <td className="py-3 px-3 text-right text-gray-700">{r.owned ? `${r.conversion_rate}%` : '–'}</td>
+                  <td className="py-3 px-3 text-right text-gray-600">{fmtDays(r.avg_pickup_days)}</td>
+                  <td className="py-3 px-3 text-right text-gray-600">
+                    {r.moves_on_own}<span className="text-gray-300"> / </span>
+                    <span className={r.moves_on_others ? 'text-violet-600 font-medium' : ''}>{r.moves_on_others}</span>
+                  </td>
+                  <td className="py-3 px-3 text-right text-gray-500">{r.moves_by_others_on_mine || '–'}</td>
+                  <td className="py-3 px-3 text-right">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); open(r, 'active'); }}
+                      className="text-gray-900 hover:text-brand-600 hover:underline"
+                      disabled={!r.active_now}
+                    >
+                      {r.active_now}
+                    </button>
+                    {r.stale_now > 0 && <p className="text-[11px] text-amber-600">{r.stale_now} stale</p>}
+                  </td>
+                  <td className="py-3 px-3 text-gray-300"><ChevronRight className="w-4 h-4" /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div>
+        <SectionHeading
+          title="Stage progression of owned candidates"
+          subtitle="How many of each recruiter's claimed candidates reached each stage, with the share of their owned total underneath. Agency and campus candidates take assessment before screening, so the stages count independently and don't have to shrink left to right."
+        />
+        <div className="overflow-x-auto rounded-lg border border-surface-100">
+          <table className="w-full text-sm min-w-[760px]">
+            <thead>
+              <tr className="border-b border-surface-200 bg-surface-50">
+                <th className="text-left py-2.5 px-3 text-xs font-medium text-gray-500">Recruiter</th>
+                <th className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">Owned</th>
+                {REACH_STAGES.map((st) => (
+                  <th key={st} className="text-right py-2.5 px-3 text-xs font-medium text-gray-500">{REACH_LABELS[st]}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-surface-100">
+              {recruiters.filter((r) => r.owned > 0).map((r) => {
+                const reached = Object.fromEntries(r.reached.map((x) => [x.stage, x.count]));
+                return (
+                  <tr key={r.user_id} className="hover:bg-surface-50 cursor-pointer" onClick={() => open(r)}>
+                    <td className="py-2.5 px-3 font-medium text-gray-900">{r.name}</td>
+                    <td className="py-2.5 px-3 text-right font-semibold text-gray-900">{r.owned}</td>
+                    {REACH_STAGES.map((st) => {
+                      const n = reached[st] ?? 0;
+                      const pct = r.owned ? Math.round((n / r.owned) * 100) : 0;
+                      return (
+                        <td key={st} className="py-2.5 px-3 text-right">
+                          {n ? (
+                            <>
+                              <span className={st === 'hired' ? 'text-green-600 font-semibold' : 'text-gray-800'}>{n}</span>
+                              <p className="text-[11px] text-gray-400">{pct}%</p>
+                            </>
+                          ) : <span className="text-gray-300">–</span>}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {drill && (
+        <RecruiterDrilldownModal
+          recruiter={drill}
+          days={days}
+          onClose={() => setDrill(null)}
+          onScope={(scope) => setDrill((d) => ({ ...d, scope }))}
+        />
+      )}
+    </div>
+  );
+}
+
+const DRILL_SCOPES = [
+  { value: 'owned', label: 'Owned in period' },
+  { value: 'active', label: 'Active now' },
+  { value: 'sourced', label: 'Sourced in period' },
+];
+
+function RecruiterDrilldownModal({ recruiter, days, onClose, onScope }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['report-recruiter-apps', recruiter.id, recruiter.scope, days],
+    queryFn: () => reportsApi.recruiterApplications(recruiter.id, { days, scope: recruiter.scope }).then((r) => r.data),
+    placeholderData: keepPreviousData,
+  });
+  const items = data?.items ?? [];
+  const dateFmt = (iso) => new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' });
+
+  return (
+    <Modal onClose={onClose} title={recruiter.name} description="Every stage move, and who made it" icon={UserCog} size="3xl">
+      <div className="space-y-4">
+        <Segmented value={recruiter.scope} onChange={onScope} options={DRILL_SCOPES} size="sm" />
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-500">
+          <span><span className="inline-block w-2 h-2 rounded-full bg-brand-500 mr-1" />Moved by owner</span>
+          <span><span className="inline-block w-2 h-2 rounded-full bg-violet-500 mr-1" />Assist by another recruiter</span>
+          <span><span className="inline-block w-2 h-2 rounded-full bg-gray-300 mr-1" />System</span>
+        </div>
+
+        {isLoading ? (
+          <EmptyState text="Loading…" icon={UserCog} />
+        ) : items.length === 0 ? (
+          <EmptyState text="No candidates in this view" icon={Inbox} />
+        ) : (
+          <ul className="divide-y divide-surface-100 border border-surface-100 rounded-lg">
+            {items.map((a) => {
+              const st = STAGE_MAP[a.stage];
+              return (
+                <li key={a.application_id} className="p-3.5">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <Link
+                        to={`/hr/applicants/${a.application_id}`}
+                        className="font-medium text-gray-900 hover:text-brand-600 inline-flex items-center gap-1"
+                      >
+                        {a.candidate_name} <ExternalLink className="w-3 h-3 text-gray-400" />
+                      </Link>
+                      <p className="text-xs text-gray-500 truncate">
+                        {a.job_title}
+                        {recruiter.scope === 'sourced' && a.owner_name && a.owner_name !== recruiter.name && (
+                          <span className="text-violet-600"> · owned by {a.owner_name}</span>
+                        )}
+                        {recruiter.scope === 'sourced' && !a.owner_name && <span className="text-amber-600"> · unclaimed</span>}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      {st && <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${st.color}`}>{st.label}</span>}
+                      {a.on_hold && <span className="ml-1 text-[11px] font-medium px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">On hold</span>}
+                      {!a.is_terminal && (
+                        <p className={`text-[11px] mt-1 ${a.days_in_stage >= (data?.stuck_threshold_days ?? 5) ? 'text-amber-600' : 'text-gray-400'}`}>
+                          {Math.round(a.days_in_stage)}d in stage
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <ol className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[11px]">
+                    <li className="px-2 py-1 rounded-md bg-surface-50 text-gray-500">Applied · {dateFmt(a.applied_at)}</li>
+                    {a.trail.map((t, idx) => (
+                      <li key={idx} className="flex items-center gap-1.5">
+                        <ChevronRight className="w-3 h-3 text-gray-300" />
+                        <span
+                          className={`px-2 py-1 rounded-md border ${
+                            t.by_system
+                              ? 'border-surface-200 bg-surface-50 text-gray-500'
+                              : t.by_owner
+                                ? 'border-brand-100 bg-brand-50 text-brand-700'
+                                : 'border-violet-200 bg-violet-50 text-violet-700'
+                          }`}
+                          title={`${t.from_stage} → ${t.to_stage}`}
+                        >
+                          {STAGE_MAP[t.to_stage]?.label ?? t.to_label} · {dateFmt(t.at)} · {t.by_name}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {data?.truncated && <p className="text-xs text-gray-400">Showing the 500 most recently moved.</p>}
+      </div>
+    </Modal>
+  );
+}
+
 export default function ReportsPage() {
   const [activeTab, setActiveTab] = useState('pipeline');
   const [days, setDays] = useState(90);
@@ -1166,6 +1456,7 @@ export default function ReportsPage() {
         {activeTab === 'tth'      && <TimeToHireReport days={days} />}
         {activeTab === 'agency'   && <AgencyPerformanceReport days={days} />}
         {activeTab === 'interviewer' && <InterviewerPerformanceReport days={days} />}
+        {activeTab === 'recruiter' && <RecruiterPerformanceReport days={days} />}
       </div>
     </div>
   );

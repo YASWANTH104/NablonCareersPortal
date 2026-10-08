@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, update
 
 from app.models.application import Application, ApplicationStageHistory
 from app.schemas.application import (
@@ -92,6 +92,8 @@ def _app_to_dict(app: Application) -> dict:
         "rating": app.rating,
         "is_starred": app.is_starred,
         "assigned_to": app.assigned_to,
+        "owner_id": app.owner_id,
+        "owned_at": app.owned_at,
         "on_hold": app.on_hold,
         "hold_reason": app.hold_reason,
         "duplicate_flag": app.duplicate_flag,
@@ -783,6 +785,7 @@ async def get_all_applications(
     from sqlalchemy.orm import aliased
 
     _Sourcer = aliased(User)
+    _Owner = aliased(User)
 
     base = (
         select(
@@ -790,6 +793,7 @@ async def get_all_applications(
             Campus.name.label("campus_name"),
             ScreeningResponse.overall_score, ScreeningResponse.auto_reject,
             _Sourcer.full_name.label("sourced_by_name"),
+            _Owner.full_name.label("owner_name"),
         )
         .join(User, User.id == Application.applicant_id)
         .join(Agency, Agency.id == Application.agency_id, isouter=True)
@@ -798,6 +802,7 @@ async def get_all_applications(
         # Second alias of users — Application already joins users once for the
         # applicant, so the uploader needs its own alias or the join collides.
         .join(_Sourcer, _Sourcer.id == Application.sourced_by, isouter=True)
+        .join(_Owner, _Owner.id == Application.owner_id, isouter=True)
     )
 
     filters = []
@@ -855,11 +860,12 @@ async def get_all_applications(
 
     items = []
     for (app, full_name, email, avatar_url, agency_name, campus_name,
-         screening_score, screening_auto_reject, sourced_by_name) in rows:
+         screening_score, screening_auto_reject, sourced_by_name, owner_name) in rows:
         d = _app_to_dict(app)
         d["agency_name"] = agency_name
         d["campus_name"] = campus_name
         d["sourced_by_name"] = sourced_by_name
+        d["owner_name"] = owner_name
         d["screening_score"] = float(screening_score) if screening_score is not None else None
         d["screening_auto_reject"] = screening_auto_reject
         d["applicant"] = {
@@ -887,6 +893,8 @@ async def get_application_by_id(
 
     Referrer = aliased(User)
     Sourcer = aliased(User)   # the internal recruiter who uploaded the profile
+    Owner = aliased(User)     # first human stage mover — credited recruiter
+    Handler = aliased(User)   # assigned_to — whoever is handling it right now
 
     row = (await db.execute(
         select(
@@ -894,6 +902,8 @@ async def get_application_by_id(
             Agency.name.label("agency_name"), Campus.name.label("campus_name"),
             Referrer.full_name.label("referrer_name"),
             Sourcer.full_name.label("sourced_by_name"),
+            Owner.full_name.label("owner_name"),
+            Handler.full_name.label("assigned_to_name"),
         )
         .join(User, User.id == Application.applicant_id)
         .join(Agency, Agency.id == Application.agency_id, isouter=True)
@@ -901,6 +911,8 @@ async def get_application_by_id(
         .join(Referral, Referral.id == Application.referral_id, isouter=True)
         .join(Referrer, Referrer.id == Referral.referred_by, isouter=True)
         .join(Sourcer, Sourcer.id == Application.sourced_by, isouter=True)
+        .join(Owner, Owner.id == Application.owner_id, isouter=True)
+        .join(Handler, Handler.id == Application.assigned_to, isouter=True)
         .where(Application.id == application_id)
     )).first()
 
@@ -908,7 +920,7 @@ async def get_application_by_id(
         raise HTTPException(404, "Application not found")
 
     (app, full_name, email, phone, avatar_url, date_of_birth,
-     agency_name, campus_name, referrer_name, sourced_by_name) = row
+     agency_name, campus_name, referrer_name, sourced_by_name, owner_name, assigned_to_name) = row
 
     # Same relaxed-gate reasoning as get_all_applications above — a caller
     # who isn't HR only reaches this function at all because the router now
@@ -940,6 +952,8 @@ async def get_application_by_id(
     d["agency_name"] = agency_name
     d["campus_name"] = campus_name
     d["sourced_by_name"] = sourced_by_name
+    d["owner_name"] = owner_name
+    d["assigned_to_name"] = assigned_to_name
     d["referrer_name"] = referrer_name
     d["applicant"] = {
         "id": app.applicant_id,
@@ -1019,7 +1033,12 @@ async def move_stage(
     (see screening_service.REJECTION_EMAIL_DELAY); every other caller leaves
     this None and keeps the original immediate-send behavior. Actual delayed
     send is a Celery beat sweep, screening_tasks.send_delayed_screening_rejection_emails."""
-    app = await db.get(Application, application_id)
+    # Row lock: without it two people moving the same candidate at once both
+    # validate against the same stale stage and both commit, leaving a history
+    # with two moves out of the same from_stage — which corrupts the per-stage
+    # trail the Recruiters report reads. With it, the second move waits, then
+    # validates against the stage the first one actually left behind.
+    app = await db.get(Application, application_id, with_for_update=True)
     if not app:
         raise HTTPException(404, "Application not found")
 
@@ -1052,6 +1071,24 @@ async def move_stage(
         notes=notes,
     )
     db.add(history)
+
+    # First human mover owns the application — see Application.owner_id.
+    # A conditional UPDATE rather than `if app.owner_id is None: app.owner_id =`
+    # because the read-then-write version lets two TAs moving the same fresh
+    # candidate at the same moment both "win", with the later commit silently
+    # taking the credit. The row lock this UPDATE takes makes the second one
+    # re-check owner_id after the first commits and match nothing.
+    if moved_by is not None:
+        await db.execute(
+            update(Application)
+            .where(Application.id == application_id, Application.owner_id.is_(None))
+            .values(
+                owner_id=moved_by,
+                owned_at=datetime.utcnow(),
+                assigned_to=func.coalesce(Application.assigned_to, moved_by),
+            )
+            .execution_options(synchronize_session=False)
+        )
 
     app.stage = new_stage
     app.stage_updated_at = datetime.utcnow()
@@ -1287,11 +1324,38 @@ async def assign_application(
     db: AsyncSession,
     application_id: uuid.UUID,
     assignee_id: Optional[uuid.UUID],
+    changed_by: Optional[uuid.UUID] = None,
 ) -> Application:
+    """Changes who is HANDLING the application (assigned_to) — never the
+    owner, which stays with the first mover for credit. The change is written
+    to the timeline as a same-stage history row (the shape move-job and resume
+    swaps already use), so reports' real-move filter ignores it."""
+    from app.models.user import User
+
     app = await db.get(Application, application_id)
     if not app:
         raise HTTPException(404, "Application not found")
+    if assignee_id == app.assigned_to:
+        return app
+
+    new_handler = None
+    if assignee_id is not None:
+        new_handler = await db.get(User, assignee_id)
+        if not new_handler or not new_handler.is_active or new_handler.role not in _HR_EDIT_ROLES:
+            raise HTTPException(400, "Applications can only be handed to an active HR / TA team member")
+    old_handler = await db.get(User, app.assigned_to) if app.assigned_to else None
+
     app.assigned_to = assignee_id
+    db.add(ApplicationStageHistory(
+        application_id=application_id,
+        from_stage=app.stage,
+        to_stage=app.stage,
+        changed_by=changed_by,
+        notes=(
+            f"Handler changed from {old_handler.full_name if old_handler else 'nobody'} "
+            f"to {new_handler.full_name if new_handler else 'nobody'}"
+        ),
+    ))
     await db.commit()
     await db.refresh(app)
     return app

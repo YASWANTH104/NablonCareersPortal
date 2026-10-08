@@ -13,6 +13,7 @@ from app.models.agency import Agency, JobAgencyAssignment
 from app.models.campus import Campus, JobCampusAssignment
 from app.models.interview_slot import InterviewSlot
 from app.models.screening import ScreeningResponse
+from app.models.action_snooze import ActionSnooze
 
 __all__ = [
     "User",
@@ -29,4 +30,5 @@ __all__ = [
     "Campus", "JobCampusAssignment",
     "InterviewSlot",
     "ScreeningResponse",
+    "ActionSnooze",
 ]

@@ -4,7 +4,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, or_
 
 from app.database import get_db
 from app.dependencies import require_roles, Role
@@ -630,7 +630,306 @@ async def interviewer_performance(
     return result
 
 
-ReportKey = Literal["funnel", "pipeline", "trend", "job", "source", "referral", "tth", "agency", "interviewer"]
+# ── Recruiter (TA) ownership ─────────────────────────────────────────────────
+# Credit model (see Application.owner_id): an application belongs to whoever
+# made its FIRST human stage move, permanently. Later moves by other TAs are
+# "assists" — counted for the person who made them, but the candidate's
+# outcome stays on the owner's line. Sourcing (sourced_by = who uploaded the
+# profile) is tracked as its own column because the sourcer and the owner are
+# often different people.
+
+_REAL_MOVE = and_(
+    ApplicationStageHistory.to_stage != "_note",
+    ApplicationStageHistory.from_stage.isnot(None),
+    ApplicationStageHistory.from_stage != ApplicationStageHistory.to_stage,
+)
+_RECRUITER_CORE_ROLE = Role.HR_MANAGER.value
+
+
+def _avg(values: list[float]) -> float | None:
+    return round(sum(values) / len(values), 1) if values else None
+
+
+@router.get("/recruiter-performance")
+async def recruiter_performance(
+    days: int = Query(90, ge=1, le=365),
+    _=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Per-recruiter sourcing, ownership and stage-by-stage progress.
+
+    Windows, stated precisely because they differ by column:
+      - sourced            -> applications CREATED in the window with sourced_by = them
+      - owned / funnel     -> applications they CLAIMED (owned_at) in the window
+      - moves              -> stage moves MADE in the window (any application)
+      - active_now / stale_now / unclaimed -> point-in-time, no window: the
+        current load a manager needs to see regardless of the period picked.
+    """
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+    stale_cutoff = now - timedelta(days=STUCK_THRESHOLD_DAYS)
+
+    stats: dict = {}
+
+    def row_for(uid):
+        return stats.setdefault(uid, {
+            "sourced": 0, "sourced_hired": 0, "sourced_owned_by_others": 0,
+            "owned": 0, "active": 0, "hired": 0, "not_proceeding": 0, "on_hold": 0,
+            "_pickup": [], "_tth": [],
+            "reached": {s: 0 for s in FUNNEL_STAGES},
+            "current": {},
+            "moves_total": 0, "moves_on_own": 0, "moves_on_others": 0, "moves_on_unowned": 0,
+            "moves_by_others_on_mine": 0,
+            "active_now": 0, "stale_now": 0,
+        })
+
+    # --- sourced ---
+    for r in (await db.execute(
+        select(Application.sourced_by, Application.owner_id, Application.stage)
+        .where(Application.sourced_by.isnot(None), Application.created_at >= since)
+    )).all():
+        s = row_for(r.sourced_by)
+        s["sourced"] += 1
+        if r.stage == "hired":
+            s["sourced_hired"] += 1
+        if r.owner_id is not None and r.owner_id != r.sourced_by:
+            s["sourced_owned_by_others"] += 1
+
+    # --- owned in window + every real move on those applications ---
+    owned_rows = (await db.execute(
+        select(
+            Application.id, Application.owner_id, Application.stage, Application.on_hold,
+            Application.applied_at, Application.owned_at, Application.stage_updated_at,
+        )
+        .where(Application.owner_id.isnot(None), Application.owned_at >= since)
+    )).all()
+    reached_sets: dict = {r.id: {"applied", r.stage} for r in owned_rows}
+    owned_ids = list(reached_sets)
+    if owned_ids:
+        for h in (await db.execute(
+            select(ApplicationStageHistory.application_id, ApplicationStageHistory.to_stage)
+            .join(Application, ApplicationStageHistory.application_id == Application.id)
+            .where(Application.owner_id.isnot(None), Application.owned_at >= since, _REAL_MOVE)
+        )).all():
+            reached_sets[h.application_id].add(h.to_stage)
+
+    for r in owned_rows:
+        s = row_for(r.owner_id)
+        s["owned"] += 1
+        s["current"][r.stage] = s["current"].get(r.stage, 0) + 1
+        if r.stage == "hired":
+            s["hired"] += 1
+            s["_tth"].append((r.stage_updated_at - r.applied_at).total_seconds() / 86400)
+        elif r.stage in TERMINAL_STAGES:
+            s["not_proceeding"] += 1
+        else:
+            s["active"] += 1
+            if r.on_hold:
+                s["on_hold"] += 1
+        s["_pickup"].append(max(0.0, (r.owned_at - r.applied_at).total_seconds() / 86400))
+        for st in reached_sets[r.id]:
+            if st in s["reached"]:
+                s["reached"][st] += 1
+
+    # --- moves made in the window, split by whose candidate it was ---
+    for r in (await db.execute(
+        select(ApplicationStageHistory.changed_by, Application.owner_id, func.count().label("n"))
+        .join(Application, ApplicationStageHistory.application_id == Application.id)
+        .where(
+            ApplicationStageHistory.created_at >= since,
+            ApplicationStageHistory.changed_by.isnot(None),
+            _REAL_MOVE,
+        )
+        .group_by(ApplicationStageHistory.changed_by, Application.owner_id)
+    )).all():
+        mover = row_for(r.changed_by)
+        mover["moves_total"] += r.n
+        if r.owner_id == r.changed_by:
+            mover["moves_on_own"] += r.n
+        elif r.owner_id is None:
+            mover["moves_on_unowned"] += r.n
+        else:
+            mover["moves_on_others"] += r.n
+            row_for(r.owner_id)["moves_by_others_on_mine"] += r.n
+
+    # --- current load (point-in-time) ---
+    for r in (await db.execute(
+        select(
+            Application.owner_id,
+            func.count().label("active"),
+            func.count().filter(
+                Application.stage_updated_at < stale_cutoff, Application.on_hold.is_(False),
+            ).label("stale"),
+        )
+        .where(Application.owner_id.isnot(None), Application.stage.notin_(TERMINAL_STAGES))
+        .group_by(Application.owner_id)
+    )).all():
+        s = row_for(r.owner_id)
+        s["active_now"], s["stale_now"] = r.active, r.stale
+
+    unclaimed = (await db.execute(
+        select(func.count(), func.min(Application.applied_at))
+        .where(Application.owner_id.is_(None), Application.stage.notin_(TERMINAL_STAGES))
+    )).one()
+
+    # Every active TA is listed even at zero — an idle recruiter is exactly
+    # what a manager wants to see. Admins only appear if they did something.
+    core_ta = and_(User.role == _RECRUITER_CORE_ROLE, User.is_active.is_(True))
+    people = {
+        u.id: u for u in (await db.execute(
+            select(User).where(or_(User.id.in_(list(stats)), core_ta) if stats else core_ta)
+        )).scalars().all()
+    }
+
+    recruiters = []
+    for uid, u in people.items():
+        s = row_for(uid)
+        pickup, tth = s.pop("_pickup"), s.pop("_tth")
+        closed = s["hired"] + s["not_proceeding"]
+        recruiters.append({
+            "user_id": str(uid),
+            "name": u.full_name,
+            "email": u.email,
+            "role": u.role,
+            "is_active": u.is_active,
+            **{k: v for k, v in s.items() if k not in ("reached", "current")},
+            "conversion_rate": round(s["hired"] / s["owned"] * 100, 1) if s["owned"] else 0,
+            "close_rate": round(s["hired"] / closed * 100, 1) if closed else None,
+            "avg_pickup_days": _avg(pickup),
+            "avg_days_to_hire": _avg(tth),
+            "reached": [{"stage": st, "count": s["reached"][st]} for st in FUNNEL_STAGES],
+            "current": [{"stage": st, "count": c} for st, c in s["current"].items()],
+        })
+    recruiters.sort(key=lambda x: (x["owned"], x["sourced"], x["moves_total"]), reverse=True)
+
+    def total(key):
+        return sum(r[key] for r in recruiters)
+
+    return {
+        "window_days": days,
+        "stuck_threshold_days": STUCK_THRESHOLD_DAYS,
+        "team": {
+            "sourced": total("sourced"),
+            "owned": total("owned"),
+            "hired": total("hired"),
+            "active_now": total("active_now"),
+            "stale_now": total("stale_now"),
+            "moves": total("moves_total"),
+            "assists": total("moves_on_others"),
+            "unclaimed_now": unclaimed[0] or 0,
+            "unclaimed_oldest_days": (
+                round((now - unclaimed[1]).total_seconds() / 86400, 1) if unclaimed[1] else None
+            ),
+        },
+        "recruiters": recruiters,
+    }
+
+
+@router.get("/recruiter-performance/{user_id}/applications")
+async def recruiter_applications(
+    user_id: uuid.UUID,
+    days: int = Query(90, ge=1, le=365),
+    scope: Literal["owned", "sourced", "active"] = Query("owned"),
+    _=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Drill-down for one recruiter: each candidate with the full stage trail
+    (who made every move, and whether it was the owner or an assist).
+    scope=owned  -> claimed in the window
+    scope=sourced -> uploaded by them in the window
+    scope=active -> everything they own that is still in flight, any age."""
+    from sqlalchemy.orm import aliased
+
+    person = await db.get(User, user_id)
+    if not person:
+        raise HTTPException(404, "User not found")
+
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    Candidate, Owner, Sourcer = aliased(User), aliased(User), aliased(User)
+
+    where = {
+        "owned": [Application.owner_id == user_id, Application.owned_at >= since],
+        "sourced": [Application.sourced_by == user_id, Application.created_at >= since],
+        "active": [Application.owner_id == user_id, Application.stage.notin_(TERMINAL_STAGES)],
+    }[scope]
+
+    apps = (await db.execute(
+        select(
+            Application.id, Application.stage, Application.source, Application.on_hold,
+            Application.applied_at, Application.owned_at, Application.stage_updated_at,
+            Application.owner_id,
+            Candidate.full_name.label("candidate_name"), Candidate.email.label("candidate_email"),
+            Job.id.label("job_id"), Job.title.label("job_title"),
+            Owner.full_name.label("owner_name"), Sourcer.full_name.label("sourced_by_name"),
+        )
+        .join(Candidate, Candidate.id == Application.applicant_id)
+        .join(Job, Job.id == Application.job_id)
+        .join(Owner, Owner.id == Application.owner_id, isouter=True)
+        .join(Sourcer, Sourcer.id == Application.sourced_by, isouter=True)
+        .where(*where)
+        .order_by(Application.stage_updated_at.desc())
+        .limit(500)
+    )).all()
+
+    trails: dict = {a.id: [] for a in apps}
+    if trails:
+        Mover = aliased(User)
+        for h in (await db.execute(
+            select(
+                ApplicationStageHistory.application_id, ApplicationStageHistory.from_stage,
+                ApplicationStageHistory.to_stage, ApplicationStageHistory.created_at,
+                ApplicationStageHistory.changed_by, Mover.full_name.label("by_name"),
+            )
+            .join(Mover, Mover.id == ApplicationStageHistory.changed_by, isouter=True)
+            .where(ApplicationStageHistory.application_id.in_(list(trails)), _REAL_MOVE)
+            .order_by(ApplicationStageHistory.created_at)
+        )).all():
+            trails[h.application_id].append(h)
+
+    now = datetime.now(timezone.utc)
+    items = []
+    for a in apps:
+        items.append({
+            "application_id": str(a.id),
+            "candidate_name": a.candidate_name,
+            "candidate_email": a.candidate_email,
+            "job_id": str(a.job_id),
+            "job_title": a.job_title,
+            "source": a.source,
+            "stage": a.stage,
+            "stage_label": STAGE_LABELS.get(a.stage, a.stage),
+            "on_hold": a.on_hold,
+            "is_terminal": a.stage in TERMINAL_STAGES,
+            "applied_at": a.applied_at.isoformat(),
+            "owned_at": a.owned_at.isoformat() if a.owned_at else None,
+            "owner_name": a.owner_name,
+            "sourced_by_name": a.sourced_by_name,
+            "days_in_stage": round((now - a.stage_updated_at).total_seconds() / 86400, 1),
+            "trail": [
+                {
+                    "from_stage": h.from_stage,
+                    "to_stage": h.to_stage,
+                    "to_label": STAGE_LABELS.get(h.to_stage, h.to_stage),
+                    "at": h.created_at.isoformat(),
+                    "by_name": h.by_name or ("System" if h.changed_by is None else "Unknown"),
+                    "by_owner": h.changed_by is not None and h.changed_by == a.owner_id,
+                    "by_system": h.changed_by is None,
+                }
+                for h in trails[a.id]
+            ],
+        })
+
+    return {
+        "user_id": str(person.id),
+        "name": person.full_name,
+        "scope": scope,
+        "stuck_threshold_days": STUCK_THRESHOLD_DAYS,
+        "truncated": len(items) == 500,
+        "items": items,
+    }
+
+
+ReportKey = Literal["funnel", "pipeline", "trend", "job", "source", "referral", "tth", "agency", "interviewer", "recruiter"]
 
 
 async def _fetch_report_data(report: str, *, db: AsyncSession, days: int, bucket: str = "day"):
@@ -658,6 +957,8 @@ async def _fetch_report_data(report: str, *, db: AsyncSession, days: int, bucket
         return await agency_performance(days=days, _=None, db=db)
     if report == "interviewer":
         return await interviewer_performance(days=days, _=None, db=db)
+    if report == "recruiter":
+        return await recruiter_performance(days=days, _=None, db=db)
     raise HTTPException(400, f"Unknown report: {report}")
 
 

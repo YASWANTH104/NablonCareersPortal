@@ -60,9 +60,19 @@ class Application(Base):
     # was nothing recording WHO — so the pipeline could not tell you which
     # recruiter sourced a profile. NULL for candidates who applied themselves.
     sourced_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    # The recruiter who OWNS this application: whoever made its first human
+    # stage move. Claimed exactly once (application_service.move_stage, with a
+    # conditional UPDATE so two simultaneous first moves can't both win) and
+    # never overwritten by later moves from other TAs — it is the credit line
+    # for the Recruiters report. System moves (screening auto-reject,
+    # moved_by=None) never claim. `assigned_to` below is the separate "who is
+    # handling it right now" field: it defaults to the owner on claim and can
+    # be reassigned (e.g. the owner leaves) without moving the credit.
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), index=True)
+    owned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     rating: Mapped[int | None] = mapped_column(Integer)
     is_starred: Mapped[bool] = mapped_column(Boolean, default=False)
-    assigned_to: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    assigned_to: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), index=True)
 
     # On-hold is orthogonal to `stage` — the candidate stays in their current
     # Kanban column, just flagged paused (e.g. waiting on budget approval).
