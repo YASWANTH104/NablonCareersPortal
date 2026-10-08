@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Your hiring actions – Nablon AI Careers{% endblock %}
+
+{% block content %}
+<h2>Good morning {{ full_name }},</h2>
+<p style="margin-bottom:20px;">
+  Here's what needs you on {{ date_label }}:
+  {% if overdue_count %}<strong style="color:#B91C1C;">{{ overdue_count }} overdue</strong>{% if due_count %} and {% endif %}{% endif %}
+  {% if due_count %}<strong>{{ due_count }} due</strong>{% endif %}.
+</p>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse; font-size:14px;">
+  {% for i in items %}
+  <tr>
+    <td style="padding:12px 0; border-top:1px solid #F3F4F6; vertical-align:top; width:10px;">
+      <span style="display:inline-block; width:8px; height:8px; border-radius:50%; margin-top:6px; background:{{ '#DC2626' if i.severity == 'overdue' else '#D97706' }};"></span>
+    </td>
+    <td style="padding:12px 0 12px 10px; border-top:1px solid #F3F4F6;">
+      <a href="{{ i.url }}" style="color:#111827; font-weight:600; text-decoration:none;">{{ i.candidate_name }}</a>
+      <span style="color:#6B7280;"> · {{ i.job_title }} · {{ i.stage_label }}</span><br>
+      <span style="color:#111827;">{{ i.title }}</span><br>
+      <span style="color:#6B7280; font-size:13px;">
+        {{ i.detail }}{% if i.severity == 'overdue' %} · <span style="color:#B91C1C;">overdue by {{ i.overdue_by_days|round(0)|int }}d</span>{% endif %}{% if i.unclaimed %} · unclaimed, on a job you posted{% endif %}
+      </span>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+
+{% if hidden_count %}
+<p style="color:#6B7280; font-size:13px; margin-top:12px;">…and {{ hidden_count }} more.</p>
+{% endif %}
+
+<a href="{{ action_center_url }}" class="cta">Open Action Center</a>
+
+<p style="margin-top:8px; color:#6B7280; font-size:13px;">
+  Something here is waiting on purpose? Snooze it in the Action Center and it'll drop out of tomorrow's list.
+</p>
+{% endblock %}

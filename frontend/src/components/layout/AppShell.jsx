@@ -21,6 +21,7 @@ function getPageTitle(pathname) {
     referrals: 'Referrals',
     offers: 'Offers',
     reports: 'Reports',
+    'action-center': 'Action Center',
     settings: 'Settings',
     refer: 'Refer a Candidate',
     'my-referrals': 'My Referrals',

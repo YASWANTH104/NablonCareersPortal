@@ -87,6 +87,26 @@ def _interviewer_rows(data: list[dict]) -> tuple[list[str], list[list]]:
     return headers, rows
 
 
+def _recruiter_rows(data: dict) -> tuple[list[str], list[list]]:
+    stages = ["applied", "screening", "assessment", "tr1", "tr2", "final_tr", "hr", "offer", "hired"]
+    headers = ["Recruiter", "Email", "Sourced", "Sourced → Hired", "Owned", "Active", "Hired", "Not Proceeding",
+               "Conversion %", "Avg Pickup (days)", "Avg Days to Hire",
+               *[f"Reached: {s}" for s in stages],
+               "Moves (total)", "Moves on own", "Assists on others", "Moves by others on mine",
+               "Active now", "Stale now"]
+    rows = []
+    for r in data.get("recruiters", []):
+        reached = {x["stage"]: x["count"] for x in r["reached"]}
+        rows.append([
+            r["name"], r["email"], r["sourced"], r["sourced_hired"], r["owned"], r["active"], r["hired"],
+            r["not_proceeding"], r["conversion_rate"], r["avg_pickup_days"], r["avg_days_to_hire"],
+            *[reached.get(s, 0) for s in stages],
+            r["moves_total"], r["moves_on_own"], r["moves_on_others"], r["moves_by_others_on_mine"],
+            r["active_now"], r["stale_now"],
+        ])
+    return headers, rows
+
+
 _BUILDERS = {
     "funnel": _funnel_rows,
     "pipeline": _pipeline_rows,
@@ -97,6 +117,7 @@ _BUILDERS = {
     "tth": _tth_rows,
     "agency": _agency_rows,
     "interviewer": _interviewer_rows,
+    "recruiter": _recruiter_rows,
 }
 
 REPORT_TITLES = {
@@ -109,6 +130,7 @@ REPORT_TITLES = {
     "tth": "Time to Hire",
     "agency": "Agency Performance",
     "interviewer": "Interviewer Performance",
+    "recruiter": "Recruiter Performance",
 }
 
 

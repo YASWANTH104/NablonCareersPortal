@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 
 from app.config import settings
-from app.routers import auth, users, jobs, applications, referrals, interviews, assessments, offers, dashboard, notifications, uploads, reports, documents, agencies, interview_slots, screening, campuses
+from app.routers import auth, users, jobs, applications, referrals, interviews, assessments, offers, dashboard, notifications, uploads, reports, documents, agencies, interview_slots, screening, campuses, action_center
 
 
 @asynccontextmanager
@@ -55,6 +55,7 @@ app.include_router(agencies.router, prefix=prefix)
 app.include_router(campuses.router, prefix=prefix)
 app.include_router(interview_slots.router, prefix=prefix)
 app.include_router(screening.router, prefix=prefix)
+app.include_router(action_center.router, prefix=prefix)
 
 
 @app.get("/health")

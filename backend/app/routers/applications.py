@@ -338,7 +338,7 @@ async def assign_application(
     user=Depends(require_roles(*_HR_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
-    return await application_service.assign_application(db, application_id, data.assignee_id)
+    return await application_service.assign_application(db, application_id, data.assignee_id, user.id)
 
 
 @router.patch("/{application_id}/hold", response_model=ApplicationResponse)

@@ -177,6 +177,12 @@ class ApplicationResponse(BaseModel):
     rating: Optional[int] = None
     is_starred: bool
     assigned_to: Optional[uuid.UUID] = None
+    assigned_to_name: Optional[str] = None
+    # First human stage mover — the credited recruiter. Never changes once set;
+    # assigned_to above is who is handling it now. See Application.owner_id.
+    owner_id: Optional[uuid.UUID] = None
+    owner_name: Optional[str] = None
+    owned_at: Optional[datetime] = None
     on_hold: bool = False
     hold_reason: Optional[str] = None
     duplicate_flag: bool = False

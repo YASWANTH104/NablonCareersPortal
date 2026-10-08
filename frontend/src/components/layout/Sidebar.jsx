@@ -5,17 +5,19 @@ import {
   LayoutDashboard, Briefcase, Users, Star, Calendar,
   FileText, BarChart2, Settings, LogOut, ChevronLeft,
   ChevronRight, UserCheck, Award, AlertTriangle, Building2, X, CalendarClock,
-  GraduationCap,
+  GraduationCap, ListChecks,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { useUIStore } from '@/store/uiStore';
 import { HR_ROLES, ROLES } from '@/utils/permissions';
 import { jobsApi } from '@/api/jobs';
+import { actionCenterApi } from '@/api/actionCenter';
 import { cn } from '@/lib/utils';
 
 const NAV_ITEMS = {
   hr: [
     { to: '/hr/dashboard',   label: 'Dashboard',   icon: LayoutDashboard },
+    { to: '/hr/action-center', label: 'Action Center', icon: ListChecks, badge: 'actions' },
     { to: '/hr/jobs',        label: 'Jobs',         icon: Briefcase },
     { to: '/hr/applicants',  label: 'Applicants',   icon: Users },
     { to: '/hr/interviews',  label: 'Interviews',   icon: Calendar },
@@ -86,6 +88,24 @@ export default function Sidebar() {
   // that's the same object reference stored in the module-level NAV_ITEMS
   // constant, so splicing it in place would permanently corrupt it across
   // renders and every other session sharing this module.
+  // Badge on Action Center: the caller's own due + overdue items. Waiting
+  // items never count — a badge that includes "candidate hasn't replied yet"
+  // is a badge nobody can clear, and one people learn to ignore.
+  const isHR = HR_ROLES.includes(user?.role);
+  const { data: actionCount } = useQuery({
+    queryKey: ['action-center-count'],
+    queryFn: () => actionCenterApi.count().then((r) => r.data),
+    enabled: isHR,
+    refetchInterval: 60_000,
+    staleTime: 0,
+    // Changes made by teammates or background jobs (screening auto-reject)
+    // never pass through this tab's mutation cache — catch them on refocus.
+    refetchOnWindowFocus: true,
+  });
+  const badges = {
+    actions: actionCount ? { n: actionCount.overdue + actionCount.due, urgent: actionCount.overdue > 0 } : null,
+  };
+
   const baseNavItems = getNavItems(user?.role);
   const navItems = needsHiringManagerCheck && managedJobs?.length > 0
     ? [baseNavItems[0], { to: '/hr/applicants', label: 'Applicants', icon: Users }, ...baseNavItems.slice(1)]
@@ -160,23 +180,38 @@ export default function Sidebar() {
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-0.5">
-          {navItems.map(({ to, label, icon: Icon }) => (
-            <NavLink
-              key={to}
-              to={to}
-              className={({ isActive }) =>
-                cn(
-                  'flex items-center gap-3 px-3 py-2.5 lg:py-2 rounded-lg text-sm font-medium transition-colors',
-                  isActive
-                    ? 'bg-brand-50 text-brand-600'
-                    : 'text-gray-600 hover:bg-surface-100 hover:text-gray-900'
-                )
-              }
-            >
-              <Icon className="w-4 h-4 flex-shrink-0" />
-              <span className={cn('truncate', collapsed && 'lg:hidden')}>{label}</span>
-            </NavLink>
-          ))}
+          {navItems.map(({ to, label, icon: Icon, badge }) => {
+            const b = badge ? badges[badge] : null;
+            return (
+              <NavLink
+                key={to}
+                to={to}
+                className={({ isActive }) =>
+                  cn(
+                    'relative flex items-center gap-3 px-3 py-2.5 lg:py-2 rounded-lg text-sm font-medium transition-colors',
+                    isActive
+                      ? 'bg-brand-50 text-brand-600'
+                      : 'text-gray-600 hover:bg-surface-100 hover:text-gray-900'
+                  )
+                }
+              >
+                <Icon className="w-4 h-4 flex-shrink-0" />
+                <span className={cn('truncate', collapsed && 'lg:hidden')}>{label}</span>
+                {b?.n > 0 && (
+                  <span
+                    title={b.urgent ? 'Includes overdue items' : 'Items due'}
+                    className={cn(
+                      'ml-auto min-w-[1.25rem] h-5 px-1.5 rounded-full text-[11px] font-semibold leading-5 text-center tabular-nums',
+                      b.urgent ? 'bg-rose-500 text-white' : 'bg-amber-100 text-amber-800',
+                      collapsed && 'lg:absolute lg:top-0.5 lg:right-0.5 lg:ml-0 lg:min-w-[1rem] lg:h-4 lg:leading-4 lg:px-1 lg:text-[10px]'
+                    )}
+                  >
+                    {b.n > 99 ? '99+' : b.n}
+                  </span>
+                )}
+              </NavLink>
+            );
+          })}
         </nav>
 
         {/* User info + logout */}

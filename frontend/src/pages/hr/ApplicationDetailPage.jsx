@@ -1612,6 +1612,76 @@ function MoveJobModal({ app, currentJobTitle, onClose, onSuccess }) {
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
+// Owner = the recruiter credited with this candidate (first person to move
+// them, never changes). Handler = who is working it right now — defaults to
+// the owner and is what the Action Center routes on, so reassigning it is how
+// a departing TA's queue gets picked up without moving their credit.
+function OwnershipFields({ app, canManage }) {
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const { data: team } = useQuery({
+    queryKey: ['internal-users-active'],
+    queryFn: () => usersApi.internalUsers().then((r) => r.data),
+    enabled: canManage && editing,
+    staleTime: 5 * 60_000,
+  });
+  const recruiters = (team ?? []).filter((u) => HR_ROLES.includes(u.role));
+  const assign = useMutation({
+    mutationFn: (assigneeId) => applicationsApi.assign(app.id, assigneeId),
+    onSuccess: () => {
+      toast.success('Handler updated');
+      setEditing(false);
+      queryClient.invalidateQueries({ queryKey: ['application-detail', app.id] });
+      queryClient.invalidateQueries({ queryKey: ['action-center'] });
+      queryClient.invalidateQueries({ queryKey: ['action-center-count'] });
+    },
+    onError: (e) => toast.error(e.response?.data?.detail ?? 'Could not change handler'),
+  });
+
+  return (
+    <>
+      <div>
+        <dt className="text-gray-400">Owner</dt>
+        <dd className="text-gray-700 mt-0.5">
+          {app.owner_name ?? <span className="text-gray-400">Unclaimed</span>}
+          <span className="block text-xs text-gray-500 mt-0.5">
+            {app.owned_at ? `First moved ${format(new Date(app.owned_at), 'd MMM yyyy')}` : 'Claimed on first stage move'}
+          </span>
+        </dd>
+      </div>
+      <div>
+        <dt className="text-gray-400">Handled by</dt>
+        <dd className="text-gray-700 mt-0.5">
+          {editing ? (
+            <select
+              autoFocus
+              defaultValue={app.assigned_to ?? ''}
+              disabled={assign.isPending || !team}
+              onChange={(e) => assign.mutate(e.target.value || null)}
+              onBlur={() => !assign.isPending && setEditing(false)}
+              onKeyDown={(e) => e.key === 'Escape' && setEditing(false)}
+              className="w-full text-sm border border-surface-300 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              {!team && <option>Loading…</option>}
+              <option value="">Nobody</option>
+              {recruiters.map((u) => <option key={u.id} value={u.id}>{u.full_name}</option>)}
+            </select>
+          ) : (
+            <>
+              {app.assigned_to_name ?? <span className="text-gray-400">Nobody</span>}
+              {canManage && (
+                <button type="button" onClick={() => setEditing(true)} className="ml-2 text-xs text-brand-600 hover:underline">
+                  Change
+                </button>
+              )}
+            </>
+          )}
+        </dd>
+      </div>
+    </>
+  );
+}
+
 export default function ApplicationDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -2346,6 +2416,7 @@ export default function ApplicationDetailPage() {
                   )}
                 </dd>
               </div>
+              <OwnershipFields app={app} canManage={canManage} />
               <div>
                 <dt className="text-gray-400">Interview count</dt>
                 <dd className="text-gray-700 mt-0.5">{app.interview_count ?? 0}</dd>
