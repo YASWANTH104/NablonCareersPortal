@@ -11,8 +11,8 @@ def _task_session():
     return _shared()
 
 
-# A run logs in, then spends ~1.5 min per new attempt (report page, two PDFs)
-# plus ~20s per test for its responses workbook, so a busy day is tens of minutes. The hard limit stops a hung browser from
+# A run logs in, then spends roughly 20s per new attempt (report page, counters)
+# plus ~20s per test for its responses workbook. The hard limit stops a hung browser from
 # holding a worker slot forever; the sync-run row it leaves "running" is
 # reclaimed as abandoned by the next run.
 @celery_app.task(name="sync_autoproctor_results", soft_time_limit=3 * 3600 - 300, time_limit=3 * 3600)

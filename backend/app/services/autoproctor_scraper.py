@@ -16,8 +16,10 @@ How the site works, as observed 2026-10-17:
   * Report page: Results / Proctoring / Auxiliary device tabs. "Download All
     responses" (Results) is a real .xlsx download, but it holds EVERY
     candidate's responses for that test, so we fetch it once per test per run
-    and slice out each candidate. Both "Download Report" buttons just call
-    window.print(); page.pdf() under print media produces the same document.
+    and slice out each candidate. The two "Download Report" buttons just call
+    window.print(); we used to reproduce them with page.pdf(), but loading and
+    printing ~150 evidence photos crashed Chromium on a 1 GB worker, so the
+    PDFs were dropped (2026-10-17) — HR opens the evidence in AutoProctor.
 """
 import asyncio
 import io
@@ -339,41 +341,6 @@ class AutoproctorSession:
         return page, captured
 
     @staticmethod
-    async def _load_lazy_images(page):
-        height = await page.evaluate("document.body.scrollHeight")
-        for y in range(0, height, 800):
-            await page.evaluate(f"window.scrollTo(0, {y})")
-            await page.wait_for_timeout(120)
-        await page.evaluate("window.scrollTo(0, 0)")
-        await page.wait_for_timeout(1500)
-
-    @staticmethod
-    async def _show_all_evidence(page):
-        """The evidence table pages at 40 rows and print only prints what's
-        on screen — pick the biggest page size first. Best effort."""
-        try:
-            sel = page.locator("select").filter(has=page.locator("option")).last
-            if await sel.count():
-                values = await sel.evaluate("s => Array.from(s.options).map(o => o.value)")
-                nums = [v for v in values if str(v).isdigit()]
-                if nums:
-                    await sel.select_option(max(nums, key=int))
-                    await page.wait_for_timeout(1500)
-        except Exception:
-            pass
-
-    async def _print_tab(self, page, tab: str) -> bytes:
-        await page.get_by_role("tab", name=tab).click()
-        await page.wait_for_timeout(3000)
-        await self._show_all_evidence(page)
-        await self._load_lazy_images(page)
-        await page.emulate_media(media="print")
-        try:
-            return await page.pdf(format="A4", print_background=True)
-        finally:
-            await page.emulate_media(media="screen")
-
-    @staticmethod
     async def _read_violations(page) -> dict:
         text = await page.inner_text("body")
         out = {}
@@ -383,7 +350,10 @@ class AutoproctorSession:
         return out
 
     async def scrape_attempt(self, attempt_label: str) -> dict:
-        """Top-level data, violation counters and both report PDFs."""
+        """Top-level data and the proctoring violation counters. The report
+        PDFs are deliberately not generated: printing them crashed Chromium
+        out of memory on the 1 GB worker, and the photo evidence is one click
+        away in AutoProctor itself."""
         page, captured = await self._open_report(attempt_label)
         try:
             v3 = captured.get("v3") or {}
@@ -400,8 +370,6 @@ class AutoproctorSession:
             except Exception:
                 logger.warning(f"Attempt {attempt_label}: violation counters didn't render")
             violations = await self._read_violations(page)
-            proctoring_pdf = await self._print_tab(page, "Proctoring")
-            aux_pdf = await self._print_tab(page, "Auxiliary device")
         finally:
             await page.close()
 
@@ -430,8 +398,6 @@ class AutoproctorSession:
             "aux_video_url": aux.get("evidence_url"),
             # test_settings is a large static blob of plan/credit config — not worth keeping per row.
             "raw": {k: v for k, v in v3.items() if k != "test_settings"},
-            "proctoring_pdf": proctoring_pdf,
-            "aux_pdf": aux_pdf,
         }
 
     async def download_test_responses(self, attempt_label: str) -> bytes:

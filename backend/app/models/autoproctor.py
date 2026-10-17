@@ -44,6 +44,8 @@ class AutoproctorAttempt(Base):
     responses: Mapped[list] = mapped_column(JSONB, default=list)
 
     responses_file_url: Mapped[str | None] = mapped_column(Text)
+    # No longer filled (PDF generation dropped 2026-10-17, see
+    # autoproctor_scraper); kept so attempts imported before then keep theirs.
     proctoring_report_url: Mapped[str | None] = mapped_column(Text)
     aux_report_url: Mapped[str | None] = mapped_column(Text)
 

@@ -2,9 +2,8 @@
 
 Nightly (tasks/autoproctor_tasks.py, 00:00 IST):
   1. Log into AutoProctor and import every newly finished attempt: top-level
-     data, violation counters, the candidate's slice of the test's responses
-     workbook, and the Proctoring + Auxiliary device report PDFs (stored in
-     blob storage).
+     data, violation counters, and the candidate's slice of the test's
+     responses workbook (stored in blob storage).
   2. Match each attempt to one of our assessments by candidate email + the
      test id in the assessment's platform link, and mark it completed.
   3. Follow up on AutoProctor assessments still pending: a reminder email 3
@@ -23,7 +22,7 @@ from datetime import date, datetime, timedelta, timezone, time as dtime
 from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy import select, update, func, or_, and_
+from sqlalchemy import select, update, func, or_, and_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -100,13 +99,39 @@ async def _abandon_stale(db: AsyncSession) -> None:
     )
 
 
+async def reap_dead_runs(db: AsyncSession) -> None:
+    """A "running" row whose worker died (a deploy restarting the container,
+    out of memory) would otherwise keep the page on "Running…" with the
+    button locked. The run's advisory lock dies with its connection, so a
+    running row with no lock held is a dead run. Read from pg_locks rather
+    than try-locking, so this check can never block a run that's starting.
+    (A bigint key below 2^32 shows up as classid 0, objid = key.)"""
+    running = (await db.execute(
+        select(AutoproctorSyncRun.id).where(AutoproctorSyncRun.status == "running").limit(1)
+    )).first()
+    if running:
+        held = (await db.execute(text(
+            "select exists(select 1 from pg_locks where locktype = 'advisory' "
+            "and classid = 0 and objid = :k and objsubid = 1 and granted)"
+        ), {"k": SYNC_LOCK_KEY})).scalar()
+        if not held:
+            await db.execute(
+                update(AutoproctorSyncRun).where(AutoproctorSyncRun.status == "running")
+                .values(status="failed", finished_at=_now(),
+                        error="Stopped — the worker restarted mid-run (e.g. a deploy). "
+                              "Run the same range again; attempts already imported are skipped.")
+            )
+    await _abandon_stale(db)
+    await db.commit()
+
+
 async def queue_manual_run(db: AsyncSession, date_from: date, date_to: date) -> AutoproctorSyncRun:
     """Record HR's scrape request as a "queued" run before the task starts,
     so the page shows it straight away and a second click is refused rather
     than queueing a duplicate. The transaction lock serializes two clicks
     landing in the same instant."""
+    await reap_dead_runs(db)
     await db.execute(select(func.pg_advisory_xact_lock(QUEUE_LOCK_KEY)))
-    await _abandon_stale(db)
     active = (await db.execute(
         select(AutoproctorSyncRun.id).where(AutoproctorSyncRun.status.in_(ACTIVE_STATUSES)).limit(1)
     )).first()
@@ -201,17 +226,7 @@ async def _store_attempt(db: AsyncSession, data: dict, workbook: Optional[bytes]
                 )
         except Exception:
             logger.exception(f"AutoProctor {data['attempt_label']}: responses workbook unreadable")
-    proctoring_url = await storage_service.upload_bytes(data["proctoring_pdf"], f"{base}/proctoring-report.pdf", "application/pdf")
-    aux_url = await storage_service.upload_bytes(data["aux_pdf"], f"{base}/auxiliary-device-report.pdf", "application/pdf")
-
-    fields = {k: v for k, v in data.items() if k not in ("proctoring_pdf", "aux_pdf")}
-    attempt = AutoproctorAttempt(
-        **fields,
-        responses=responses,
-        responses_file_url=responses_url,
-        proctoring_report_url=proctoring_url,
-        aux_report_url=aux_url,
-    )
+    attempt = AutoproctorAttempt(**data, responses=responses, responses_file_url=responses_url)
     db.add(attempt)
     await db.flush()
     return attempt
@@ -335,6 +350,7 @@ async def run_sync(
 
 async def _run_locked(db: AsyncSession, run_id: uuid.UUID, trigger: str,
                       date_from: Optional[date], date_to: Optional[date]) -> dict:
+    from celery.exceptions import SoftTimeLimitExceeded
     from app.services.autoproctor_scraper import AutoproctorSession
 
     # Plain counters, not run.* attributes: a per-attempt rollback expires
@@ -371,6 +387,8 @@ async def _run_locked(db: AsyncSession, run_id: uuid.UUID, trigger: str,
                         )).scalar_one()
                         await _refresh_scores(db, attempt, row)
                         await db.commit()
+                    except SoftTimeLimitExceeded:
+                        raise
                     except Exception:
                         await db.rollback()
                         logger.exception(f"AutoProctor attempt {row['label']}: score refresh failed")
@@ -395,6 +413,10 @@ async def _run_locked(db: AsyncSession, run_id: uuid.UUID, trigger: str,
                         stats["matched"] += 1
                     await db.commit()
                     stats["imported"] += 1
+                except SoftTimeLimitExceeded:
+                    # Not an attempt failure: the task is out of time. Stop the
+                    # run cleanly so it's recorded as finished, not left "running".
+                    raise
                 except Exception:
                     await db.rollback()
                     stats["failed"] += 1
@@ -403,6 +425,12 @@ async def _run_locked(db: AsyncSession, run_id: uuid.UUID, trigger: str,
                 # Live progress for the page's status line.
                 await _update_run(db, run_id, attempts_imported=stats["imported"],
                                   attempts_matched=stats["matched"], attempts_failed=stats["failed"])
+    except SoftTimeLimitExceeded:
+        await db.rollback()
+        status = "failed"
+        error = (f"Stopped at the 3-hour limit after importing {stats['imported']} attempts. "
+                 "Run the same date range again to continue; attempts already imported are skipped.")
+        logger.warning(f"AutoProctor sync hit the time limit: {stats}")
     except Exception as exc:
         await db.rollback()
         status, error = "failed", f"{type(exc).__name__}: {exc}"[:2000]
@@ -663,6 +691,7 @@ async def pending_assessments(db: AsyncSession) -> list[dict]:
 
 
 async def summary(db: AsyncSession) -> dict:
+    await reap_dead_runs(db)
     now = _now()
     week_ago = now - timedelta(days=7)
     completed_7d, avg_score, avg_trust = (await db.execute(

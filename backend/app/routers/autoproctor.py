@@ -27,8 +27,8 @@ class SyncBody(BaseModel):
     date_to: date
 
 
-# Each new attempt costs ~1.5 min of browser time, so a month of attempts is
-# already hours. Wider windows should be split into several runs.
+# Keeps one run comfortably inside the task's 3-hour limit; wider windows
+# should be split into several runs.
 MAX_RANGE_DAYS = 31
 
 
