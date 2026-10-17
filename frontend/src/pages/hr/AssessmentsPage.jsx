@@ -129,7 +129,7 @@ function ScrapeModal({ onClose, onQueued }) {
       )}
       <ul className="mt-4 space-y-1.5 text-xs text-gray-500 list-disc pl-4">
         <li>Attempts already imported are skipped, so overlapping ranges are safe to run.</li>
-        <li>Each new attempt takes about 1–2 minutes (report page, two PDFs). It runs in the background.</li>
+        <li>Each new attempt takes about 20–30 seconds. It runs in the background, so you can leave this page.</li>
         <li>A manual scrape only imports results. Reminders and auto-drops run with the nightly sync.</li>
       </ul>
     </Modal>

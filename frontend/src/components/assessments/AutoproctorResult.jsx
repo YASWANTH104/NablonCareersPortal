@@ -133,8 +133,10 @@ export function AttemptSummary({ attempt, onOpen }) {
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <ReportChip href={attempt.responses_file_url} icon={FileSpreadsheet} label="All responses" />
+        {/* PDFs exist only for attempts imported before PDF generation was dropped. */}
         <ReportChip href={attempt.proctoring_report_url} icon={FileText} label="Proctoring report" />
         <ReportChip href={attempt.aux_report_url} icon={Smartphone} label="Auxiliary device report" />
+        <ReportChip href={attempt.autoproctor_url} icon={ExternalLink} label="Proctoring evidence" />
         <button
           type="button"
           onClick={onOpen}
@@ -254,12 +256,16 @@ export function AttemptDetailModal({ attemptId, onClose }) {
             <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Reports</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <DownloadLink href={a.responses_file_url} icon={FileSpreadsheet} label="All responses" hint="Excel · this candidate's answers and points" />
-              <DownloadLink href={a.proctoring_report_url} icon={FileText} label="Proctoring report" hint="PDF · evidence from the primary device" />
-              <DownloadLink href={a.aux_report_url} icon={Smartphone} label="Auxiliary device report" hint="PDF · evidence from the phone camera" />
+              {a.proctoring_report_url && (
+                <DownloadLink href={a.proctoring_report_url} icon={FileText} label="Proctoring report" hint="PDF · evidence from the primary device" />
+              )}
+              {a.aux_report_url && (
+                <DownloadLink href={a.aux_report_url} icon={Smartphone} label="Auxiliary device report" hint="PDF · evidence from the phone camera" />
+              )}
               {a.aux_video_url && (
                 <DownloadLink href={a.aux_video_url} icon={Video} label="Auxiliary device video" hint="Recorded by AutoProctor" />
               )}
-              <DownloadLink href={a.autoproctor_url} icon={ExternalLink} label="Open in AutoProctor" hint="Needs an AutoProctor login" />
+              <DownloadLink href={a.autoproctor_url} icon={ExternalLink} label="Proctoring evidence" hint="Photos from both devices, in AutoProctor (login needed)" />
             </div>
           </section>
 
