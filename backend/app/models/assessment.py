@@ -19,10 +19,16 @@ class Assessment(Base):
     platform_link: Mapped[str | None] = mapped_column(Text)
     instructions: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(30), default="pending")
-    # pending | submitted | evaluated | cancelled
+    # pending | submitted | completed | evaluated | expired | cancelled
+    # completed = AutoProctor sync found the candidate's submission;
+    # expired = the auto-drop sweep closed it unattempted.
     score: Mapped[float | None] = mapped_column(Numeric(5, 2))
     max_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
     evaluator_notes: Mapped[str | None] = mapped_column(Text)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Set once the "please complete your assessment" nudge has gone out, so the
+    # nightly sweep never sends it twice.
+    reminder_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)

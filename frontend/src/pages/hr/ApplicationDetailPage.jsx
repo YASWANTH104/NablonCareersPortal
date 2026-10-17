@@ -18,6 +18,9 @@ import FilePreviewModal from '@/components/shared/FilePreviewModal';
 import { applicationsApi } from '@/api/applications';
 import { interviewsApi } from '@/api/interviews';
 import { assessmentsApi } from '@/api/assessments';
+import { autoproctorApi } from '@/api/autoproctor';
+import { AttemptSummary, AttemptDetailModal } from '@/components/assessments/AutoproctorResult';
+import { ASSESSMENT_STATUS_STYLES } from '@/constants/assessmentResults';
 import { jobsApi } from '@/api/jobs';
 import { offersApi } from '@/api/offers';
 import { usersApi } from '@/api/users';
@@ -1790,6 +1793,15 @@ export default function ApplicationDetailPage() {
     enabled: !!id,
   });
 
+  // AutoProctor attempts the nightly sync linked to this application's
+  // assessments. Interviewers can read them too (the endpoint allows it).
+  const { data: proctorAttempts = [] } = useQuery({
+    queryKey: ['application-autoproctor', id],
+    queryFn: () => autoproctorApi.attempts({ application_id: id }).then((r) => r.data),
+    enabled: !!id && activeTab === 'assessments',
+  });
+  const [openAttemptId, setOpenAttemptId] = useState(null);
+
   const stageMutation = useMutation({
     mutationFn: ({ stage, notes, rejection_reason, drop_category }) =>
       applicationsApi.moveStage(id, stage, notes, rejection_reason, drop_category),
@@ -2713,13 +2725,9 @@ export default function ApplicationDetailPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${
-                      a.status === 'pending'    ? 'bg-yellow-100 text-yellow-700' :
-                      a.status === 'submitted'  ? 'bg-blue-100 text-blue-700' :
-                      a.status === 'evaluated'  ? 'bg-green-100 text-green-700' :
-                      a.status === 'cancelled'  ? 'bg-red-100 text-red-700' :
-                      'bg-gray-100 text-gray-600'
+                      ASSESSMENT_STATUS_STYLES[a.status] ?? 'bg-gray-100 text-gray-600'
                     }`}>
-                      {a.status}
+                      {a.status === 'expired' ? 'Not completed' : a.status}
                     </span>
                     {canManage && a.status === 'pending' && (
                       <button
@@ -2764,9 +2772,15 @@ export default function ApplicationDetailPage() {
                   </p>
                 )}
 
+                {(() => {
+                  const attempt = proctorAttempts.find((p) => p.assessment_id === a.id);
+                  return attempt ? <AttemptSummary attempt={attempt} onOpen={() => setOpenAttemptId(attempt.id)} /> : null;
+                })()}
+
                 {(a.score != null || a.evaluator_notes) && (
                   <div className="mt-3 pt-3 border-t border-surface-100 text-xs text-gray-600">
-                    {a.score != null && (
+                    {/* An AutoProctor result above already shows the score. */}
+                    {a.score != null && !proctorAttempts.some((p) => p.assessment_id === a.id) && (
                       <p>Score: <span className="font-semibold text-gray-900">{a.score}{a.max_score ? ` / ${a.max_score}` : ''}</span></p>
                     )}
                     {a.evaluator_notes && <p className="mt-1 text-gray-500 whitespace-pre-wrap">{a.evaluator_notes}</p>}
@@ -3434,6 +3448,10 @@ export default function ApplicationDetailPage() {
           onClose={() => setShowScheduleDialog(false)}
           onSuccess={() => refetchInterviews()}
         />
+      )}
+
+      {openAttemptId && (
+        <AttemptDetailModal attemptId={openAttemptId} onClose={() => setOpenAttemptId(null)} />
       )}
 
       {/* Schedule Assessment Dialog */}

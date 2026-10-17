@@ -14,6 +14,7 @@ from app.models.campus import Campus, JobCampusAssignment
 from app.models.interview_slot import InterviewSlot
 from app.models.screening import ScreeningResponse
 from app.models.action_snooze import ActionSnooze
+from app.models.autoproctor import AutoproctorAttempt, AutoproctorSyncRun
 
 __all__ = [
     "User",
@@ -31,4 +32,5 @@ __all__ = [
     "InterviewSlot",
     "ScreeningResponse",
     "ActionSnooze",
+    "AutoproctorAttempt", "AutoproctorSyncRun",
 ]

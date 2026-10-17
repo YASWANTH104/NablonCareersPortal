@@ -41,6 +41,18 @@ class Settings(BaseSettings):
     MS_GRAPH_CLIENT_SECRET: str = ""
     MS_GRAPH_MAIL_SENDER: str = "noreply@nablon.ai"
 
+    # AutoProctor results sync (tasks/autoproctor_tasks.py). The admin account
+    # logs in with an emailed 6-digit code, which we read from this same
+    # mailbox through MS Graph (needs the Mail.Read application permission).
+    # Tests must be shared with this account, or their attempts never show
+    # up on its Latest attempts page.
+    AUTOPROCTOR_ENABLED: bool = True
+    AUTOPROCTOR_LOGIN_EMAIL: str = ""
+    AUTOPROCTOR_OTP_SENDER: str = ""
+    # Attempts finished before this IST date are never imported — the sync
+    # starts clean from go-live instead of back-filling the whole history.
+    AUTOPROCTOR_SYNC_START: str = "2026-10-17"
+
     @property
     def ms_graph_configured(self) -> bool:
         return bool(self.MS_GRAPH_TENANT_ID and self.MS_GRAPH_CLIENT_ID and self.MS_GRAPH_CLIENT_SECRET)
