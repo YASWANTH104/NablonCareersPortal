@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Assessment Reminder – Nablon AI Careers{% endblock %}
+
+{% block content %}
+<p>Hi {{ full_name }},</p>
+
+<p>A quick reminder that your online assessment for <strong>{{ job_title }}</strong> is still waiting for you. We haven't received a submission yet.</p>
+
+<table style="width:100%; border-collapse:collapse; margin: 24px 0; background:#f8f9fc; border-radius:8px; overflow:hidden;">
+  <tr>
+    <td style="padding:12px 16px; font-weight:600; color:#6B7280; width:40%; border-bottom:1px solid #E5E7EB;">Assessment</td>
+    <td style="padding:12px 16px; border-bottom:1px solid #E5E7EB;">{{ assessment_title }}</td>
+  </tr>
+  {% if duration_mins %}
+  <tr>
+    <td style="padding:12px 16px; font-weight:600; color:#6B7280; width:40%; border-bottom:1px solid #E5E7EB;">Time Duration</td>
+    <td style="padding:12px 16px; border-bottom:1px solid #E5E7EB;">{{ duration_mins }} minutes</td>
+  </tr>
+  {% endif %}
+  <tr>
+    <td style="padding:12px 16px; font-weight:600; color:#F59E0B;">Please complete by</td>
+    <td style="padding:12px 16px; font-weight:600; color:#F59E0B;">{{ complete_by }}</td>
+  </tr>
+</table>
+
+{% if platform_link %}
+<a href="{{ platform_link }}" class="cta">Start Assessment</a>
+{% endif %}
+
+<p style="margin-top:24px;">If the assessment isn't completed by then, we won't be able to take your application forward for this role.</p>
+<p>If you're facing any trouble accessing the test, just reply to this email and we'll help.</p>
+
+<p style="margin-top:24px;">Best regards,<br>Nablon AI Team</p>
+{% endblock %}

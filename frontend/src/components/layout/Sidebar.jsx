@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Briefcase, Users, Star, Calendar,
   FileText, BarChart2, Settings, LogOut, ChevronLeft,
   ChevronRight, UserCheck, Award, AlertTriangle, Building2, X, CalendarClock,
-  GraduationCap, ListChecks,
+  GraduationCap, ListChecks, ClipboardCheck,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { useUIStore } from '@/store/uiStore';
@@ -21,6 +21,7 @@ const NAV_ITEMS = {
     { to: '/hr/jobs',        label: 'Jobs',         icon: Briefcase },
     { to: '/hr/applicants',  label: 'Applicants',   icon: Users },
     { to: '/hr/interviews',  label: 'Interviews',   icon: Calendar },
+    { to: '/hr/assessments', label: 'Assessments',  icon: ClipboardCheck },
     { to: '/hr/availability', label: 'Interviewer Availability', icon: CalendarClock },
     { to: '/hr/referrals',   label: 'Referrals',    icon: UserCheck },
     { to: '/employee/refer',        label: 'Refer a Candidate', icon: UserCheck },

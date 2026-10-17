@@ -75,6 +75,8 @@ export const DROP_REASON_CATEGORIES = [
   { value: 'got_another_offer', label: 'Got another offer' },
   { value: 'not_aligned_with_expectations', label: 'Not aligned with expectations' },
   { value: 'assessment_too_long', label: 'Assessment takes too long' },
+  // Set only by the nightly AutoProctor auto-drop (7 days unattempted).
+  { value: 'assessment_not_completed', label: 'Assessment not completed' },
   { value: 'compensation_mismatch', label: 'Compensation mismatch' },
   { value: 'communication_gap', label: 'Communication gap' },
   { value: 'profile_mismatch', label: 'Profile mismatch' },
