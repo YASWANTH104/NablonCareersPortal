@@ -93,6 +93,10 @@ async def sync_now(body: SyncBody, _=Depends(require_roles(*_HR_ROLES)), db: Asy
 
     if not settings.AUTOPROCTOR_ENABLED:
         raise HTTPException(400, "AutoProctor sync is turned off (AUTOPROCTOR_ENABLED).")
+    from app.services.autoproctor_scraper import missing_config
+    missing = missing_config()
+    if missing:
+        raise HTTPException(400, f"AutoProctor sync isn't configured on the server — set: {', '.join(missing)}")
     today = datetime.now(timezone.utc).astimezone(IST).date()
     if body.date_from > body.date_to:
         raise HTTPException(400, "From date must be on or before To date.")

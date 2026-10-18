@@ -484,6 +484,18 @@ async def _pending_rows(db: AsyncSession):
     )).all()
 
 
+async def _still_in_assessment(db: AsyncSession, application_id: uuid.UUID) -> bool:
+    """Lock the application row and confirm it's still sitting in the
+    assessment stage and not on hold. Candidates in any other stage are never
+    reminded or dropped, whatever their assessment status."""
+    row = (await db.execute(
+        select(Application.stage, Application.on_hold)
+        .where(Application.id == application_id)
+        .with_for_update()
+    )).first()
+    return bool(row) and row.stage == "assessment" and not row.on_hold
+
+
 async def process_followups(db: AsyncSession, failed_emails: set[str] = frozenset(), dry_run: bool = False) -> dict:
     """dry_run: report who WOULD be reminded/dropped without emailing or
     moving anyone — for checking the sweep against real data safely."""
@@ -527,6 +539,12 @@ async def process_followups(db: AsyncSession, failed_emails: set[str] = frozense
             if dry_run:
                 would["drop"].append({"application_id": str(it["application_id"]), "email": it["email"], "due": it["due"]})
                 continue
+            # Re-check under the row lock: the list above was read earlier,
+            # and HR may have moved the candidate on since (TR1 -> Interview
+            # Drop is also a legal move, so move_stage alone wouldn't refuse).
+            if not await _still_in_assessment(db, it["application_id"]):
+                await db.rollback()
+                continue
             try:
                 await application_service.move_stage(
                     db, it["application_id"], "interview_drop", None,
@@ -548,6 +566,9 @@ async def process_followups(db: AsyncSession, failed_emails: set[str] = frozense
                 continue
             # Claim before sending (same shape as the action digest), so a
             # double-fired run can't email anyone twice.
+            if not await _still_in_assessment(db, it["application_id"]):
+                await db.rollback()
+                continue
             claimed = (await db.execute(
                 update(Assessment)
                 .where(Assessment.id == it["assessment_id"], Assessment.reminder_sent_at.is_(None))
