@@ -60,6 +60,20 @@ class AutoproctorError(Exception):
     pass
 
 
+def missing_config() -> list[str]:
+    """Settings the sync can't run without. An empty login email made every
+    login fail with "Email cannot be empty" (2026-10-18); an empty OTP sender
+    would let ANY mail with a 6-digit subject pass as the login code."""
+    required = {
+        "AUTOPROCTOR_LOGIN_EMAIL": settings.AUTOPROCTOR_LOGIN_EMAIL,
+        "AUTOPROCTOR_OTP_SENDER": settings.AUTOPROCTOR_OTP_SENDER,
+    }
+    out = [k for k, v in required.items() if not (v or "").strip()]
+    if not settings.ms_graph_configured:
+        out.append("MS_GRAPH_TENANT_ID / MS_GRAPH_CLIENT_ID / MS_GRAPH_CLIENT_SECRET")
+    return out
+
+
 def report_url(attempt_label: str) -> str:
     return f"{BASE}/test-admin/test-attempts/{attempt_label}/report/?t=p"
 
@@ -98,7 +112,9 @@ async def fetch_login_otp(requested_at: datetime, timeout_s: int = 150, poll_s: 
         "$top": "10",
         "$select": "from,subject,bodyPreview,receivedDateTime",
     }
-    sender = settings.AUTOPROCTOR_OTP_SENDER.lower()
+    sender = (settings.AUTOPROCTOR_OTP_SENDER or "").strip().lower()
+    if not sender:
+        raise AutoproctorError("AUTOPROCTOR_OTP_SENDER isn't set — refusing to guess which email holds the code")
     deadline = asyncio.get_event_loop().time() + timeout_s
     async with httpx.AsyncClient(timeout=20) as client:
         while asyncio.get_event_loop().time() < deadline:
@@ -193,10 +209,50 @@ def slice_responses(xlsx: bytes, email: str) -> tuple[Optional[bytes], list[dict
 
 # ── Browser session ──────────────────────────────────────────────────────────
 
+# The logged-in browser session (cookies) is kept in Redis between runs, so
+# a run only requests a login code when the saved session has expired.
+# Requesting a code on every run got us cut off: AutoProctor stopped sending
+# codes after seven in a few hours (2026-10-17), failing the next run's login.
+SESSION_KEY = "autoproctor:session"
+SESSION_TTL_SECONDS = 30 * 24 * 3600
+
+
+async def _load_session() -> Optional[dict]:
+    try:
+        import json
+        from app.services.auth_service import _redis_client
+        raw = await _redis_client().get(SESSION_KEY)
+        return json.loads(raw) if raw else None
+    except Exception as exc:
+        logger.warning(f"AutoProctor: couldn't load the saved session ({exc}); will log in")
+        return None
+
+
+async def _save_session(state: dict) -> None:
+    try:
+        import json
+        from app.services.auth_service import _redis_client
+        await _redis_client().set(SESSION_KEY, json.dumps(state), ex=SESSION_TTL_SECONDS)
+    except Exception as exc:
+        logger.warning(f"AutoProctor: couldn't save the session ({exc}); next run will log in again")
+
+
+async def _clear_session() -> None:
+    try:
+        from app.services.auth_service import _redis_client
+        await _redis_client().delete(SESSION_KEY)
+    except Exception:
+        pass
+
+
+# Words that mark AutoProctor's own error/notice text on the login form.
+_NOTICE_RE = re.compile(r"(too many|try again|limit|wait|invalid|error|blocked|unable|later|cannot|empty|required|not allowed)", re.I)
+
+
 class AutoproctorSession:
-    """`async with AutoproctorSession() as ap:` launches Chromium and logs in.
-    One login per run — a fresh code each night is simpler than persisting a
-    session cookie across container restarts."""
+    """`async with AutoproctorSession() as ap:` launches Chromium and gets a
+    logged-in session: the saved one if it's still valid, otherwise a fresh
+    email-code login."""
 
     def __init__(self):
         self._pw = None
@@ -206,6 +262,10 @@ class AutoproctorSession:
     async def __aenter__(self):
         from playwright.async_api import async_playwright
 
+        missing = missing_config()
+        if missing:
+            raise AutoproctorError(f"AutoProctor sync isn't configured on this worker — set: {', '.join(missing)}")
+
         self._pw = await async_playwright().start()
         # --no-sandbox: the container runs as root, where Chromium's sandbox
         # refuses to start. --disable-dev-shm-usage: /dev/shm is tiny in
@@ -213,14 +273,26 @@ class AutoproctorSession:
         self._browser = await self._pw.chromium.launch(
             headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"],
         )
+        saved = await _load_session()
         self.ctx = await self._browser.new_context(
             user_agent=CHROME_UA, viewport={"width": 1440, "height": 900}, accept_downloads=True,
+            storage_state=saved,
         )
         self.ctx.set_default_timeout(60_000)
-        await self._login()
+        if saved and await self._session_is_valid():
+            logger.info("AutoProctor: reusing saved session, no login code needed")
+        else:
+            await self._login()
+        await _save_session(await self.ctx.storage_state())
         return self
 
     async def __aexit__(self, *exc):
+        try:
+            if self.ctx:
+                # Cookies may have been refreshed during the run.
+                await _save_session(await self.ctx.storage_state())
+        except Exception:
+            pass
         try:
             if self._browser:
                 await self._browser.close()
@@ -228,18 +300,70 @@ class AutoproctorSession:
             if self._pw:
                 await self._pw.stop()
 
+    async def _session_is_valid(self) -> bool:
+        """An expired session gets redirected to the login page."""
+        page = await self.ctx.new_page()
+        try:
+            await page.goto(LATEST_URL, wait_until="domcontentloaded")
+            await page.wait_for_timeout(1500)
+            if "/account/login" in page.url:
+                await _clear_session()
+                logger.info("AutoProctor: saved session expired, logging in again")
+                return False
+            return True
+        except Exception:
+            return False
+        finally:
+            await page.close()
+
+    async def _fill_email(self, page) -> None:
+        """Type the login email and confirm the field really holds it before
+        submitting, so a bad fill fails here with a clear message instead of
+        as AutoProctor's "Email cannot be empty" toast."""
+        email = settings.AUTOPROCTOR_LOGIN_EMAIL.strip()
+        field = page.locator("#email-desktop")
+        await field.wait_for(state="visible")
+        for _ in range(3):
+            await field.fill(email)
+            if (await field.input_value()).strip().lower() == email.lower():
+                return
+            await page.wait_for_timeout(1000)
+        raise AutoproctorError("Couldn't type the login email into AutoProctor's sign-in form")
+
+    async def _wait_for_code_screen(self, page) -> Optional[str]:
+        """After "Sign In With Email": None once the code screen is up, or the
+        error AutoProctor showed instead. Raises if neither appears in 60s."""
+        verify = page.get_by_role("button", name="Verify", exact=True)
+        deadline = asyncio.get_event_loop().time() + 60
+        while asyncio.get_event_loop().time() < deadline:
+            if await verify.count() and await verify.first.is_visible():
+                return None
+            notice = await self._page_notice(page)
+            if notice:
+                return notice
+            await page.wait_for_timeout(1000)
+        raise AutoproctorError("AutoProctor didn't show the login-code screen within 60s")
+
     async def _login(self):
         page = await self.ctx.new_page()
         try:
             await page.goto(LOGIN_URL, wait_until="domcontentloaded")
+            # Let the page's scripts (form hydration, cookie banner) settle.
+            try:
+                await page.wait_for_load_state("networkidle", timeout=15_000)
+            except Exception:
+                pass  # analytics can keep the network busy; the checks below cover it
             try:
                 await page.get_by_role("button", name="OK, I accept").click(timeout=4000)
+                await page.wait_for_timeout(1000)  # accepting can re-render the page
             except Exception:
                 pass  # cookie banner only shows on a fresh context, and not always
-            await page.fill("#email-desktop", settings.AUTOPROCTOR_LOGIN_EMAIL)
+            await self._fill_email(page)
             requested_at = datetime.now(timezone.utc)
             await page.click("#sign-in-button-desktop")
-            await page.get_by_role("button", name="Verify", exact=True).wait_for(timeout=60_000)
+            notice = await self._wait_for_code_screen(page)
+            if notice is not None:
+                raise AutoproctorError(f'AutoProctor refused the login request: "{notice}"')
 
             code = await fetch_login_otp(requested_at)
             boxes = [
@@ -258,6 +382,16 @@ class AutoproctorSession:
             logger.info("AutoProctor login ok")
         finally:
             await page.close()
+
+    @staticmethod
+    async def _page_notice(page) -> Optional[str]:
+        """The error/notice line the login form is showing, if any."""
+        try:
+            lines = [ln.strip() for ln in (await page.inner_text("body")).splitlines()]
+            hits = [ln for ln in lines if 3 < len(ln) < 200 and _NOTICE_RE.search(ln)]
+            return " | ".join(dict.fromkeys(hits))[:300] or None
+        except Exception:
+            return None
 
     # ── Latest attempts ──
 
