@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-  ShieldCheck, ShieldAlert, FileSpreadsheet, FileText, Smartphone, ExternalLink, Video,
+  ShieldCheck, ShieldAlert, FileSpreadsheet, FileText, Smartphone, ExternalLink,
   Loader2, CheckCircle2, XCircle, Clock, Monitor, ChevronDown,
 } from 'lucide-react';
 import { autoproctorApi } from '@/api/autoproctor';
@@ -261,9 +261,6 @@ export function AttemptDetailModal({ attemptId, onClose }) {
               )}
               {a.aux_report_url && (
                 <DownloadLink href={a.aux_report_url} icon={Smartphone} label="Auxiliary device report" hint="PDF · evidence from the phone camera" />
-              )}
-              {a.aux_video_url && (
-                <DownloadLink href={a.aux_video_url} icon={Video} label="Auxiliary device video" hint="Recorded by AutoProctor" />
               )}
               <DownloadLink href={a.autoproctor_url} icon={ExternalLink} label="Proctoring evidence" hint="Photos from both devices, in AutoProctor (login needed)" />
             </div>

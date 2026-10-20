@@ -38,6 +38,7 @@ class AutoproctorAttempt(Base):
     # {"tab_switched", "no_face", "multiple_faces", "noise", "exited_fullscreen", "multiple_monitors"}
     violations: Mapped[dict] = mapped_column(JSONB, default=dict)
     aux_device_verified: Mapped[bool | None] = mapped_column(Boolean)
+    # No longer captured or shown (dropped 2026-10-20); column kept for old rows.
     aux_video_url: Mapped[str | None] = mapped_column(Text)
     # [{"number", "question", "answer", "points", "max_points"}] — this
     # candidate's slice of the test's "Download All responses" workbook.
