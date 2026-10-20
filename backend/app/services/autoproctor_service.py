@@ -625,7 +625,6 @@ def attempt_dict(a: AutoproctorAttempt, app: Optional[Application] = None, candi
         "violations": a.violations or {},
         "violation_total": sum(v for v in (a.violations or {}).values() if isinstance(v, int)),
         "aux_device_verified": a.aux_device_verified,
-        "aux_video_url": a.aux_video_url,
         "responses_file_url": storage_service.refresh_url(a.responses_file_url) if a.responses_file_url else None,
         "proctoring_report_url": storage_service.refresh_url(a.proctoring_report_url) if a.proctoring_report_url else None,
         "aux_report_url": storage_service.refresh_url(a.aux_report_url) if a.aux_report_url else None,

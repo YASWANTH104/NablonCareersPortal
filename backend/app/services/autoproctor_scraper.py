@@ -457,8 +457,6 @@ class AutoproctorSession:
                 return
             if "/api/v3/" in url and "/report" not in url:
                 captured["v3"] = data
-            elif url.rstrip("/").endswith("aux-video-upload"):
-                captured["aux"] = data
             elif re.search(r"/api/v2/test-attempts/[^/]+/?$", url.split("?")[0]):
                 captured["v2"] = data
 
@@ -508,7 +506,6 @@ class AutoproctorSession:
             await page.close()
 
         v2 = (captured.get("v2") or {}).get("test_attempt") or {}
-        aux = (captured.get("aux") or {}).get("aux_device_video_upload") or {}
         test = v3.get("test") or {}
         taker = v3.get("test_taker") or {}
         name = " ".join(x for x in (taker.get("first_name"), taker.get("last_name")) if x).strip()
@@ -529,7 +526,6 @@ class AutoproctorSession:
             "graded": bool(v3.get("graded")),
             "violations": violations,
             "aux_device_verified": (v2.get("misc_data") or {}).get("auxiliary_device_verified"),
-            "aux_video_url": aux.get("evidence_url"),
             # test_settings is a large static blob of plan/credit config — not worth keeping per row.
             "raw": {k: v for k, v in v3.items() if k != "test_settings"},
         }
