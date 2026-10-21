@@ -44,6 +44,11 @@ conf = dict(
             # 03:30 UTC = 09:00 IST, Monday–Friday (beat runs in UTC, see timezone above).
             "schedule": crontab(hour=3, minute=30, day_of_week="mon-fri"),
         },
+        "send-assessment-reminders": {
+            "task": "send_assessment_reminders",
+            # 04:30 UTC = 10:00 IST daily — a civil hour, after the midnight sync.
+            "schedule": crontab(hour=4, minute=30),
+        },
         "sync-autoproctor-results": {
             "task": "sync_autoproctor_results",
             # 18:30 UTC = 00:00 IST, every day (attempts and drop deadlines don't stop at weekends).

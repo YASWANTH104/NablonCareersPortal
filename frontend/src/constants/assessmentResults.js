@@ -1,12 +1,20 @@
-// The shortlist bar candidates are told in the assessment email
-// (backend templates/email/assessment_scheduled.html): Trust Score above 90%
-// and Technical Score above 75%. Change both together.
+// The bar the nightly sync acts on (backend autoproctor_service.SCORE_BAR /
+// TRUST_BAR) and the candidate email states: score at least 75% AND trust at
+// least 90%, inclusive. Meeting it advances the candidate; missing it rejects.
+// Change all three together.
 export const TRUST_BAR = 90;
 export const SCORE_BAR = 75;
 
 export const meetsBar = (a) =>
   a?.trust_score_pct != null && a?.percentage_scored != null
-  && a.trust_score_pct > TRUST_BAR && a.percentage_scored > SCORE_BAR;
+  && a.trust_score_pct >= TRUST_BAR && a.percentage_scored >= SCORE_BAR;
+
+// What the sync did with the candidate based on their result.
+export const DECISION_LABELS = {
+  advanced: { label: 'Moved to next round', cls: 'bg-emerald-50 text-emerald-700' },
+  rejected: { label: 'Rejected (below bar)', cls: 'bg-rose-50 text-rose-700' },
+  skipped: { label: 'Already moved by HR', cls: 'bg-surface-100 text-gray-600' },
+};
 
 // Keys match autoproctor_scraper.VIOLATION_LABELS on the backend.
 export const VIOLATIONS = [

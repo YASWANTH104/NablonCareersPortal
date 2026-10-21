@@ -5,7 +5,9 @@ do not duplicate this dict anywhere else in the backend."""
 VALID_TRANSITIONS = {
     "applied":        ["screening", "rejected"],
     "screening":      ["assessment", "tr1", "rejected"],
-    "assessment":     ["tr1", "rejected", "interview_drop"],
+    # screening is allowed too: a role can be set to send candidates to the
+    # HR screening call after the assessment (jobs.assessment_pass_stage).
+    "assessment":     ["tr1", "screening", "rejected", "interview_drop"],
     "tr1":            ["tr2", "final_tr", "hr", "offer", "rejected", "interview_drop"],
     "tr2":            ["final_tr", "hr", "offer", "rejected", "interview_drop"],
     "final_tr":       ["hr", "offer", "rejected", "interview_drop"],
@@ -26,7 +28,7 @@ VALID_TRANSITIONS = {
 AGENCY_VALID_TRANSITIONS = {
     **VALID_TRANSITIONS,
     "applied":        ["assessment", "rejected"],
-    "assessment":     ["screening", "rejected", "interview_drop"],
+    "assessment":     ["screening", "tr1", "rejected", "interview_drop"],
     "screening":      ["tr1", "rejected"],
 }
 

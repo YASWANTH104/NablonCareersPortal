@@ -200,3 +200,50 @@ async def cancel_assessment(db: AsyncSession, assessment_id: uuid.UUID) -> None:
     obj = await get_assessment(db, assessment_id)
     obj.status = "cancelled"
     await db.commit()
+
+
+DEFAULT_DEADLINE_DAYS = 7
+
+
+async def auto_send_for_stage(db: AsyncSession, application_id: uuid.UUID) -> str:
+    """Send the job's mapped assessment to a candidate who just reached the
+    assessment stage. Runs from a Celery task queued by move_stage.
+
+    Does nothing (and says why) when the job has no assessment mapped, the
+    candidate already has a live assessment for this application (HR
+    scheduled one by hand, which is also what moved them here), or they've
+    already left the stage. The application row is locked first, so two
+    quick stage moves can't both send."""
+    from datetime import datetime, timedelta, timezone
+    from app.models.application import Application
+    from app.models.job import Job
+
+    app = (await db.execute(
+        select(Application).where(Application.id == application_id).with_for_update()
+    )).scalar_one_or_none()
+    if app is None or app.stage != "assessment":
+        await db.rollback()
+        return "not in assessment stage"
+    job = await db.get(Job, app.job_id)
+    if not job or not job.assessment_link:
+        await db.rollback()
+        return "role has no assessment mapped"
+    existing = (await db.execute(
+        select(Assessment.id).where(Assessment.application_id == app.id, Assessment.status != "cancelled").limit(1)
+    )).first()
+    if existing:
+        await db.rollback()
+        return "already has an assessment"
+
+    data = AssessmentCreate(
+        application_id=app.id,
+        title=job.assessment_title or f"{job.title} assessment",
+        assessment_type="online_test",
+        deadline=datetime.now(timezone.utc) + timedelta(days=job.assessment_deadline_days or DEFAULT_DEADLINE_DAYS),
+        duration_mins=job.assessment_duration_mins,
+        platform_link=job.assessment_link,
+    )
+    # create_assessment commits (releasing the lock), queues the candidate's
+    # email and in-app notification; its stage advance is a no-op here.
+    await create_assessment(db, data, None)
+    return "sent"

@@ -21,6 +21,7 @@ import { assessmentsApi } from '@/api/assessments';
 import { autoproctorApi } from '@/api/autoproctor';
 import { AttemptSummary, AttemptDetailModal } from '@/components/assessments/AutoproctorResult';
 import { ASSESSMENT_STATUS_STYLES } from '@/constants/assessmentResults';
+import { ASSESSMENT_PRESETS } from '@/constants/assessmentPresets';
 import { jobsApi } from '@/api/jobs';
 import { offersApi } from '@/api/offers';
 import { usersApi } from '@/api/users';
@@ -813,17 +814,6 @@ function ScheduleInterviewDialog({
 
 // ── Schedule Assessment Dialog ────────────────────────────────────────────────
 
-// UPDATE_URLS: replace placeholder hrefs with your actual assessment platform links
-const ASSESSMENT_PRESETS = [
-  { label: 'Intern - AI Engineer',   url: 'https://www.autoproctor.co/tests/WaUuT0uDxq/instructions/' },
-  { label: 'Associate AI Engineer',  url: 'https://www.autoproctor.co/tests/WaUuT0uDxq/instructions/' },
-  { label: 'AI Engineer 1',   url: 'https://www.autoproctor.co/tests/QjBnmy7SKh/instructions/' },
-  { label: 'AI Engineer 2',   url: 'https://www.autoproctor.co/tests/Nj7fLKVvdf/instructions/' },
-  { label: 'Computer Vision Architect',     url: 'https://www.autoproctor.co/tests/ZEkNoybx33/instructions/' },
-  { label: 'Impact Architect',url: 'https://www.autoproctor.co/tests/OCZ3ibsBdf/instructions/' },
-  { label: 'Reinforcement Learning Scientist', url: 'https://www.autoproctor.co/tests/Cyypi1YXwr/instructions/'},
-  { label: 'Custom link',     url: '__custom__' },
-];
 
 const ASSESSMENT_TYPES = [
   { value: 'online_test', label: 'Online Test' },

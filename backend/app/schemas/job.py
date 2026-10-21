@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Literal, Optional
 
 Criticality = Literal["critical", "high", "medium", "low"]
@@ -178,3 +178,38 @@ class JobListResponse(BaseModel):
     page: int
     limit: int
     pages: int
+
+
+class JobAssessmentConfig(BaseModel):
+    """The assessment auto-sent to this role's candidates when they reach the
+    assessment stage. assessment_link=None un-maps the role. HR-only — kept
+    out of JobResponse because that schema is also served publicly."""
+    assessment_link: Optional[str] = None
+    assessment_title: Optional[str] = None
+    assessment_duration_mins: Optional[int] = None
+    assessment_deadline_days: Optional[int] = None
+    # "tr1" | "screening" | None (pipeline default for the candidate's source)
+    assessment_pass_stage: Optional[str] = None
+
+    @field_validator("assessment_pass_stage")
+    @classmethod
+    def _pass_stage(cls, v: Optional[str]) -> Optional[str]:
+        v = (v or "").strip() or None
+        if v not in (None, "tr1", "screening"):
+            raise ValueError("After passing, candidates can move to TR1 or Screening")
+        return v
+
+    @field_validator("assessment_link")
+    @classmethod
+    def _https_link(cls, v: Optional[str]) -> Optional[str]:
+        v = (v or "").strip() or None
+        if v and not v.startswith("https://"):
+            raise ValueError("Assessment link must be an https:// URL")
+        return v
+
+    @field_validator("assessment_deadline_days")
+    @classmethod
+    def _deadline_range(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and not 1 <= v <= 30:
+            raise ValueError("Deadline must be between 1 and 30 days")
+        return v

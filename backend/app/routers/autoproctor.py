@@ -19,7 +19,11 @@ _READ_ROLES = (*_HR_ROLES, Role.INTERVIEWER)
 
 
 class LinkBody(BaseModel):
+    """assessment_id links to that assessment; application_id alone links to
+    the candidate's AutoProctor assessment, creating one if they have none;
+    both None unlinks."""
     assessment_id: Optional[uuid.UUID] = None
+    application_id: Optional[uuid.UUID] = None
 
 
 class SyncBody(BaseModel):
@@ -57,11 +61,11 @@ async def get_attempt(attempt_id: uuid.UUID, _=Depends(require_roles(*_READ_ROLE
 @router.post("/attempts/{attempt_id}/link")
 async def link_attempt(
     attempt_id: uuid.UUID, body: LinkBody,
-    _=Depends(require_roles(*_HR_ROLES)), db: AsyncSession = Depends(get_db),
+    user=Depends(require_roles(*_HR_ROLES)), db: AsyncSession = Depends(get_db),
 ):
     """Attach an attempt to an assessment by hand (candidate sat the test
     under a different email), or detach it with assessment_id=null."""
-    return await svc.link_attempt(db, attempt_id, body.assessment_id)
+    return await svc.link_attempt(db, attempt_id, body.assessment_id, body.application_id, user.id)
 
 
 @router.get("/pending")
@@ -74,7 +78,7 @@ async def linkable(
     q: str = Query(..., min_length=2),
     _=Depends(require_roles(*_HR_ROLES)), db: AsyncSession = Depends(get_db),
 ):
-    return await svc.linkable_assessments(db, q)
+    return await svc.linkable_applications(db, q)
 
 
 @router.get("/runs")

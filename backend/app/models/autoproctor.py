@@ -54,6 +54,11 @@ class AutoproctorAttempt(Base):
     application_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("applications.id"), index=True)
     # auto | manual — manual links are never re-matched by a later sync.
     match_method: Mapped[str | None] = mapped_column(String(20))
+    # What the sync did with the candidate based on this result:
+    # advanced | rejected | skipped (they'd already left the assessment stage).
+    # Set once, so a later sync never re-decides the same attempt.
+    decision: Mapped[str | None] = mapped_column(String(20))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     raw: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
@@ -84,4 +89,7 @@ class AutoproctorSyncRun(Base):
     attempts_skipped: Mapped[int] = mapped_column(Integer, default=0)
     reminders_sent: Mapped[int] = mapped_column(Integer, default=0)
     candidates_dropped: Mapped[int] = mapped_column(Integer, default=0)
+    # Result decisions made by this run (score/trust bar).
+    candidates_advanced: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    candidates_rejected: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     error: Mapped[str | None] = mapped_column(Text)

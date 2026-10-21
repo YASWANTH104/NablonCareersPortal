@@ -22,6 +22,9 @@ export const jobsApi = {
   update: (id, data) => client.put(`/jobs/${id}`, data),
   updateStatus: (id, status) => client.patch(`/jobs/${id}/status`, { status }),
   duplicate: (id) => client.post(`/jobs/${id}/duplicate`),
+  // HR-only: the test auto-sent when a candidate reaches the assessment stage.
+  getAssessment: (id) => client.get(`/jobs/${id}/assessment`),
+  setAssessment: (id, data) => client.put(`/jobs/${id}/assessment`, data),
   remove: (id) => client.delete(`/jobs/${id}`),
   generateJD: (data) => client.post('/jobs/generate-jd', data),
   parseJdPdf: (file) => {

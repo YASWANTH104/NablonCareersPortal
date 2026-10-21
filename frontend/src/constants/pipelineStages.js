@@ -23,7 +23,9 @@ export const STAGE_MAP = Object.fromEntries(PIPELINE_STAGES.map((s) => [s.key, s
 export const VALID_TRANSITIONS = {
   applied:         ['screening', 'rejected'],
   screening:       ['assessment', 'tr1', 'rejected'],
-  assessment:      ['tr1', 'rejected', 'interview_drop'],
+  // screening too: a job can send candidates to the HR screening call after
+  // the assessment (jobs.assessment_pass_stage). Mirrors backend stages.py.
+  assessment:      ['tr1', 'screening', 'rejected', 'interview_drop'],
   tr1:             ['tr2', 'final_tr', 'hr', 'offer', 'rejected', 'interview_drop'],
   tr2:             ['final_tr', 'hr', 'offer', 'rejected', 'interview_drop'],
   final_tr:        ['hr', 'offer', 'rejected', 'interview_drop'],
@@ -43,7 +45,7 @@ export const VALID_TRANSITIONS = {
 export const AGENCY_VALID_TRANSITIONS = {
   ...VALID_TRANSITIONS,
   applied:    ['assessment', 'rejected'],
-  assessment: ['screening', 'rejected', 'interview_drop'],
+  assessment: ['screening', 'tr1', 'rejected', 'interview_drop'],
   screening:  ['tr1', 'rejected'],
 };
 

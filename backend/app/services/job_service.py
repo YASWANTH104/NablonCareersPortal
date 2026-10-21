@@ -233,6 +233,12 @@ async def duplicate_job(db: AsyncSession, job_id: uuid.UUID, posted_by: uuid.UUI
         allow_outsiders=source.allow_outsiders,
         criticality=source.criticality,
         screening_enabled=source.screening_enabled,
+        # Same role in a new location sits the same test.
+        assessment_link=source.assessment_link,
+        assessment_title=source.assessment_title,
+        assessment_duration_mins=source.assessment_duration_mins,
+        assessment_deadline_days=source.assessment_deadline_days,
+        assessment_pass_stage=source.assessment_pass_stage,
         posted_by=posted_by,
         hiring_manager_id=source.hiring_manager_id,
     )

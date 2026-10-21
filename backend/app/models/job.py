@@ -57,6 +57,17 @@ class Job(Base):
     # screening-questionnaire email (college/CGPA/projects/skills) and an AI-assisted
     # score — see app/services/screening_service.py.
     screening_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # The role's assessment, sent automatically the moment a candidate is
+    # moved to the "assessment" stage (assessment_service.auto_send_for_stage).
+    # NULL link = not mapped: nothing is sent and HR schedules by hand.
+    # Never returned on public job endpoints — see routers/jobs.py.
+    assessment_link: Mapped[str | None] = mapped_column(Text)
+    assessment_title: Mapped[str | None] = mapped_column(String(200))
+    assessment_duration_mins: Mapped[int | None] = mapped_column(Integer)
+    assessment_deadline_days: Mapped[int | None] = mapped_column(Integer)
+    # Where a candidate goes after clearing it: "tr1" | "screening".
+    # NULL = the pipeline's default next step for their source.
+    assessment_pass_stage: Mapped[str | None] = mapped_column(String(20))
     posted_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     # Engineering/hiring manager this req is assigned to — any internal user,
     # not a dedicated role. Distinct from posted_by (who created the listing).

@@ -128,6 +128,8 @@ async def fetch_login_otp(requested_at: datetime, timeout_s: int = 150, poll_s: 
                 for text in (msg.get("subject"), msg.get("bodyPreview")):
                     m = OTP_REGEX.search(text or "")
                     if m:
+                        logger.info(f"AutoProctor login code received at {msg.get('receivedDateTime')} "
+                                    f"(****{m.group(1)[-2:]})")
                         return m.group(1)
             await asyncio.sleep(poll_s)
     raise AutoproctorError(f"No AutoProctor login code reached {settings.AUTOPROCTOR_LOGIN_EMAIL} within {timeout_s}s")
