@@ -3,12 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ClipboardCheck, Hourglass, AlarmClock, Link2, DownloadCloud, Search, Loader2, CheckCircle2,
-  AlertTriangle, RefreshCw, History, ListChecks, Unlink, Mail,
+  AlertTriangle, RefreshCw, History, ListChecks, Unlink,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { autoproctorApi } from '@/api/autoproctor';
 import { PageHeader, StatTile, Segmented, EmptyState, Modal } from '@/components/ui';
-import { AttemptDetailModal, ScoreBar, TrustChip, ViolationBadge } from '@/components/assessments/AutoproctorResult';
+import { AttemptDetailModal, ScoreBar, TrustChip, ViolationBadge, DecisionBadge } from '@/components/assessments/AutoproctorResult';
 import { useDebounced } from '@/hooks/useDebounced';
 import { formatIST, istDateKey } from '@/utils/formatters';
 import { STAGE_MAP } from '@/constants/pipelineStages';
@@ -130,7 +130,8 @@ function ScrapeModal({ onClose, onQueued }) {
       <ul className="mt-4 space-y-1.5 text-xs text-gray-500 list-disc pl-4">
         <li>Attempts already imported are skipped, so overlapping ranges are safe to run.</li>
         <li>Each new attempt takes about 20–30 seconds. It runs in the background, so you can leave this page.</li>
-        <li>A manual scrape only imports results. Reminders and auto-drops run with the nightly sync.</li>
+        <li>Imported results are acted on straight away: score ≥ 75% and trust ≥ 90% moves the candidate to the next round, anything less rejects them and sends the rejection email right away. Only candidates still in Assessment are moved.</li>
+        <li>The 30-day auto-drop only runs with the nightly sync.</li>
       </ul>
     </Modal>
   );
@@ -145,7 +146,7 @@ function LinkModal({ attempt, onClose, onLinked }) {
     enabled: dq.trim().length >= 2,
   });
   const mutation = useMutation({
-    mutationFn: (assessmentId) => autoproctorApi.link(attempt.id, assessmentId),
+    mutationFn: (o) => autoproctorApi.link(attempt.id, { assessment_id: o.assessment_id, application_id: o.application_id }),
     onSuccess: () => { toast.success('Attempt linked — assessment marked completed'); onLinked(); onClose(); },
     onError: (err) => toast.error(err.response?.data?.detail ?? 'Could not link'),
   });
@@ -165,21 +166,24 @@ function LinkModal({ attempt, onClose, onLinked }) {
       <div className="mt-3 max-h-80 overflow-y-auto divide-y divide-surface-100">
         {isFetching && <p className="py-6 text-center text-sm text-gray-400">Searching…</p>}
         {!isFetching && dq.trim().length >= 2 && options.length === 0 && (
-          <p className="py-6 text-center text-sm text-gray-400">No AutoProctor assessments for that candidate.</p>
+          <p className="py-6 text-center text-sm text-gray-400">No candidate found with that name or email.</p>
         )}
         {options.map((o) => (
           <button
-            key={o.assessment_id}
+            key={o.application_id}
             type="button"
             disabled={mutation.isPending}
-            onClick={() => mutation.mutate(o.assessment_id)}
+            onClick={() => mutation.mutate(o)}
             className="w-full flex items-center justify-between gap-3 py-2.5 px-1 text-left hover:bg-surface-50 rounded-lg"
           >
             <span className="min-w-0">
               <span className="block text-sm font-medium text-gray-900 truncate">{o.candidate_name}</span>
-              <span className="block text-xs text-gray-500 truncate">{o.candidate_email} · {o.job_title} · {o.title}</span>
+              <span className="block text-xs text-gray-500 truncate">{o.candidate_email} · {o.job_title}</span>
+              <span className="block text-[11px] text-gray-400 truncate">
+                {o.assessment_id ? `Assessment: ${o.assessment_title} (${o.assessment_status})` : 'No assessment yet — linking creates one (no email sent)'}
+              </span>
             </span>
-            <span className="shrink-0 text-[11px] text-gray-500 capitalize">{o.status} · {stageLabel(o.stage)}</span>
+            <span className="shrink-0 text-[11px] font-medium text-gray-600 bg-surface-100 rounded-full px-2 py-0.5">{stageLabel(o.stage)}</span>
           </button>
         ))}
       </div>
@@ -221,6 +225,7 @@ function ResultsTable({ rows, onOpen, onLink, onUnlink, showLink }) {
                   <button type="button" onClick={() => navigate(`/hr/applicants/${a.application.id}?tab=assessments`)} className="text-left">
                     <span className="block text-xs font-medium text-brand-600 hover:text-brand-700">{a.application.job_title}</span>
                     <span className="block text-[11px] text-gray-500">{stageLabel(a.application.stage)}</span>
+                    {a.decision && <span className="mt-1 block"><DecisionBadge decision={a.decision} /></span>}
                   </button>
                 ) : showLink ? (
                   <button type="button" onClick={() => onLink(a)} className="inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-700">
@@ -254,8 +259,9 @@ function PendingTable({ rows }) {
           <tr className="border-b border-surface-200 bg-surface-50">
             <th className={th}>Candidate</th>
             <th className={th}>Role · Assessment</th>
-            <th className={th}>Scheduled (IST)</th>
-            <th className={th}>Reminder</th>
+            <th className={th}>Sent (IST)</th>
+            <th className={th}>Deadline</th>
+            <th className={th}>Reminders</th>
             <th className={th}>Auto-drop on</th>
           </tr>
         </thead>
@@ -271,12 +277,12 @@ function PendingTable({ rows }) {
                 <p className="text-xs text-gray-500">{p.title}</p>
               </td>
               <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{formatIST(p.scheduled_at, 'dd MMM, h:mm a')}</td>
-              <td className="px-4 py-3 text-xs">
-                {p.reminder_sent_at ? (
-                  <span className="inline-flex items-center gap-1 text-emerald-700"><Mail className="w-3.5 h-3.5" /> Sent {formatIST(p.reminder_sent_at, 'dd MMM')}</span>
-                ) : (
-                  <span className="text-gray-500">Due {formatIST(p.reminder_due_at, 'dd MMM')}</span>
-                )}
+              <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{p.deadline ? formatIST(p.deadline, 'dd MMM') : '—'}</td>
+              <td className="px-4 py-3 text-xs whitespace-nowrap">
+                <span className={cn('font-medium', p.reminders_sent ? 'text-emerald-700' : 'text-gray-500')}>{p.reminders_sent} of 2 sent</span>
+                <span className="block text-[11px] text-gray-400">
+                  {p.next_reminder_at ? `next ${formatIST(p.next_reminder_at, 'dd MMM')}` : p.last_reminder_at ? `last ${formatIST(p.last_reminder_at, 'dd MMM')}` : ''}
+                </span>
               </td>
               <td className="px-4 py-3 text-xs whitespace-nowrap">
                 <span className={cn('font-medium', p.days_left <= 2 ? 'text-rose-700' : 'text-gray-700')}>
@@ -308,7 +314,8 @@ function RunsTable({ rows }) {
             <th className={cn(th, 'text-right')}>Skipped</th>
             <th className={cn(th, 'text-right')}>Matched</th>
             <th className={cn(th, 'text-right')}>Failed</th>
-            <th className={cn(th, 'text-right')}>Reminders</th>
+            <th className={cn(th, 'text-right')}>Advanced</th>
+            <th className={cn(th, 'text-right')}>Rejected</th>
             <th className={cn(th, 'text-right')}>Dropped</th>
           </tr>
         </thead>
@@ -328,7 +335,7 @@ function RunsTable({ rows }) {
                 </span>
                 {r.error && <p className="mt-1 text-[11px] text-rose-600 max-w-xs break-words">{r.error}</p>}
               </td>
-              {['attempts_seen', 'attempts_imported', 'attempts_skipped', 'attempts_matched', 'attempts_failed', 'reminders_sent', 'candidates_dropped'].map((k) => (
+              {['attempts_seen', 'attempts_imported', 'attempts_skipped', 'attempts_matched', 'attempts_failed', 'candidates_advanced', 'candidates_rejected', 'candidates_dropped'].map((k) => (
                 <td key={k} className={cn('px-4 py-3 text-right tabular-nums', k === 'attempts_failed' && r[k] ? 'text-rose-700 font-semibold' : 'text-gray-700')}>{r[k]}</td>
               ))}
             </tr>
@@ -405,7 +412,7 @@ export default function AssessmentsPage() {
   };
 
   const unlink = useMutation({
-    mutationFn: (a) => autoproctorApi.link(a.id, null),
+    mutationFn: (a) => autoproctorApi.link(a.id, { assessment_id: null, application_id: null }),
     onSuccess: () => { toast.success('Unlinked — the assessment is pending again'); refreshAll(); },
     onError: (err) => toast.error(err.response?.data?.detail ?? 'Could not unlink'),
   });
@@ -510,11 +517,11 @@ export default function AssessmentsPage() {
         {view === 'pending' && (
           loadingPending ? <div className="p-10 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-gray-400" /></div>
             : pending.length === 0 ? (
-              <EmptyState icon={CheckCircle2} title="Nobody is waiting" description="Candidates with an AutoProctor assessment they haven't submitted yet appear here, with their reminder and auto-drop dates." />
+              <EmptyState icon={CheckCircle2} title="Nobody is waiting" description="Candidates with an AutoProctor assessment they haven't submitted yet appear here, with their deadline and auto-drop date." />
             ) : (
               <>
                 <p className="px-4 py-2.5 text-xs text-gray-500 border-b border-surface-100 bg-surface-50/60">
-                  A reminder goes out 3 days after scheduling. Unsubmitted candidates move to Interview Drop after 7 days, never before their deadline.
+                  Reminder emails go out at 10:00 AM IST on day 3 and day 6 after the assessment was sent. Candidates still in Assessment with nothing submitted move to Interview Drop after 30 days, never before their deadline.
                 </p>
                 <PendingTable rows={pending} />
               </>

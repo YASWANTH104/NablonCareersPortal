@@ -11,6 +11,7 @@ from app.schemas.job import (
     JobQuestionCreate, JobQuestionResponse,
     DepartmentCreate, DepartmentResponse,
     JDGenerateRequest, JDGenerateResponse, JDPdfParseResponse,
+    JobAssessmentConfig,
 )
 from app.services import job_service, storage_service
 from app.services.jd_generation_service import generate_job_description, JDGenerationUnavailable
@@ -243,6 +244,40 @@ async def update_job(
 ):
     job = await job_service.update_job(db, job_id, data)
     return await job_service.get_job_with_names(db, job)
+
+
+@router.get("/{job_id}/assessment", response_model=JobAssessmentConfig)
+async def get_job_assessment(
+    job_id: uuid.UUID,
+    user=Depends(require_roles(Role.HR_MANAGER, Role.ADMIN, Role.SUPER_ADMIN)),
+    db: AsyncSession = Depends(get_db),
+):
+    """The role's auto-sent assessment. HR-only on purpose: the public job
+    endpoints must never reveal the test link."""
+    job = await job_service.get_job_by_id(db, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    return JobAssessmentConfig.model_validate(job, from_attributes=True)
+
+
+@router.put("/{job_id}/assessment", response_model=JobAssessmentConfig)
+async def set_job_assessment(
+    job_id: uuid.UUID,
+    data: JobAssessmentConfig,
+    user=Depends(require_roles(Role.HR_MANAGER, Role.ADMIN, Role.SUPER_ADMIN)),
+    db: AsyncSession = Depends(get_db),
+):
+    job = await job_service.get_job_by_id(db, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    for field, value in data.model_dump().items():
+        setattr(job, field, value)
+    if not job.assessment_link:  # un-mapped: clear the rest so nothing stale lingers
+        job.assessment_title = job.assessment_duration_mins = job.assessment_deadline_days = None
+        job.assessment_pass_stage = None
+    await db.commit()
+    await db.refresh(job)
+    return JobAssessmentConfig.model_validate(job, from_attributes=True)
 
 
 @router.patch("/{job_id}/status", response_model=JobResponse)

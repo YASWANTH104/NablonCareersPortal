@@ -14,7 +14,9 @@ import CopyLink from '@/components/shared/CopyLink';
 import PipelineFunnel, { QuotaMeter } from '@/components/shared/PipelineFunnel';
 import { ROUND_TYPES, ROUND_MAP, ROUND_ELIGIBLE_STAGE, isBookableForRound } from '@/constants/interviewRounds';
 import { toIST, formatIST } from '@/utils/formatters';
-import { Modal, EmptyState } from '@/components/ui';
+import { Modal, EmptyState, Segmented } from '@/components/ui';
+import AgencyAssessmentsTab from '@/components/assessments/AgencyAssessmentsTab';
+import { AgencyAssessmentStrip } from '@/components/assessments/AutoproctorResult';
 import { cn } from '@/lib/utils';
 
 const STAGE_LABELS = {
@@ -659,6 +661,7 @@ function RoleDetail({ portalToken, assignment, onBack }) {
   const [showSubmit, setShowSubmit] = useState(false);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
+  const [tab, setTab] = useState('candidates');
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['agency-portal-assignment', portalToken, assignment.assignment_id],
@@ -789,6 +792,19 @@ function RoleDetail({ portalToken, assignment, onBack }) {
             )}
           </header>
 
+          <Segmented
+            value={tab}
+            onChange={setTab}
+            options={[
+              { value: 'candidates', label: `Candidates (${candidates.length})` },
+              { value: 'assessments', label: `Assessments (${candidates.filter((c) => c.assessment).length})` },
+            ]}
+          />
+
+          {tab === 'assessments' ? (
+            <AgencyAssessmentsTab candidates={candidates} />
+          ) : (
+          <>
           <SlotPicker
             portalToken={portalToken}
             assignmentId={assignment.assignment_id}
@@ -907,12 +923,17 @@ function RoleDetail({ portalToken, assignment, onBack }) {
                           moved {formatDistanceToNow(new Date(c.stage_updated_at), { addSuffix: true })}
                         </span>
                       </div>
+                      {/* Their assessment, so the agency can chase a pending one
+                          and see the result. Scores only — never the answers. */}
+                      <AgencyAssessmentStrip a={c.assessment} />
                     </div>
                   );
                 })}
               </div>
             )}
           </div>
+          </>
+          )}
         </div>
 
         {/* ── Sidebar ── */}

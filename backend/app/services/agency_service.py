@@ -197,6 +197,46 @@ async def get_assignment_by_ref_token(
     )).scalar_one_or_none()
 
 
+async def _portal_assessments(db: AsyncSession, application_ids: list) -> dict:
+    """Latest live assessment per application, with its AutoProctor result
+    when one is linked. Two batched queries for the whole list."""
+    from app.models.assessment import Assessment
+    from app.models.autoproctor import AutoproctorAttempt
+    from app.schemas.agency import AgencyPortalAssessment
+
+    if not application_ids:
+        return {}
+    latest: dict = {}
+    for a in (await db.execute(
+        select(Assessment).where(Assessment.application_id.in_(application_ids), Assessment.status != "cancelled")
+        .order_by(Assessment.created_at.desc())
+    )).scalars().all():
+        latest.setdefault(a.application_id, a)
+    attempts: dict = {}
+    if latest:
+        for at in (await db.execute(
+            select(AutoproctorAttempt).where(AutoproctorAttempt.assessment_id.in_([a.id for a in latest.values()]))
+            .order_by(AutoproctorAttempt.finished_at.desc())
+        )).scalars().all():
+            attempts.setdefault(at.assessment_id, at)
+
+    out = {}
+    for app_id, a in latest.items():
+        at = attempts.get(a.id)
+        out[app_id] = AgencyPortalAssessment(
+            title=a.title, status=a.status, sent_at=a.created_at, deadline=a.deadline,
+            completed_at=a.completed_at,
+            score_pct=at.percentage_scored if at else None,
+            points_scored=at.points_scored if at else None,
+            points_available=at.points_available if at else None,
+            trust_pct=at.trust_score_pct if at else None,
+            flags=sum(v for v in (at.violations or {}).values() if isinstance(v, int)) if at else None,
+            graded=at.graded if at else None,
+            decision=at.decision if at else None,
+        )
+    return out
+
+
 async def get_agency_portal(
     db: AsyncSession,
     portal_token: str,
@@ -233,6 +273,8 @@ async def get_agency_portal(
         db, [app.id for app, _ in rows]
     )
 
+    assessment_by_app = await _portal_assessments(db, [app.id for app, _ in rows])
+
     candidates = [
         AgencyPortalCandidate(
             application_id=app.id,
@@ -241,6 +283,7 @@ async def get_agency_portal(
             applied_at=app.applied_at,
             stage_updated_at=app.stage_updated_at,
             booked_rounds=sorted(booked_by_app.get(app.id, set())),
+            assessment=assessment_by_app.get(app.id),
         )
         for app, full_name in rows
     ]

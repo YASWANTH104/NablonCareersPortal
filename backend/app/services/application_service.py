@@ -1099,7 +1099,9 @@ async def move_stage(
             app.drop_category = drop_category
 
     if new_stage == "rejected" and notify_delay:
-        app.rejection_notify_at = datetime.utcnow() + notify_delay
+        # Timezone-aware on purpose: a naive utcnow() is read as the server's
+        # local time by the driver, which shifted the hold by 5h30m on IST machines.
+        app.rejection_notify_at = datetime.now(timezone.utc) + notify_delay
         app.rejection_notify_from_stage = from_stage
 
     try:
@@ -1139,6 +1141,15 @@ async def move_stage(
         try:
             from app.tasks.email_tasks import send_agency_stage_update_email
             send_agency_stage_update_email.delay(str(application_id), new_stage)
+        except Exception:
+            pass
+
+    if new_stage == "assessment":
+        # Roles with an assessment mapped send it automatically; the task
+        # skips unmapped roles and candidates who already have one.
+        try:
+            from app.tasks.autoproctor_tasks import auto_send_assessment
+            auto_send_assessment.delay(str(application_id))
         except Exception:
             pass
 

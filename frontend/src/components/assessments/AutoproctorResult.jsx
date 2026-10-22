@@ -8,13 +8,13 @@ import { autoproctorApi } from '@/api/autoproctor';
 import { Modal } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { formatIST } from '@/utils/formatters';
-import { TRUST_BAR, SCORE_BAR, VIOLATIONS, meetsBar, formatDuration } from '@/constants/assessmentResults';
+import { TRUST_BAR, SCORE_BAR, VIOLATIONS, DECISION_LABELS, meetsBar, formatDuration } from '@/constants/assessmentResults';
 
 // Quiz score as a bar against the shortlist bar. Colour encodes pass/below
 // the bar, and the number is always printed — never colour alone.
 export function ScoreBar({ pct, points, max, className }) {
   if (pct == null) return <span className="text-xs text-gray-400">Not graded</span>;
-  const ok = pct > SCORE_BAR;
+  const ok = pct >= SCORE_BAR;
   return (
     <div className={cn('min-w-[110px]', className)}>
       <div className="flex items-baseline justify-between gap-2">
@@ -33,7 +33,7 @@ export function ScoreBar({ pct, points, max, className }) {
 
 export function TrustChip({ pct }) {
   if (pct == null) return <span className="text-xs text-gray-400">—</span>;
-  const ok = pct > TRUST_BAR;
+  const ok = pct >= TRUST_BAR;
   const Icon = ok ? ShieldCheck : ShieldAlert;
   return (
     <span className={cn(
@@ -48,10 +48,17 @@ export function TrustChip({ pct }) {
 export function ViolationBadge({ total }) {
   if (!total) return <span className="text-xs text-gray-400">None</span>;
   return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 text-xs font-semibold tabular-nums">
+    <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 text-xs font-semibold tabular-nums whitespace-nowrap">
       {total} flag{total === 1 ? '' : 's'}
     </span>
   );
+}
+
+// What the nightly sync did with the candidate because of this result.
+export function DecisionBadge({ decision }) {
+  const d = DECISION_LABELS[decision];
+  if (!d) return null;
+  return <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap', d.cls)}>{d.label}</span>;
 }
 
 export function BarVerdict({ attempt }) {
@@ -130,6 +137,7 @@ export function AttemptSummary({ attempt, onOpen }) {
         </div>
         <div className="flex-1" />
         <BarVerdict attempt={attempt} />
+        <DecisionBadge decision={attempt.decision} />
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <ReportChip href={attempt.responses_file_url} icon={FileSpreadsheet} label="All responses" />
@@ -223,7 +231,10 @@ export function AttemptDetailModal({ attemptId, onClose }) {
               Started {formatIST(a.started_at, 'dd MMM yyyy, h:mm a')} · Submitted {formatIST(a.finished_at, 'h:mm a')} IST
               {!a.graded && <span className="ml-2 text-amber-600 font-medium">· Grading pending on AutoProctor</span>}
             </span>
-            <BarVerdict attempt={a} />
+            <span className="flex items-center gap-2">
+              <BarVerdict attempt={a} />
+              <DecisionBadge decision={a.decision} />
+            </span>
           </div>
 
           <section>
@@ -281,5 +292,43 @@ export function AttemptDetailModal({ attemptId, onClose }) {
         </div>
       )}
     </Modal>
+  );
+}
+
+// One-line assessment status for the agency portal. Built from the agency
+// payload (agency_service._portal_assessments): headline numbers only, never
+// questions or answers.
+export function AgencyAssessmentStrip({ a }) {
+  if (!a) return null;
+  const now = Date.now();
+  const due = a.deadline ? new Date(a.deadline).getTime() : null;
+  const daysLeft = due ? Math.ceil((due - now) / 86400000) : null;
+  const done = a.status === 'completed' || a.status === 'evaluated' || a.status === 'submitted';
+  return (
+    <div className="w-full flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-xl bg-surface-50 border border-surface-200 px-3 py-2 text-[11px] text-gray-600">
+      <span className="font-semibold text-gray-800">{a.title}</span>
+      <span>Sent {formatIST(a.sent_at, 'dd MMM')}</span>
+      {a.status === 'pending' && (
+        <span className={cn('font-semibold', daysLeft != null && daysLeft <= 1 ? 'text-rose-700' : 'text-amber-700')}>
+          Awaiting submission{daysLeft != null && (daysLeft > 0 ? ` · due in ${daysLeft} day${daysLeft === 1 ? '' : 's'}` : ' · deadline passed')}
+        </span>
+      )}
+      {a.status === 'expired' && <span className="font-semibold text-gray-500">Not completed in time</span>}
+      {done && (
+        <>
+          <span>Submitted {a.completed_at ? formatIST(a.completed_at, 'dd MMM') : ''}</span>
+          {a.graded === false ? (
+            <span className="text-amber-700 font-medium">Being graded</span>
+          ) : (
+            <>
+              <ScoreBar pct={a.score_pct} points={a.points_scored} max={a.points_available} className="min-w-[96px]" />
+              <TrustChip pct={a.trust_pct} />
+              <ViolationBadge total={a.flags} />
+            </>
+          )}
+          <DecisionBadge decision={a.decision} />
+        </>
+      )}
+    </div>
   );
 }

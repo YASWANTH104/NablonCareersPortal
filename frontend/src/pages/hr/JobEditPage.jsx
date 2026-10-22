@@ -12,6 +12,9 @@ import RichTextEditor from '@/components/shared/RichTextEditor';
 import DraftWithAiModal from '@/components/shared/DraftWithAiModal';
 import ImportJdPdfModal from '@/components/shared/ImportJdPdfModal';
 import LocationCombobox from '@/components/shared/LocationCombobox';
+import JobAssessmentSection, {
+  EMPTY_JOB_ASSESSMENT, jobAssessmentFromApi, jobAssessmentToBody, jobAssessmentError,
+} from '@/components/assessments/JobAssessmentSection';
 import { LOCATION_TYPES, EMPLOYMENT_TYPES } from '@/constants/jobOptions';
 
 const toOptionalInt = (v) => (v === '' || v === null || v === undefined ? undefined : parseInt(v, 10));
@@ -186,9 +189,38 @@ export default function JobEditPage() {
     }
   }, [existing, reset]);
 
+  // The role's auto-sent assessment. Part of this form, but stored through its
+  // own HR-only endpoint (the job record is public), so it's saved right
+  // after the job itself on create and on edit.
+  const [assessment, setAssessment] = useState({ ...EMPTY_JOB_ASSESSMENT });
+  const [assessmentDirty, setAssessmentDirty] = useState(false);
+  const { data: assessmentData } = useQuery({
+    queryKey: ['job-assessment', id],
+    queryFn: () => jobsApi.getAssessment(id).then((r) => r.data),
+    enabled: isEdit,
+  });
+  useEffect(() => {
+    if (assessmentData) {
+      setAssessment(jobAssessmentFromApi(assessmentData));
+      setAssessmentDirty(false);
+    }
+  }, [assessmentData]);
+  const changeAssessment = (next) => { setAssessment(next); setAssessmentDirty(true); };
+  const saveAssessment = async (jobId) => {
+    try {
+      const res = await jobsApi.setAssessment(jobId, jobAssessmentToBody(assessment));
+      queryClient.setQueryData(['job-assessment', jobId], res.data);
+      setAssessmentDirty(false);
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      toast.error(`Job saved, but the assessment wasn't: ${Array.isArray(detail) ? detail[0]?.msg : detail ?? 'please try again'}`);
+    }
+  };
+
   const createMutation = useMutation({
     mutationFn: (data) => jobsApi.create(data),
-    onSuccess: (res) => {
+    onSuccess: async (res) => {
+      if (assessment.assessment_link) await saveAssessment(res.data.id);
       toast.success('Job created as draft');
       queryClient.invalidateQueries({ queryKey: ['hr-jobs'] });
       navigate(`/hr/jobs/${res.data.id}/edit`);
@@ -243,9 +275,12 @@ export default function JobEditPage() {
   });
 
   const onSubmit = async (values) => {
+    const problem = jobAssessmentError(assessment);
+    if (problem) { toast.error(problem); return; }
     const payload = buildPayload(values);
     if (isEdit) {
       await updateMutation.mutateAsync(payload);
+      if (assessmentDirty) await saveAssessment(id);
     } else {
       await createMutation.mutateAsync(payload);
     }
@@ -255,7 +290,10 @@ export default function JobEditPage() {
   // in one action — see the JOB_STATUS_TRANSITIONS "closed"/"archived" ->
   // "published" paths added on the backend for this.
   const onReactivate = async (values) => {
+    const problem = jobAssessmentError(assessment);
+    if (problem) { toast.error(problem); return; }
     await updateMutation.mutateAsync(buildPayload(values));
+    if (assessmentDirty) await saveAssessment(id);
     await statusMutation.mutateAsync('published');
   };
 
@@ -550,6 +588,9 @@ export default function JobEditPage() {
             </div>
           )}
         </section>
+
+        {/* Auto-sent assessment (saved separately, HR-only endpoint) */}
+        <JobAssessmentSection value={assessment} onChange={changeAssessment} />
 
         {/* JD document */}
         <section className="bg-white rounded-xl border border-surface-200 p-4 sm:p-6 space-y-4">

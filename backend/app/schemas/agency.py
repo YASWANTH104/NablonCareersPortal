@@ -58,6 +58,25 @@ class JobAgencyAssignmentResponse(BaseModel):
     job_title: Optional[str] = None
 
 
+class AgencyPortalAssessment(BaseModel):
+    """What an agency sees of its candidate's assessment: status, dates and
+    headline scores. Never the questions, answers or responses file — those
+    would leak the question bank to every agency."""
+    title: str
+    status: str
+    sent_at: datetime
+    deadline: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    score_pct: Optional[float] = None
+    points_scored: Optional[float] = None
+    points_available: Optional[float] = None
+    trust_pct: Optional[int] = None
+    flags: Optional[int] = None
+    graded: Optional[bool] = None
+    # advanced | rejected | skipped — what the result did to the candidate
+    decision: Optional[str] = None
+
+
 class AgencyPortalCandidate(BaseModel):
     application_id: uuid.UUID
     candidate_name: str
@@ -68,6 +87,7 @@ class AgencyPortalCandidate(BaseModel):
     # The portal hides them from those rounds' booking lists; cancelling the
     # interview drops the round out of here and the name comes back on its own.
     booked_rounds: list[str] = []
+    assessment: Optional[AgencyPortalAssessment] = None
 
 
 class AgencyPortalResponse(BaseModel):

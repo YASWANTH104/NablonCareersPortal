@@ -6,9 +6,19 @@ Nightly (tasks/autoproctor_tasks.py, 00:00 IST):
      responses workbook (stored in blob storage).
   2. Match each attempt to one of our assessments by candidate email + the
      test id in the assessment's platform link, and mark it completed.
-  3. Follow up on AutoProctor assessments still pending: a reminder email 3
-     days after scheduling, and a move to interview_drop after 7 days (never
-     before the deadline the candidate was given).
+  3. Act on each graded result (any run, nightly or manual): score >= 75%
+     AND trust >= 90% moves the candidate to their next round; anything
+     less moves them to Rejected, and the rejection email goes out
+     immediately (user's call for this flow, 2026-10-21). Decided once per attempt.
+  4. Nightly only: a candidate still in the assessment stage with nothing
+     submitted 30 days after the assessment was sent moves to
+     interview_drop (never before the deadline they were given).
+  5. Daily at 10:00 IST (send_reminders, its own beat task so candidates
+     aren't emailed at midnight): reminder emails 3 and 6 days after the
+     assessment was sent, while it's still unsubmitted.
+
+Only candidates sitting in the assessment stage are ever moved by 3 or 4;
+anyone HR has already moved on is left alone.
 
 The drop is the dangerous half — it closes a candidate out — so it only runs
 after a sync that actually succeeded, and skips anyone whose attempt failed
@@ -36,8 +46,12 @@ from app.utils.timezone import IST
 
 logger = logging.getLogger(__name__)
 
-REMINDER_AFTER = timedelta(days=3)
-DROP_AFTER = timedelta(days=7)
+DROP_AFTER = timedelta(days=30)
+# Reminder emails go out this many days after the assessment was sent.
+REMINDER_DAYS = (3, 6)
+# The bar from the candidate email: both must be met (inclusive).
+SCORE_BAR = 75.0
+TRUST_BAR = 90
 # The drop sweep needs a successful sync at least this recent.
 SYNC_FRESHNESS = timedelta(hours=26)
 # A "running" row older than this is a crashed run, not a live one.
@@ -66,8 +80,8 @@ def sync_start_utc() -> datetime:
 
 
 def drop_due_at(a: Assessment) -> datetime:
-    """7 days after scheduling, but never before the deadline the candidate
-    was told — dropping someone whose deadline hasn't passed is wrong."""
+    """30 days after the assessment was sent, but never before the deadline
+    the candidate was told."""
     due = a.created_at + DROP_AFTER
     if a.deadline and a.deadline > due:
         due = a.deadline
@@ -319,7 +333,7 @@ async def run_sync(
     date_to: Optional[date] = None,
     run_id: Optional[uuid.UUID] = None,
 ) -> dict:
-    """Import attempts, then (scheduled runs only) send reminders / auto-drop.
+    """Import attempts, act on graded results, then (nightly only) auto-drop.
 
     run_id: the "queued" row HR's click created (manual runs); the nightly
     run creates its own.
@@ -441,17 +455,27 @@ async def _run_locked(db: AsyncSession, run_id: uuid.UUID, trigger: str,
                       attempts_matched=stats["matched"], attempts_failed=stats["failed"],
                       attempts_skipped=stats["skipped"])
 
-    reminders = dropped = 0
+    # Results decide on every run, manual included: they act on real scores,
+    # unlike the drop, which acts on an absence of data.
+    advanced = rejected = 0
+    try:
+        out = await process_outcomes(db)
+        advanced, rejected = out["advanced"], out["rejected"]
+        await _update_run(db, run_id, candidates_advanced=advanced, candidates_rejected=rejected)
+    except Exception:
+        await db.rollback()
+        logger.exception("AutoProctor outcomes failed")
+
+    dropped = 0
     if trigger == "schedule":
         try:
-            done = await process_followups(db, failed_emails)
-            reminders, dropped = done["reminders"], done["dropped"]
-            await _update_run(db, run_id, reminders_sent=reminders, candidates_dropped=dropped)
+            dropped = (await process_followups(db, failed_emails))["dropped"]
+            await _update_run(db, run_id, candidates_dropped=dropped)
         except Exception:
             await db.rollback()
-            logger.exception("AutoProctor follow-ups failed")
+            logger.exception("AutoProctor auto-drop failed")
 
-    return {"status": status, **stats, "reminders": reminders, "dropped": dropped, "error": error}
+    return {"status": status, **stats, "advanced": advanced, "rejected": rejected, "dropped": dropped, "error": error}
 
 
 def _row_started(row: dict) -> Optional[datetime]:
@@ -468,7 +492,7 @@ async def _update_run(db: AsyncSession, run_id: uuid.UUID, **values) -> None:
 
 async def _pending_rows(db: AsyncSession):
     """AutoProctor assessments still pending for candidates sitting in the
-    assessment stage — the only people a reminder or drop can apply to."""
+    assessment stage — the only people the auto-drop can apply to."""
     return (await db.execute(
         select(Assessment, Application, User, Job)
         .join(Application, Application.id == Assessment.application_id)
@@ -496,26 +520,107 @@ async def _still_in_assessment(db: AsyncSession, application_id: uuid.UUID) -> b
     return bool(row) and row.stage == "assessment" and not row.on_hold
 
 
+# Where a cleared candidate goes when the job doesn't say: the order each
+# pipeline already ran in (agency candidates take the HR screening call after
+# their assessment; direct and campus go straight to TR1).
+DEFAULT_PASS_STAGE = {"direct": "tr1", "agency": "screening", "campus": "tr1"}
+
+
+def next_round_after_assessment(source: Optional[str], job_choice: Optional[str] = None) -> str:
+    """The job's own choice (jobs.assessment_pass_stage) when it's a legal
+    move for this candidate's pipeline, else the source default."""
+    from app.constants.stages import valid_transitions_for
+    allowed = valid_transitions_for(source).get("assessment", [])
+    if job_choice and job_choice in allowed:
+        return job_choice
+    default = DEFAULT_PASS_STAGE.get(source or "direct", "tr1")
+    return default if default in allowed else allowed[0]
+
+
+async def process_outcomes(db: AsyncSession) -> dict:
+    """Act on graded results: clear the bar (score >= 75% and trust >= 90%)
+    -> next round; otherwise -> Rejected, rejection email sent immediately. Only for
+    candidates still in the assessment stage and not on hold; each attempt
+    is decided once (decision column), so later syncs never re-move anyone.
+    Ungraded attempts wait until AutoProctor finishes grading them."""
+    from app.services import application_service
+
+    rows = (await db.execute(
+        select(AutoproctorAttempt.id, AutoproctorAttempt.application_id, AutoproctorAttempt.percentage_scored,
+               AutoproctorAttempt.trust_score_pct, Application.source, Job.assessment_pass_stage)
+        .join(Application, Application.id == AutoproctorAttempt.application_id)
+        .join(Job, Job.id == Application.job_id)
+        .where(
+            AutoproctorAttempt.decision.is_(None),
+            AutoproctorAttempt.assessment_id.is_not(None),
+            AutoproctorAttempt.graded.is_(True),
+            AutoproctorAttempt.percentage_scored.is_not(None),
+            AutoproctorAttempt.trust_score_pct.is_not(None),
+        )
+        .order_by(AutoproctorAttempt.finished_at)
+    )).all()
+
+    advanced = rejected = 0
+    for attempt_id, app_id, pct, trust, source, pass_stage in rows:
+        app_row = (await db.execute(
+            select(Application.stage, Application.on_hold).where(Application.id == app_id).with_for_update()
+        )).first()
+        if not app_row or app_row.on_hold:
+            await db.rollback()  # on hold: decide once HR resumes them
+            continue
+        if app_row.stage != "assessment":
+            await db.execute(update(AutoproctorAttempt).where(AutoproctorAttempt.id == attempt_id)
+                             .values(decision="skipped", decided_at=_now()))
+            await db.commit()
+            continue
+
+        cleared = pct >= SCORE_BAR and trust >= TRUST_BAR
+        result = f"score {pct:g}%, trust {trust}%"
+        try:
+            if cleared:
+                await application_service.move_stage(
+                    db, app_id, next_round_after_assessment(source, pass_stage), None,
+                    notes=f"Moved automatically — cleared the assessment ({result})",
+                )
+            else:
+                await application_service.move_stage(
+                    db, app_id, "rejected", None,
+                    notes=f"Moved automatically — assessment below the bar ({result})",
+                    rejection_reason=(f"Assessment below the bar: {result} "
+                                      f"(needs {SCORE_BAR:g}% score and {TRUST_BAR}% trust)"),
+                )
+        except HTTPException as exc:
+            await db.rollback()
+            logger.warning(f"Assessment outcome not applied to application {app_id}: {exc.detail}")
+            continue
+        await db.execute(update(AutoproctorAttempt).where(AutoproctorAttempt.id == attempt_id)
+                         .values(decision="advanced" if cleared else "rejected", decided_at=_now()))
+        await db.commit()
+        if cleared:
+            advanced += 1
+        else:
+            rejected += 1
+    return {"advanced": advanced, "rejected": rejected}
+
+
 async def process_followups(db: AsyncSession, failed_emails: set[str] = frozenset(), dry_run: bool = False) -> dict:
     """dry_run: report who WOULD be reminded/dropped without emailing or
     moving anyone — for checking the sweep against real data safely."""
     from app.services import application_service
-    from app.services.email_service import send_email
-    from app.utils.timezone import format_ist
 
     last = await last_successful_run(db)
     if not last or last.started_at < _now() - SYNC_FRESHNESS:
         logger.warning("AutoProctor follow-ups skipped: no successful sync in the last 26h")
-        return {"reminders": 0, "dropped": 0, "skipped": True}
+        return {"dropped": 0, "skipped": True}
 
     now = _now()
-    reminders = dropped = 0
-    would = {"remind": [], "drop": []}
+    dropped = 0
+    would = {"drop": []}
     # Snapshot to plain values up front: move_stage commits and a failed move
     # rolls back, and either would expire ORM rows we'd still be iterating.
     items = [{
         "assessment_id": a.id, "application_id": app.id, "created_at": a.created_at,
-        "due": drop_due_at(a), "reminder_sent_at": a.reminder_sent_at, "title": a.title,
+        "due": drop_due_at(a), "title": a.title,
         "platform_link": a.platform_link, "duration_mins": a.duration_mins,
         "email": candidate.email, "full_name": candidate.full_name, "job_title": job.title,
     } for a, app, candidate, job in await _pending_rows(db)]
@@ -548,8 +653,8 @@ async def process_followups(db: AsyncSession, failed_emails: set[str] = frozense
             try:
                 await application_service.move_stage(
                     db, it["application_id"], "interview_drop", None,
-                    notes="Moved automatically — AutoProctor assessment not completed within 7 days",
-                    rejection_reason="Assessment not completed within 7 days of being scheduled",
+                    notes="Moved automatically — assessment not completed within 30 days",
+                    rejection_reason="Assessment not completed within 30 days of being sent",
                     drop_category=DROP_CATEGORY,
                 )
                 await db.execute(update(Assessment).where(Assessment.id == it["assessment_id"]).values(status="expired"))
@@ -560,44 +665,88 @@ async def process_followups(db: AsyncSession, failed_emails: set[str] = frozense
                 logger.warning(f"Auto-drop skipped for application {it['application_id']}: {exc.detail}")
             continue
 
-        if it["reminder_sent_at"] is None and now >= it["created_at"] + REMINDER_AFTER:
-            if dry_run:
-                would["remind"].append({"application_id": str(it["application_id"]), "email": it["email"]})
-                continue
-            # Claim before sending (same shape as the action digest), so a
-            # double-fired run can't email anyone twice.
-            if not await _still_in_assessment(db, it["application_id"]):
-                await db.rollback()
-                continue
-            claimed = (await db.execute(
-                update(Assessment)
-                .where(Assessment.id == it["assessment_id"], Assessment.reminder_sent_at.is_(None))
-                .values(reminder_sent_at=now)
-                .returning(Assessment.id)
-            )).first()
-            await db.commit()
-            if not claimed:
-                continue
-            ok = await send_email(
-                to_email=it["email"],
-                subject=f"Reminder: complete your assessment for {it['job_title']}",
-                template_name="assessment_reminder",
-                context={
-                    "full_name": it["full_name"],
-                    "job_title": it["job_title"],
-                    "assessment_title": it["title"],
-                    "platform_link": it["platform_link"],
-                    "complete_by": format_ist(it["due"]),
-                    "duration_mins": it["duration_mins"],
-                },
-            )
-            if ok:
-                reminders += 1
-            else:
-                logger.error(f"Assessment reminder failed for {it['email']}")
     if dry_run:
-        return {"reminders": 0, "dropped": 0, "would": would}
-    return {"reminders": reminders, "dropped": dropped}
+        return {"dropped": 0, "would": would}
+    return {"dropped": dropped}
+
+
+async def send_reminders(db: AsyncSession, dry_run: bool = False) -> dict:
+    """Day-3 and day-6 reminders for AutoProctor assessments still unsubmitted
+    by candidates still in the assessment stage.
+
+    Same safety gate as the auto-drop: only after a nightly sync succeeded in
+    the last 26h, so a broken sync can't remind people who already finished.
+    Catches up without spamming: an assessment that's past day 6 with no
+    reminder yet (e.g. it predates this feature) gets ONE email, counted as
+    both. Each send is claimed with a conditional UPDATE on reminder_count
+    first, so an overlapping run can never email anyone twice."""
+    from app.services.email_service import send_email
+    from app.utils.timezone import format_ist
+
+    last = await last_successful_run(db)
+    if not last or last.started_at < _now() - SYNC_FRESHNESS:
+        logger.warning("Assessment reminders skipped: no successful AutoProctor sync in the last 26h")
+        return {"sent": 0, "skipped": True}
+
+    now = _now()
+    items = [{
+        "assessment_id": a.id, "application_id": app.id, "created_at": a.created_at, "deadline": a.deadline,
+        "count": a.reminder_count or 0, "drop_at": drop_due_at(a), "title": a.title,
+        "platform_link": a.platform_link, "duration_mins": a.duration_mins,
+        "email": candidate.email, "full_name": candidate.full_name, "job_title": job.title,
+    } for a, app, candidate, job in await _pending_rows(db)]
+
+    sent, would = 0, []
+    for it in items:
+        due = sum(1 for d in REMINDER_DAYS if now >= it["created_at"] + timedelta(days=d))
+        if due <= it["count"] or now >= it["drop_at"]:
+            continue
+        done_elsewhere = (await db.execute(
+            select(Assessment.id).where(
+                Assessment.application_id == it["application_id"],
+                Assessment.id != it["assessment_id"],
+                Assessment.status.in_(COMPLETED_STATUSES),
+            ).limit(1)
+        )).first()
+        if done_elsewhere:
+            continue
+        if dry_run:
+            would.append({"email": it["email"], "reminder": due})
+            continue
+        if not await _still_in_assessment(db, it["application_id"]):
+            await db.rollback()
+            continue
+        claimed = (await db.execute(
+            update(Assessment)
+            .where(Assessment.id == it["assessment_id"], Assessment.reminder_count == it["count"])
+            .values(reminder_count=due, reminder_sent_at=now)
+            .returning(Assessment.id)
+        )).first()
+        await db.commit()
+        if not claimed:
+            continue
+        # Point them at the deadline they were given while it's still ahead,
+        # otherwise at the last day before they're dropped.
+        complete_by = it["deadline"] if it["deadline"] and it["deadline"] > now else it["drop_at"]
+        ok = await send_email(
+            to_email=it["email"],
+            subject=(f"Reminder: complete your assessment for {it['job_title']}" if due == 1
+                     else f"Second reminder: your assessment for {it['job_title']} is still pending"),
+            template_name="assessment_reminder",
+            context={
+                "full_name": it["full_name"],
+                "job_title": it["job_title"],
+                "assessment_title": it["title"],
+                "platform_link": it["platform_link"],
+                "complete_by": format_ist(complete_by),
+                "duration_mins": it["duration_mins"],
+            },
+        )
+        if ok:
+            sent += 1
+        else:
+            logger.error(f"Assessment reminder failed for {it['email']}")
+    return {"sent": 0, "would": would} if dry_run else {"sent": sent}
 
 
 # ── Read side (router) ───────────────────────────────────────────────────────
@@ -632,6 +781,8 @@ def attempt_dict(a: AutoproctorAttempt, app: Optional[Application] = None, candi
         "assessment_id": str(a.assessment_id) if a.assessment_id else None,
         "application_id": str(a.application_id) if a.application_id else None,
         "match_method": a.match_method,
+        "decision": a.decision,
+        "decided_at": a.decided_at,
         "question_count": len(a.responses or []),
         "application": None,
     }
@@ -701,9 +852,11 @@ async def pending_assessments(db: AsyncSession) -> list[dict]:
             "job_title": job.title,
             "scheduled_at": a.created_at,
             "deadline": a.deadline,
-            "reminder_due_at": a.created_at + REMINDER_AFTER,
-            "reminder_sent_at": a.reminder_sent_at,
             "drop_at": due,
+            "reminders_sent": a.reminder_count or 0,
+            "last_reminder_at": a.reminder_sent_at,
+            "next_reminder_at": next(
+                (a.created_at + timedelta(days=d) for i, d in enumerate(REMINDER_DAYS) if i >= (a.reminder_count or 0)), None),
             "days_left": max(0, (due - now).days),
             "overdue": now >= due,
         })
@@ -752,35 +905,78 @@ def run_dict(r: AutoproctorSyncRun) -> dict:
         "attempts_matched": r.attempts_matched, "attempts_failed": r.attempts_failed,
         "reminders_sent": r.reminders_sent, "candidates_dropped": r.candidates_dropped, "error": r.error,
         "attempts_skipped": r.attempts_skipped, "range_from": r.range_from, "range_to": r.range_to,
+        "candidates_advanced": r.candidates_advanced, "candidates_rejected": r.candidates_rejected,
     }
 
 
-async def linkable_assessments(db: AsyncSession, q: str) -> list[dict]:
-    """AutoProctor assessments HR can attach an unmatched attempt to —
-    searched by candidate name/email, newest first."""
+async def linkable_applications(db: AsyncSession, q: str) -> list[dict]:
+    """Candidates an unmatched attempt can be linked to — searched by name or
+    email across EVERY stage (a candidate may have sat the test before being
+    moved to Assessment, or under another email). Each row carries the
+    candidate's latest AutoProctor assessment if they have one; linking a
+    row without one creates it (link_attempt)."""
     like = f"%{q.strip()}%"
     rows = (await db.execute(
-        select(Assessment, Application, User, Job)
-        .join(Application, Application.id == Assessment.application_id)
+        select(Application, User, Job)
         .join(User, User.id == Application.applicant_id)
         .join(Job, Job.id == Application.job_id)
-        .where(is_autoproctor_link(), Assessment.status != "cancelled",
-               or_(User.full_name.ilike(like), User.email.ilike(like)))
-        .order_by(Assessment.created_at.desc()).limit(20)
+        .where(or_(User.full_name.ilike(like), User.email.ilike(like)))
+        .order_by(Application.applied_at.desc()).limit(25)
     )).all()
-    return [{
-        "assessment_id": str(a.id), "application_id": str(app.id), "title": a.title, "status": a.status,
-        "candidate_name": u.full_name, "candidate_email": u.email, "job_title": j.title,
-        "stage": app.stage, "scheduled_at": a.created_at,
-    } for a, app, u, j in rows]
+    app_ids = [app.id for app, _, _ in rows]
+    latest: dict = {}
+    if app_ids:
+        for a in (await db.execute(
+            select(Assessment).where(Assessment.application_id.in_(app_ids), Assessment.status != "cancelled",
+                                     is_autoproctor_link())
+            .order_by(Assessment.created_at.desc())
+        )).scalars().all():
+            latest.setdefault(a.application_id, a)
+    out = []
+    for app, u, j in rows:
+        a = latest.get(app.id)
+        out.append({
+            "application_id": str(app.id), "candidate_name": u.full_name, "candidate_email": u.email,
+            "job_title": j.title, "stage": app.stage,
+            "assessment_id": str(a.id) if a else None,
+            "assessment_title": a.title if a else None,
+            "assessment_status": a.status if a else None,
+        })
+    return out
 
 
-async def link_attempt(db: AsyncSession, attempt_id: uuid.UUID, assessment_id: Optional[uuid.UUID]) -> dict:
-    """Manually (re)link an attempt — or unlink it with assessment_id=None.
-    Undoes the completion the attempt had written on its previous assessment."""
+async def link_attempt(db: AsyncSession, attempt_id: uuid.UUID, assessment_id: Optional[uuid.UUID],
+                       application_id: Optional[uuid.UUID] = None, linked_by: Optional[uuid.UUID] = None) -> dict:
+    """Manually (re)link an attempt to an assessment, or to an application
+    that has no AutoProctor assessment yet (one is created for it, quietly —
+    no email, no stage move), or unlink it when both ids are None. Undoes the
+    completion the attempt had written on its previous assessment. Any result
+    decision (advance/reject) happens on the next sync, not here, so a wrong
+    link can still be fixed before it moves anyone."""
+    from app.services.autoproctor_scraper import BASE
+
     attempt = await db.get(AutoproctorAttempt, attempt_id)
     if not attempt:
         raise HTTPException(404, "Attempt not found")
+
+    if assessment_id is None and application_id is not None:
+        app = await db.get(Application, application_id)
+        if not app:
+            raise HTTPException(404, "Application not found")
+        existing = (await db.execute(
+            select(Assessment).where(Assessment.application_id == app.id, Assessment.status != "cancelled",
+                                     is_autoproctor_link())
+            .order_by(Assessment.created_at.desc()).limit(1)
+        )).scalar_one_or_none()
+        if existing is None:
+            existing = Assessment(
+                application_id=app.id, title=attempt.test_title, assessment_type="online_test",
+                platform_link=f"{BASE}/tests/{attempt.test_label}/instructions/",
+                status="pending", created_by=linked_by,
+            )
+            db.add(existing)
+            await db.flush()
+        assessment_id = existing.id
 
     if attempt.assessment_id and attempt.assessment_id != assessment_id:
         previous = await db.get(Assessment, attempt.assessment_id)
