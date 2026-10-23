@@ -204,6 +204,7 @@ async def list_applications(
     agency_id: Optional[uuid.UUID] = Query(None),
     campus_id: Optional[uuid.UUID] = Query(None),
     source: Optional[str] = Query(None),
+    job_status: Optional[str] = Query(None, description="Only applications whose job has this status, e.g. 'published'. Ignored when job_id is set."),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=500),
     current_user=Depends(get_current_user),
@@ -218,7 +219,7 @@ async def list_applications(
         raise HTTPException(403, "Not authorized")
     return await application_service.get_all_applications(
         db, job_id=job_id, stage=stage, search=search, agency_id=agency_id, campus_id=campus_id,
-        source=source, page=page, limit=limit, current_user=current_user,
+        source=source, job_status=job_status, page=page, limit=limit, current_user=current_user,
     )
 
 

@@ -75,6 +75,7 @@ class JDPdfParseResponse(BaseModel):
 
 class JobCreate(BaseModel):
     title: str
+    internal_title: Optional[str] = None
     department_id: Optional[uuid.UUID] = None
     location: Optional[str] = None
     location_type: Optional[str] = None
@@ -103,6 +104,7 @@ class JobCreate(BaseModel):
 
 class JobUpdate(BaseModel):
     title: Optional[str] = None
+    internal_title: Optional[str] = None
     department_id: Optional[uuid.UUID] = None
     location: Optional[str] = None
     location_type: Optional[str] = None
@@ -138,6 +140,8 @@ class JobResponse(BaseModel):
 
     id: uuid.UUID
     title: str
+    # HR-only — blanked on every public/referral response (see routers/jobs.py).
+    internal_title: Optional[str] = None
     slug: str
     department_id: Optional[uuid.UUID] = None
     location: Optional[str] = None

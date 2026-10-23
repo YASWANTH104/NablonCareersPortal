@@ -147,7 +147,10 @@ async def _send_stage_update_email_async(application_id: str, new_stage: str, fr
     # (tr1/tr2/final_tr/hr) — always sent then, regardless of which reason category HR
     # picked. Applied/screening/assessment/offer rejections always get the
     # generic version, with no feedback content.
-    show_feedback = from_stage in FEEDBACK_ELIGIBLE_STAGES
+    # On hold: every rejection gets the generic template for now — no AI
+    # feedback, no HR note. Restore the line below to bring feedback back.
+    # show_feedback = from_stage in FEEDBACK_ELIGIBLE_STAGES
+    show_feedback = False
 
     async with _task_session() as db:
         row = (await db.execute(
@@ -228,7 +231,10 @@ async def _send_stage_update_email_async(application_id: str, new_stage: str, fr
             last_interview = interview
 
         # Self-feedback URL — only if last interview and candidate hasn't submitted yet
-        if last_interview:
+        # On hold along with show_feedback above: the generic template goes out
+        # without the "Share Your Experience" block. Change `if False and` back
+        # to `if` to restore.
+        if False and last_interview:
             already_submitted = (await db.execute(
                 select(CandidateInterviewSelfFeedback)
                 .where(CandidateInterviewSelfFeedback.interview_id == last_interview.id)

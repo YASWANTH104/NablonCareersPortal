@@ -894,7 +894,7 @@ async def list_my_interviews(
 
     offset = (page - 1) * limit
     rows = (await db.execute(
-        base.order_by(Interview.scheduled_at.asc()).offset(offset).limit(limit)
+        base.order_by(Interview.scheduled_at.desc()).offset(offset).limit(limit)
     )).all()
 
     if not rows:
@@ -1041,7 +1041,7 @@ async def list_interviews(
 
     offset = (page - 1) * limit
     rows = (await db.execute(
-        base.order_by(Interview.scheduled_at.asc()).offset(offset).limit(limit)
+        base.order_by(Interview.scheduled_at.desc()).offset(offset).limit(limit)
     )).all()
 
     if not rows:

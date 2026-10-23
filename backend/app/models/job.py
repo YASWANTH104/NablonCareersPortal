@@ -20,7 +20,11 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # title is the external, candidate-facing title (job board, emails).
+    # internal_title is HR's own name for the req — never exposed publicly;
+    # HR screens fall back to title when it's NULL.
     title: Mapped[str] = mapped_column(String(255), nullable=False)
+    internal_title: Mapped[str | None] = mapped_column(String(255))
     slug: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     department_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("departments.id"))
     location: Mapped[str | None] = mapped_column(String(255))

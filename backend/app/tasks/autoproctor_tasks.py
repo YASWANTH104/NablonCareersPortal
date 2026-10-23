@@ -19,12 +19,13 @@ def _task_session():
 def sync_autoproctor_results(trigger: str = "schedule", date_from: str | None = None, date_to: str | None = None,
                              run_id: str | None = None):
     """Nightly 00:00 IST: import new AutoProctor attempts, mark matching
-    assessments completed, then send 3-day reminders and run the 7-day
-    auto-drop. See autoproctor_service for the guards on the drop.
+    assessments completed, act on graded results (advance / reject), then
+    run the 30-day auto-drop. Reminders are a separate 10:00 IST task. See
+    autoproctor_service for the guards.
 
     HR's manual range scrape queues this with trigger="manual", ISO
     date_from/date_to (IST days, inclusive) and the id of the "queued" run
-    row its click created — import only, no follow-ups."""
+    row its click created — it imports and acts on results, but never drops."""
     import uuid
     from datetime import date
     from app.config import settings
