@@ -21,7 +21,8 @@ const toOptionalInt = (v) => (v === '' || v === null || v === undefined ? undefi
 const toOptionalNum = (v) => (v === '' || v === null || v === undefined ? undefined : parseFloat(v));
 
 const schema = z.object({
-  title: z.string().min(1, 'Title is required'),
+  title: z.string().trim().min(1, 'External job title is required'),
+  internal_title: z.string().trim().min(1, 'Internal job title is required'),
   department_id: z.string().optional(),
   location: z.string().optional(),
   location_type: z.string().optional(),
@@ -127,6 +128,7 @@ export default function JobEditPage() {
     resolver: zodResolver(schema),
     defaultValues: {
       title: '',
+      internal_title: '',
       department_id: '',
       location: '',
       location_type: '',
@@ -162,6 +164,8 @@ export default function JobEditPage() {
         : '';
       reset({
         title: existing.title ?? '',
+        // Jobs created before internal titles existed start from the external one.
+        internal_title: existing.internal_title || existing.title || '',
         department_id: existing.department_id ?? '',
         location: existing.location ?? '',
         location_type: existing.location_type ?? '',
@@ -392,10 +396,20 @@ export default function JobEditPage() {
 
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
-              <FieldLabel required>Job title</FieldLabel>
+              <FieldLabel required>External job title</FieldLabel>
               <Input {...register('title')} placeholder="e.g. Senior ML Engineer" />
+              <p className="mt-1 text-xs text-gray-400">Shown to candidates on the careers site and in emails.</p>
               <ErrorMsg message={errors.title?.message} />
             </div>
+            <div>
+              <FieldLabel required>Internal job title</FieldLabel>
+              <Input {...register('internal_title')} placeholder="e.g. ML Engineer L3 – Client X" />
+              <p className="mt-1 text-xs text-gray-400">Only visible to the internal team.</p>
+              <ErrorMsg message={errors.internal_title?.message} />
+            </div>
+          </div>
+
+          <div className="grid sm:grid-cols-2 gap-4">
             <div>
               <FieldLabel>Department</FieldLabel>
               <Select {...register('department_id')}>
@@ -405,9 +419,6 @@ export default function JobEditPage() {
                 ))}
               </Select>
             </div>
-          </div>
-
-          <div className="grid sm:grid-cols-2 gap-4">
             <div>
               <FieldLabel>Hiring manager</FieldLabel>
               <Select {...register('hiring_manager_id')}>

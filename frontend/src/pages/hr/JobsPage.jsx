@@ -250,8 +250,11 @@ export default function HRJobsPage() {
                       onClick={() => navigate(`/hr/jobs/${job.id}/edit`)}
                       className="font-medium text-gray-900 hover:text-brand-600 text-left"
                     >
-                      {job.title}
+                      {job.internal_title || job.title}
                     </button>
+                    {job.internal_title && job.internal_title !== job.title && (
+                      <p className="text-xs text-gray-500 mt-0.5">Posted as: {job.title}</p>
+                    )}
                     {job.location && (
                       <p className="text-xs text-gray-400 mt-0.5">{job.location}</p>
                     )}

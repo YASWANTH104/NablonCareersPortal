@@ -161,6 +161,7 @@ async def get_job(
         resp = JobResponse(**await job_service.get_job_with_names(db, job))
     else:
         resp = JobResponse.model_validate(job)
+        resp.internal_title = None
     if resp.jd_pdf_url:
         resp.jd_pdf_url = storage_service.refresh_url(resp.jd_pdf_url)
     return resp

@@ -773,6 +773,7 @@ async def get_all_applications(
     agency_id: Optional[uuid.UUID] = None,
     campus_id: Optional[uuid.UUID] = None,
     source: Optional[str] = None,
+    job_status: Optional[str] = None,
     page: int = 1,
     limit: int = 20,
     current_user=None,
@@ -781,6 +782,7 @@ async def get_all_applications(
     from app.models.agency import Agency
     from app.models.campus import Campus
     from app.models.screening import ScreeningResponse
+    from app.models.job import Job
     from app.services import job_service
     from sqlalchemy.orm import aliased
 
@@ -831,6 +833,10 @@ async def get_all_applications(
 
     if job_id:
         filters.append(Application.job_id == job_id)
+    elif job_status:
+        # ApplicantsPage's "Active jobs" scope. A subquery rather than a join so
+        # count_stmt below, which doesn't join jobs, filters the same way.
+        filters.append(Application.job_id.in_(select(Job.id).where(Job.status == job_status)))
     if stage:
         filters.append(Application.stage == stage)
     if search:
@@ -1153,14 +1159,18 @@ async def move_stage(
         except Exception:
             pass
 
-    if new_stage == "offer":
-        try:
-            from app.services.document_service import get_or_create_request
-            await get_or_create_request(db, application_id)
-            from app.tasks.email_tasks import send_document_request_email_task
-            send_document_request_email_task.delay(str(application_id))
-        except Exception:
-            pass
+    # On hold: moving to "offer" no longer auto-creates the DocumentRequest or
+    # emails the candidate for documents. HR can still send it by hand from the
+    # application's Documents section (document_service.send_document_request_email).
+    # Uncomment to restore the automatic trigger.
+    # if new_stage == "offer":
+    #     try:
+    #         from app.services.document_service import get_or_create_request
+    #         await get_or_create_request(db, application_id)
+    #         from app.tasks.email_tasks import send_document_request_email_task
+    #         send_document_request_email_task.delay(str(application_id))
+    #     except Exception:
+    #         pass
 
     return app
 

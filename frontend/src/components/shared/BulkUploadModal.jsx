@@ -7,6 +7,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { applicationsApi } from '@/api/applications';
+import { jobInternalLabel } from '@/constants/jobOptions';
 
 const SOURCE_OPTIONS = [
   { value: 'talent_acquisition', label: 'Talent Acquisition' },
@@ -135,7 +136,7 @@ function ResumesTab({ jobs, onDone }) {
           </label>
           <select value={jobId} onChange={(e) => setJobId(e.target.value)} className={selectCls}>
             <option value="">Select a job…</option>
-            {jobs?.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}
+            {jobs?.map((job) => <option key={job.id} value={job.id}>{jobInternalLabel(job)}</option>)}
           </select>
         </div>
         <div>
@@ -272,7 +273,7 @@ function ExcelTab({ jobs, onDone }) {
           </label>
           <select value={jobId} onChange={(e) => setJobId(e.target.value)} className={selectCls}>
             <option value="">Select a job…</option>
-            {jobs?.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}
+            {jobs?.map((job) => <option key={job.id} value={job.id}>{jobInternalLabel(job)}</option>)}
           </select>
         </div>
         <div>

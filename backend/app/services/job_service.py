@@ -87,7 +87,11 @@ async def list_jobs_public(
         )
     ).scalars().all()
 
-    return {"items": list(rows), "total": total, "page": page, "limit": limit, "pages": max(1, -(-total // limit))}
+    # internal_title is HR's own name for the req — strip it before it reaches
+    # the public board or the referral listing.
+    items = [{**{c.name: getattr(j, c.name) for c in Job.__table__.columns}, "internal_title": None} for j in rows]
+
+    return {"items": items, "total": total, "page": page, "limit": limit, "pages": max(1, -(-total // limit))}
 
 
 async def list_jobs_hr(
@@ -102,7 +106,7 @@ async def list_jobs_hr(
     if status:
         filters.append(Job.status == status)
     if search:
-        filters.append(Job.title.ilike(f"%{search}%"))
+        filters.append(or_(Job.title.ilike(f"%{search}%"), Job.internal_title.ilike(f"%{search}%")))
 
     condition = and_(*filters) if filters else True
     total = (await db.execute(select(func.count()).select_from(Job).where(condition))).scalar_one()
@@ -136,7 +140,7 @@ async def hiring_manager_job_ids(db: AsyncSession, user_id: uuid.UUID) -> list[u
 
 
 async def list_accessible_jobs_for_applicant_view(db: AsyncSession, current_user) -> list[dict]:
-    """Minimal {id, title} list of jobs current_user can see applications for
+    """Minimal {id, title, internal_title, status} list of jobs current_user can see applications for
     on ApplicantsPage — mirrors exactly the scoping rule in
     application_service.get_all_applications: HR sees every job; a hiring
     manager sees their own jobs. Deliberately does NOT include jobs a plain
@@ -149,17 +153,19 @@ async def list_accessible_jobs_for_applicant_view(db: AsyncSession, current_user
     has nothing to do with hiring_manager_id."""
     hr_roles = {"hr_manager", "admin", "super_admin"}
     if current_user.role in hr_roles:
-        rows = (await db.execute(select(Job.id, Job.title).order_by(Job.title))).all()
-        return [{"id": jid, "title": title} for jid, title in rows]
+        rows = (await db.execute(
+            select(Job.id, Job.title, Job.internal_title, Job.status).order_by(Job.title)
+        )).all()
+        return [{"id": jid, "title": title, "internal_title": it, "status": st} for jid, title, it, st in rows]
 
     job_ids = set(await hiring_manager_job_ids(db, current_user.id))
     if not job_ids:
         return []
 
     rows = (await db.execute(
-        select(Job.id, Job.title).where(Job.id.in_(job_ids)).order_by(Job.title)
+        select(Job.id, Job.title, Job.internal_title, Job.status).where(Job.id.in_(job_ids)).order_by(Job.title)
     )).all()
-    return [{"id": jid, "title": title} for jid, title in rows]
+    return [{"id": jid, "title": title, "internal_title": it, "status": st} for jid, title, it, st in rows]
 
 
 async def get_job_by_slug(db: AsyncSession, slug: str) -> Optional[Job]:
@@ -209,6 +215,7 @@ async def duplicate_job(db: AsyncSession, job_id: uuid.UUID, posted_by: uuid.UUI
 
     clone = Job(
         title=source.title,
+        internal_title=source.internal_title,
         slug=generate_slug(source.title),
         department_id=source.department_id,
         location=None,

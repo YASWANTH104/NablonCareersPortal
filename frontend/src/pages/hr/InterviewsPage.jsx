@@ -84,7 +84,8 @@ function groupByDate(interviews) {
     if (!groups[key]) groups[key] = [];
     groups[key].push(interview);
   });
-  return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
+  // Newest day first; within a day the API's scheduled_at desc order holds.
+  return Object.entries(groups).sort(([a], [b]) => b.localeCompare(a));
 }
 
 function SegmentedControl({ options, value, onChange }) {
@@ -191,7 +192,10 @@ export default function InterviewsPage() {
   );
 
   const selectedDayInterviews = useMemo(
-    () => interviews.filter((iv) => isSameDay(toIST(iv.scheduled_at), selectedDay)),
+    // A single day's agenda still reads earliest-first, unlike the list view.
+    () => interviews
+      .filter((iv) => isSameDay(toIST(iv.scheduled_at), selectedDay))
+      .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at)),
     [interviews, selectedDay],
   );
 

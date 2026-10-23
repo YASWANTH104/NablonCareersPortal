@@ -36,3 +36,9 @@ export function formatSalaryLakhs(job) {
   const max = job.salary_max ? (job.salary_max / 100000).toFixed(1) : null;
   return `${job.salary_currency ?? 'INR'} ${min}L${max ? ` – ${max}L` : '+'}`;
 }
+
+// HR-facing label for a job: the internal req name when one is set, else the
+// external (candidate-facing) title. Never use this on public/candidate pages.
+export function jobInternalLabel(job) {
+  return job?.internal_title || job?.title || '';
+}

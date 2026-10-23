@@ -20,6 +20,7 @@ import StageReasonDialog from '@/components/shared/StageReasonDialog';
 import HoldReasonDialog from '@/components/shared/HoldReasonDialog';
 import { useHoldToggle } from '@/hooks/useHoldToggle';
 import { PIPELINE_STAGES, STAGE_MAP, REASON_REQUIRED_STAGES } from '@/constants/pipelineStages';
+import { jobInternalLabel } from '@/constants/jobOptions';
 import { useAuthStore } from '@/store/authStore';
 import { HR_ROLES } from '@/utils/permissions';
 import { describeApplicationSource } from '@/utils/formatters';
@@ -583,7 +584,7 @@ function AddCandidateModal({ jobs, onClose }) {
                 <select value={jobId} onChange={(e) => setJobId(e.target.value)} className={selectCls}>
                   <option value="">Select a job…</option>
                   {jobs?.map((job) => (
-                    <option key={job.id} value={job.id}>{job.title}</option>
+                    <option key={job.id} value={job.id}>{jobInternalLabel(job)}</option>
                   ))}
                 </select>
               </div>
@@ -634,6 +635,8 @@ export default function ApplicantsPage() {
 
   const view = searchParams.get('view') || 'kanban';
   const selectedJobId = searchParams.get('jobId') || '';
+  // First step of the job filter: "active" (published only, the default) or "all".
+  const jobScope = searchParams.get('jobScope') === 'all' ? 'all' : 'active';
   const stageFilter = searchParams.get('stage') || '';
   const agencyFilter = searchParams.get('agencyId') || '';
   const campusFilter = searchParams.get('campusId') || '';
@@ -707,17 +710,29 @@ export default function ApplicantsPage() {
         : jobsApi.myApplicantAccess().then((r) => r.data),
   });
 
+  // Paused/closed/draft jobs drop out under "Active jobs". A job already
+  // selected (e.g. linked in from the Jobs page) stays listed so the
+  // dropdown never shows a value it has no option for.
+  const jobOptions = useMemo(
+    () => (jobScope === 'all'
+      ? jobsData
+      : jobsData?.filter((j) => j.status === 'published' || j.id === selectedJobId)),
+    [jobsData, jobScope, selectedJobId],
+  );
+
   // Kanban's columns each fetch their own stage independently (see KanbanColumn) —
   // this is only the shared filter shape they key off, plus the Table view's query.
   const filters = {
     job_id: selectedJobId || undefined,
+    // A picked job wins; otherwise "Active jobs" scopes applicants to published jobs.
+    job_status: !selectedJobId && jobScope === 'active' ? 'published' : undefined,
     agency_id: agencyFilter || undefined,
     campus_id: campusFilter || undefined,
     source: sourceFilter || undefined,
     search: search || undefined,
   };
 
-  const queryParams = { jobId: selectedJobId, stage: stageFilter, agencyId: agencyFilter, campusId: campusFilter, source: sourceFilter, search, page };
+  const queryParams = { jobId: selectedJobId, jobScope, stage: stageFilter, agencyId: agencyFilter, campusId: campusFilter, source: sourceFilter, search, page };
   const queryKey = ['hr-applications', queryParams];
 
   const { data, isLoading } = useQuery({
@@ -805,15 +820,26 @@ export default function ApplicantsPage() {
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3 mb-6">
-        {/* Job selector */}
+        {/* Job scope → job selector */}
+        <select
+          value={jobScope}
+          onChange={(e) => setFilter('jobScope', e.target.value === 'all' ? 'all' : '')}
+          aria-label="Job status"
+          className="text-sm border border-surface-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 max-w-full min-w-0 flex-1 sm:flex-none"
+        >
+          <option value="active">Active jobs</option>
+          <option value="all">All jobs (incl. paused/closed)</option>
+        </select>
         <select
           value={selectedJobId}
           onChange={(e) => setFilter('jobId', e.target.value)}
           className="text-sm border border-surface-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 max-w-full min-w-0 flex-1 sm:flex-none"
         >
-          <option value="">All jobs</option>
-          {jobsData?.map((job) => (
-            <option key={job.id} value={job.id}>{job.title}</option>
+          <option value="">{jobScope === 'all' ? 'All jobs' : 'All active jobs'}</option>
+          {jobOptions?.map((job) => (
+            <option key={job.id} value={job.id}>
+              {jobInternalLabel(job)}{job.status && job.status !== 'published' ? ` (${job.status})` : ''}
+            </option>
           ))}
         </select>
 
