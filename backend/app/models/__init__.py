@@ -15,6 +15,7 @@ from app.models.interview_slot import InterviewSlot
 from app.models.screening import ScreeningResponse
 from app.models.action_snooze import ActionSnooze
 from app.models.autoproctor import AutoproctorAttempt, AutoproctorSyncRun
+from app.models.scheduled_report import ScheduledReportSettings
 
 __all__ = [
     "User",
@@ -33,4 +34,5 @@ __all__ = [
     "ScreeningResponse",
     "ActionSnooze",
     "AutoproctorAttempt", "AutoproctorSyncRun",
+    "ScheduledReportSettings",
 ]

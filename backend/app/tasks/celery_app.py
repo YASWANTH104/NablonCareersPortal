@@ -8,7 +8,7 @@ celery_app = Celery(
     "nablon_careers",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=["app.tasks.email_tasks", "app.tasks.pdf_tasks", "app.tasks.interview_tasks", "app.tasks.calendar_tasks", "app.tasks.referral_tasks", "app.tasks.screening_tasks", "app.tasks.action_center_tasks", "app.tasks.autoproctor_tasks"],
+    include=["app.tasks.email_tasks", "app.tasks.pdf_tasks", "app.tasks.interview_tasks", "app.tasks.calendar_tasks", "app.tasks.referral_tasks", "app.tasks.screening_tasks", "app.tasks.action_center_tasks", "app.tasks.autoproctor_tasks", "app.tasks.scheduled_report_tasks"],
 )
 
 conf = dict(
@@ -53,6 +53,16 @@ conf = dict(
             "task": "sync_autoproctor_results",
             # 18:30 UTC = 00:00 IST, every day (attempts and drop deadlines don't stop at weekends).
             "schedule": crontab(hour=18, minute=30),
+        },
+        "send-weekly-hiring-report": {
+            "task": "send_weekly_hiring_report",
+            # 12:30 UTC = 18:00 IST, Friday. SEND_HOUR_IST in scheduled_report_service must match.
+            "schedule": crontab(hour=12, minute=30, day_of_week="fri"),
+        },
+        "send-monthly-hiring-report": {
+            "task": "send_monthly_hiring_report",
+            # 18:00 IST on days 28–31; the task itself only sends on the month's last day.
+            "schedule": crontab(hour=12, minute=30, day_of_month="28-31"),
         },
     },
 )

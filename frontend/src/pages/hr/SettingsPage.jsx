@@ -7,12 +7,13 @@ import { format } from 'date-fns';
 import {
   Building2, Users, Plus, Trash2, Pencil, Check, X, UserPlus, Loader2, Search,
   UserCog, ShieldCheck, KeyRound, Mail, BadgeCheck, AlertCircle, Info, Clock,
-  MailWarning, CircleSlash, ArrowRight, Save,
+  MailWarning, CircleSlash, ArrowRight, Save, CalendarClock, Send,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { jobsApi } from '@/api/jobs';
 import { usersApi } from '@/api/users';
 import { authApi } from '@/api/auth';
+import { scheduledReportsApi } from '@/api/scheduledReports';
 import { useAuthStore } from '@/store/authStore';
 import { ROLES, ADMIN_ROLES } from '@/utils/permissions';
 import { useDebounced } from '@/hooks/useDebounced';
@@ -24,6 +25,7 @@ const SECTIONS = [
   { key: 'account', label: 'My account', icon: UserCog, blurb: 'Your details and sign-in' },
   { key: 'departments', label: 'Departments', icon: Building2, blurb: 'Used across jobs and reports' },
   { key: 'team', label: 'Team access', icon: Users, blurb: 'Who can use this console' },
+  { key: 'reports', label: 'Scheduled reports', icon: CalendarClock, blurb: 'Weekly and monthly hiring emails' },
 ];
 
 const ROLE_LABELS = {
@@ -1147,6 +1149,271 @@ function TeamSection() {
   );
 }
 
+// ── Scheduled reports ─────────────────────────────────────────────────────────
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MAX_REPORT_RECIPIENTS = 25;
+
+const REPORT_CADENCES = [
+  {
+    kind: 'weekly',
+    field: 'weekly_enabled',
+    title: 'Weekly hiring report',
+    when: 'Every Friday, 6:00 PM IST',
+    covers: 'Saturday to Friday: interviews by day, hires by recruiter/partner, panel load, open positions, AI insights.',
+  },
+  {
+    kind: 'monthly',
+    field: 'monthly_enabled',
+    title: 'Monthly hiring summary',
+    when: 'Last day of each month, 6:00 PM IST',
+    covers: 'The same metrics for the month, by week, compared with the same point last month.',
+  },
+];
+
+function Toggle({ checked, onChange, disabled, label }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        'relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
+        checked ? 'bg-brand-500' : 'bg-surface-300'
+      )}
+    >
+      <span
+        className={cn(
+          'absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform',
+          checked && 'translate-x-5'
+        )}
+      />
+    </button>
+  );
+}
+
+function ScheduledReportsSection() {
+  const qc = useQueryClient();
+  const { user: currentUser } = useAuthStore();
+  // PUT is ADMIN/SUPER_ADMIN on the backend; HR managers can read the list
+  // and send themselves a preview.
+  const canManage = ADMIN_ROLES.includes(currentUser?.role);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['scheduled-report-settings'],
+    queryFn: () => scheduledReportsApi.getSettings().then((r) => r.data),
+  });
+
+  const [draft, setDraft] = useState(null);
+  const [emailInput, setEmailInput] = useState('');
+  const [emailError, setEmailError] = useState('');
+
+  useEffect(() => {
+    if (data) {
+      setDraft({
+        recipients: data.recipients,
+        weekly_enabled: data.weekly_enabled,
+        monthly_enabled: data.monthly_enabled,
+      });
+    }
+  }, [data]);
+
+  const dirty = useMemo(() => {
+    if (!data || !draft) return false;
+    return (
+      draft.weekly_enabled !== data.weekly_enabled ||
+      draft.monthly_enabled !== data.monthly_enabled ||
+      draft.recipients.join(',') !== data.recipients.join(',')
+    );
+  }, [data, draft]);
+
+  const saveMut = useMutation({
+    mutationFn: (payload) => scheduledReportsApi.updateSettings(payload).then((r) => r.data),
+    onSuccess: (saved) => {
+      toast.success('Scheduled reports saved');
+      qc.setQueryData(['scheduled-report-settings'], saved);
+    },
+    onError: (err) => toast.error(err.response?.data?.detail?.[0]?.msg ?? err.response?.data?.detail ?? 'Could not save'),
+  });
+
+  const previewMut = useMutation({
+    mutationFn: (kind) => scheduledReportsApi.sendPreview(kind).then((r) => r.data),
+    onSuccess: (res) => toast.success(`Preview on its way to ${res.to}. It can take a minute.`),
+    onError: (err) => toast.error(err.response?.data?.detail ?? 'Could not send the preview'),
+  });
+
+  const addEmails = () => {
+    // Accept a pasted comma/semicolon/space-separated list as well as one address.
+    const parts = emailInput.split(/[\s,;]+/).map((e) => e.trim().toLowerCase()).filter(Boolean);
+    if (!parts.length) return;
+    const bad = parts.filter((e) => !EMAIL_RE.test(e));
+    if (bad.length) {
+      setEmailError(`Not a valid email: ${bad.join(', ')}`);
+      return;
+    }
+    const next = [...draft.recipients];
+    parts.forEach((e) => { if (!next.includes(e)) next.push(e); });
+    if (next.length > MAX_REPORT_RECIPIENTS) {
+      setEmailError(`At most ${MAX_REPORT_RECIPIENTS} recipients`);
+      return;
+    }
+    setDraft({ ...draft, recipients: next });
+    setEmailInput('');
+    setEmailError('');
+  };
+
+  if (isLoading || !draft) {
+    return (
+      <Card title="Scheduled reports" description="Loading…" icon={CalendarClock}>
+        <div className="h-24 bg-surface-50 rounded-xl animate-pulse" />
+      </Card>
+    );
+  }
+
+  const noRecipients = draft.recipients.length === 0;
+
+  return (
+    <div className="space-y-4">
+      <Card
+        title="Recipients"
+        description="One shared list for both reports. Anyone can be on it, with or without a portal account."
+        icon={Mail}
+      >
+        {canManage && (
+          <div className="mb-3">
+            <div className="flex items-start gap-2">
+              <input
+                value={emailInput}
+                onChange={(e) => { setEmailInput(e.target.value); setEmailError(''); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addEmails(); } }}
+                placeholder="name@nablon.ai, or paste several"
+                className={cn(inputClass, 'flex-1 min-w-0')}
+                aria-label="Add recipient email"
+              />
+              <button
+                type="button"
+                onClick={addEmails}
+                className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2.5 border border-surface-300 text-gray-700 text-sm font-semibold rounded-lg hover:bg-surface-50 transition-colors"
+              >
+                <Plus className="w-4 h-4" /> Add
+              </button>
+            </div>
+            {emailError && (
+              <p className="flex items-center gap-1 text-[11px] text-rose-600 mt-1">
+                <AlertCircle className="w-3 h-3 shrink-0" /> {emailError}
+              </p>
+            )}
+          </div>
+        )}
+
+        {noRecipients ? (
+          <Notice tone="warn" icon={MailWarning}>
+            No recipients yet, so nothing will be sent.{canManage ? ' Add at least one address above.' : ''}
+          </Notice>
+        ) : (
+          <ul className="flex flex-wrap gap-2">
+            {draft.recipients.map((email) => (
+              <li
+                key={email}
+                className="inline-flex items-center gap-1.5 pl-3 pr-1.5 py-1 rounded-full bg-surface-100 border border-surface-200 text-xs text-gray-700 max-w-full"
+              >
+                <span className="truncate">{email}</span>
+                {canManage && (
+                  <button
+                    type="button"
+                    onClick={() => setDraft({ ...draft, recipients: draft.recipients.filter((e) => e !== email) })}
+                    aria-label={`Remove ${email}`}
+                    className="p-0.5 rounded-full text-gray-400 hover:text-rose-600 hover:bg-white"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      <Card title="Schedule" description="Sent from noreply@nablon.ai. Times are IST." icon={CalendarClock} bodyClassName="p-0 sm:p-0">
+        <div className="divide-y divide-surface-100">
+          {REPORT_CADENCES.map((c) => {
+            const lastSent = data[`last_${c.kind}_sent_on`];
+            const nextAt = data.next_send?.[c.kind];
+            return (
+              <div key={c.kind} className="px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:items-start gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-semibold text-gray-900">{c.title}</h3>
+                    <span className="text-[11px] text-gray-500 bg-surface-100 rounded-full px-2 py-0.5 whitespace-nowrap">{c.when}</span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">{c.covers}</p>
+                  <p className="text-[11px] text-gray-400 mt-1.5 flex flex-wrap gap-x-3">
+                    {draft[c.field] && nextAt && !noRecipients && (
+                      <span className="inline-flex items-center gap-1">
+                        <Clock className="w-3 h-3" /> Next: {new Date(nextAt).toLocaleString('en-IN', {
+                          timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
+                        })} IST
+                      </span>
+                    )}
+                    {lastSent && <span>Last sent: {format(new Date(`${lastSent}T00:00:00`), 'd MMM yyyy')}</span>}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => previewMut.mutate(c.kind)}
+                    disabled={previewMut.isPending}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-600 hover:text-brand-700 disabled:opacity-50"
+                  >
+                    {previewMut.isPending && previewMut.variables === c.kind
+                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      : <Send className="w-3.5 h-3.5" />}
+                    Send preview to me
+                  </button>
+                  <Toggle
+                    checked={draft[c.field]}
+                    disabled={!canManage}
+                    label={`${c.title} ${draft[c.field] ? 'on' : 'off'}`}
+                    onChange={(v) => setDraft({ ...draft, [c.field]: v })}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      {canManage ? (
+        <div className="flex items-center justify-end gap-2">
+          {dirty && (
+            <button
+              type="button"
+              onClick={() => setDraft({ recipients: data.recipients, weekly_enabled: data.weekly_enabled, monthly_enabled: data.monthly_enabled })}
+              className="px-4 py-2.5 text-sm font-semibold text-gray-600 hover:text-gray-900"
+            >
+              Discard
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={!dirty || saveMut.isPending}
+            onClick={() => saveMut.mutate(draft)}
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-brand-500 text-white text-sm font-semibold rounded-lg hover:bg-brand-600 disabled:opacity-50 transition-colors"
+          >
+            {saveMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            Save changes
+          </button>
+        </div>
+      ) : (
+        <Notice>Only admins can change recipients or turn reports on and off. You can still send yourself a preview.</Notice>
+      )}
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
@@ -1156,7 +1423,7 @@ export default function SettingsPage() {
     <div className="max-w-[1200px]">
       <PageHeader
         title="Settings"
-        description="Your account, the departments jobs are filed under, and who can use this console."
+        description="Your account, the departments jobs are filed under, who can use this console, and scheduled report emails."
       />
 
       <div className="grid lg:grid-cols-[232px_1fr] gap-4 lg:gap-6 items-start">
@@ -1195,6 +1462,7 @@ export default function SettingsPage() {
           {section === 'account' && <AccountSection />}
           {section === 'departments' && <DepartmentsSection />}
           {section === 'team' && <TeamSection />}
+          {section === 'reports' && <ScheduledReportsSection />}
         </div>
       </div>
     </div>
