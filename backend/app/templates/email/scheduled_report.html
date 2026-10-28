@@ -1,0 +1,400 @@
+{#- Weekly / monthly hiring summary. Standalone rather than extending base.html:
+    it needs a wider canvas and its own header, and base.html is shared by every
+    transactional email. Email-client rules: tables for layout, inline styles,
+    solid bgcolor behind every gradient (Outlook drops gradients and radii and
+    still reads correctly). Series colours: internal #0238DD, partner #EB6834 —
+    validated as a CVD-safe pair; always shown with a text label too. -#}
+{%- set is_weekly = kind == 'weekly' -%}
+{%- set ink = '#0B1220' -%}
+{%- set ink2 = '#475467' -%}
+{%- set muted = '#98A2B3' -%}
+{%- set line = '#E4E8F1' -%}
+{%- set blue = '#0238DD' -%}
+{%- set orange = '#EB6834' -%}
+{%- set font = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" -%}
+{%- set period_noun = 'week' if is_weekly else 'month' -%}
+
+{%- macro initials(name) -%}
+  {%- set p = (name or '?').split() -%}
+  {{- (p[0][0] ~ (p[-1][0] if p|length > 1 else ''))|upper -}}
+{%- endmacro -%}
+
+{%- macro avatar(name, bg, fg, size=32) -%}
+<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:separate;"><tr>
+  <td width="{{ size }}" height="{{ size }}" align="center" valign="middle" bgcolor="{{ bg }}"
+      style="width:{{ size }}px; height:{{ size }}px; border-radius:{{ size // 2 }}px; background:{{ bg }}; color:{{ fg }}; font-family:{{ font }}; font-size:{{ 11 if size < 30 else 12 }}px; font-weight:700; line-height:{{ size }}px; text-align:center;">{{ initials(name) }}</td>
+</tr></table>
+{%- endmacro -%}
+
+{%- macro delta_chip(d) -%}
+  {%- if d.dir == 'up' -%}
+    <span style="display:inline-block; padding:3px 8px; border-radius:999px; background:#E7F6EE; color:#067647; font-size:12px; font-weight:700;">&#9650; {{ d.text|replace('+', '') }}</span>
+  {%- elif d.dir == 'down' -%}
+    <span style="display:inline-block; padding:3px 8px; border-radius:999px; background:#FDECEC; color:#B42318; font-size:12px; font-weight:700;">&#9660; {{ d.text|replace('-', '') }}</span>
+  {%- else -%}
+    <span style="display:inline-block; padding:3px 8px; border-radius:999px; background:#F2F4F7; color:#475467; font-size:12px; font-weight:700;">{{ d.text }}</span>
+  {%- endif -%}
+{%- endmacro -%}
+
+{%- macro chip(text, bg='#F2F4F7', fg='#344054') -%}
+<span style="display:inline-block; margin:0 4px 4px 0; padding:3px 9px; border-radius:999px; background:{{ bg }}; color:{{ fg }}; font-size:12px; font-weight:600; white-space:nowrap;">{{ text }}</span>
+{%- endmacro -%}
+
+{%- macro bar(pct, color, track='#EEF1F6', height=8) -%}
+{%- set pct = [[pct, 0]|max, 100]|min -%}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;"><tr>
+  {%- if pct > 0 %}<td width="{{ pct }}%" height="{{ height }}" bgcolor="{{ color }}" style="width:{{ pct }}%; height:{{ height }}px; background:{{ color }}; border-radius:{{ height // 2 }}px; font-size:0; line-height:0;">&nbsp;</td>{% endif -%}
+  {%- if pct < 100 %}<td height="{{ height }}" bgcolor="{{ track }}" style="height:{{ height }}px; background:{{ track }}; border-radius:{{ height // 2 }}px; font-size:0; line-height:0;">&nbsp;</td>{% endif -%}
+</tr></table>
+{%- endmacro -%}
+
+{%- macro section_head(num, eyebrow, title, figure=None, figure_label=None) -%}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+  <td valign="bottom">
+    <div style="font-size:11px; font-weight:700; letter-spacing:1.6px; text-transform:uppercase; color:{{ blue }};">{{ num }} &nbsp;·&nbsp; {{ eyebrow }}</div>
+    <div style="font-size:19px; font-weight:700; color:{{ ink }}; padding-top:4px; letter-spacing:-0.2px;">{{ title }}</div>
+  </td>
+  {%- if figure is not none %}
+  <td valign="bottom" align="right" style="white-space:nowrap; padding-left:12px;">
+    <div style="font-size:30px; font-weight:800; color:{{ ink }}; line-height:1; letter-spacing:-0.5px;">{{ figure }}</div>
+    <div style="font-size:12px; color:{{ muted }}; padding-top:4px;">{{ figure_label }}</div>
+  </td>
+  {%- endif %}
+</tr></table>
+{%- endmacro -%}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="x-apple-disable-message-reformatting">
+  <meta name="color-scheme" content="light only">
+  <meta name="supported-color-schemes" content="light only">
+  <title>{{ 'Weekly hiring report' if is_weekly else 'Monthly hiring summary' }} · {{ period_label }}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!--[if mso]><style>* { font-family: Arial, sans-serif !important; }</style><![endif]-->
+  <style>
+    body { margin:0; padding:0; -webkit-text-size-adjust:100%; }
+    a { color:{{ blue }}; }
+    @media only screen and (max-width: 620px) {
+      .container { width:100% !important; }
+      .px { padding-left:18px !important; padding-right:18px !important; }
+      .kpi { display:block !important; width:100% !important; box-sizing:border-box; margin-bottom:10px !important; }
+      .kpi-gap { display:none !important; }
+      .stack { display:block !important; width:100% !important; text-align:left !important; padding-left:0 !important; padding-top:8px !important; }
+      .hero-title { font-size:26px !important; }
+      .hide-sm { display:none !important; }
+    }
+  </style>
+</head>
+<body style="margin:0; padding:0; background:#EDF0F7;">
+
+<!-- Inbox preview line -->
+<div style="display:none; max-height:0; overflow:hidden; mso-hide:all; font-size:1px; line-height:1px; color:#EDF0F7;">
+  {{ interviews.total }} interviews · {{ hires.total }} offers closed · {{ open_positions.remaining }} positions open — {{ period_label }}
+  &#8204;&nbsp;&#8204;&nbsp;&#8204;&nbsp;&#8204;&nbsp;&#8204;&nbsp;&#8204;&nbsp;&#8204;&nbsp;&#8204;&nbsp;&#8204;&nbsp;&#8204;&nbsp;&#8204;&nbsp;&#8204;&nbsp;
+</div>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#EDF0F7" style="background:#EDF0F7;">
+<tr><td align="center" style="padding:28px 12px 40px;">
+
+<table role="presentation" class="container" width="640" cellpadding="0" cellspacing="0" style="width:640px; max-width:640px; font-family:{{ font }}; color:{{ ink2 }};">
+
+  {% if is_preview %}
+  <tr><td style="padding:0 0 12px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+      <td bgcolor="#FEF6E7" style="background:#FEF6E7; border:1px solid #F7D9A4; border-radius:10px; padding:10px 14px; font-size:13px; color:#93370D;">
+        <strong>Preview</strong> — sent only to you. The scheduled email goes to the shared recipient list.
+      </td>
+    </tr></table>
+  </td></tr>
+  {% endif %}
+
+  <!-- ═══ Header band with KPIs ═══ -->
+  <tr><td bgcolor="#0A1F5C" style="background:#0A1F5C; background-image:linear-gradient(135deg, #071645 0%, #0A2A8A 55%, #0238DD 100%); border-radius:20px 20px 0 0;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      <tr><td class="px" style="padding:28px 32px 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+          <td style="font-size:15px; font-weight:800; letter-spacing:5px; color:#FFFFFF;">NABLON</td>
+          <td align="right">
+            <span style="display:inline-block; padding:5px 12px; border-radius:999px; border:1px solid #4E6BD8; color:#C9D5FF; font-size:11px; font-weight:700; letter-spacing:1.4px;">{{ 'WEEKLY REPORT' if is_weekly else 'MONTHLY SUMMARY' }}</span>
+          </td>
+        </tr></table>
+      </td></tr>
+
+      <tr><td class="px" style="padding:30px 32px 0;">
+        <div style="font-size:13px; font-weight:600; color:#9FB3F7; letter-spacing:0.3px;">{{ 'Hiring this week' if is_weekly else 'Hiring this month' }}</div>
+        <div class="hero-title" style="font-size:34px; font-weight:800; color:#FFFFFF; letter-spacing:-0.8px; line-height:1.15; padding-top:6px;">{{ period_label }}</div>
+        <div style="font-size:13px; color:#8EA2E6; padding-top:8px;">{{ window_label }}</div>
+      </td></tr>
+
+      <tr><td class="px" style="padding:26px 32px 32px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+          {%- set kpis = [
+            ('Interviews', interviews.total, deltas.interviews, 'vs ' ~ compare_label),
+            ('Offers closed', hires.total, deltas.hires, 'vs ' ~ compare_label),
+          ] %}
+          {%- for label, value, d, note in kpis %}
+          <td class="kpi" width="31%" valign="top" bgcolor="#FFFFFF" style="width:31%; background:#FFFFFF; border-radius:14px; padding:16px 16px 14px;">
+            <div style="font-size:11px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:{{ muted }};">{{ label }}</div>
+            <div style="font-size:38px; font-weight:800; color:{{ ink }}; line-height:1.1; padding:6px 0 8px; letter-spacing:-1px;">{{ value }}</div>
+            <div style="font-size:12px; color:{{ muted }};">{{ delta_chip(d) }}&nbsp; {{ note }}</div>
+          </td>
+          <td class="kpi-gap" width="3%" style="width:3%; font-size:0;">&nbsp;</td>
+          {%- endfor %}
+          <td class="kpi" width="31%" valign="top" bgcolor="#FFFFFF" style="width:31%; background:#FFFFFF; border-radius:14px; padding:16px 16px 14px;">
+            <div style="font-size:11px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:{{ muted }};">Open positions</div>
+            <div style="font-size:38px; font-weight:800; color:{{ ink }}; line-height:1.1; padding:6px 0 10px; letter-spacing:-1px;">{{ open_positions.remaining }}</div>
+            {{ bar((open_positions.filled / open_positions.openings * 100)|round|int if open_positions.openings else 0, blue, height=6) }}
+            <div style="font-size:12px; color:{{ muted }}; padding-top:7px;">{{ open_positions.filled }} of {{ open_positions.openings }} filled · {{ open_positions.jobs }} job{{ 's' if open_positions.jobs != 1 }}</div>
+          </td>
+        </tr></table>
+      </td></tr>
+    </table>
+  </td></tr>
+
+  <!-- ═══ Body ═══ -->
+  <tr><td bgcolor="#FFFFFF" class="px" style="background:#FFFFFF; padding:30px 32px 8px; border-radius:0 0 20px 20px;">
+
+    <!-- Insights -->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+      <td bgcolor="#F4F7FF" style="background:#F4F7FF; border:1px solid #DCE4FD; border-radius:16px; padding:22px 22px 14px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+          <td style="font-size:16px; font-weight:700; color:{{ ink }};"><span style="color:{{ blue }};">&#10022;</span>&nbsp; Key insights</td>
+          <td align="right"><span style="font-size:11px; font-weight:600; color:#5770C9; letter-spacing:0.4px;">AI-GENERATED</span></td>
+        </tr></table>
+        {% if insights %}
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;">
+          {% for i in insights %}
+          <tr>
+            <td width="34" valign="top" style="padding:0 0 12px;">
+              <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+                <td width="24" height="24" align="center" valign="middle" bgcolor="{{ blue }}" style="width:24px; height:24px; border-radius:12px; background:{{ blue }}; color:#FFFFFF; font-size:12px; font-weight:700; line-height:24px; text-align:center;">{{ loop.index }}</td>
+              </tr></table>
+            </td>
+            <td valign="top" style="padding:2px 0 12px; font-size:15px; line-height:1.55; color:#1D2939;">{{ i }}</td>
+          </tr>
+          {% endfor %}
+        </table>
+        <div style="font-size:12px; color:#7A89B8; padding:2px 0 6px;">Written by AI from the numbers below. Check the tables before acting on them.</div>
+        {% else %}
+        <div style="font-size:14px; color:{{ ink2 }}; padding:12px 0 8px;">AI insights weren't available for this run. Every number below is complete.</div>
+        {% endif %}
+      </td>
+    </tr></table>
+
+    <!-- 01 Interviews -->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:40px;"><tr><td>
+      {{ section_head('01', 'Interviews', 'Interviews conducted ' ~ ('by day' if is_weekly else 'by week'), interviews.total, 'this ' ~ period_noun) }}
+    </td></tr></table>
+
+    {%- set n = interviews.buckets|length %}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:22px; table-layout:fixed;">
+      <tr>
+        {% for b in interviews.buckets %}
+        {%- set h = [((b.count / max_bucket) * 110)|round|int, 6]|max if b.count else 0 %}
+        <td valign="bottom" align="center" style="height:150px; vertical-align:bottom; padding:0 5px;">
+          <div style="font-size:13px; font-weight:700; color:{{ ink if b.count else muted }}; padding-bottom:6px;">{{ b.count }}</div>
+          {% if h %}
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:42px; margin:0 auto;"><tr>
+            <td height="{{ h }}" bgcolor="{{ blue }}" style="height:{{ h }}px; background:{{ blue }}; border-radius:4px 4px 0 0; font-size:0; line-height:0;">&nbsp;</td>
+          </tr></table>
+          {% endif %}
+        </td>
+        {% endfor %}
+      </tr>
+      <tr><td colspan="{{ n }}" height="1" bgcolor="#D0D5DD" style="height:1px; background:#D0D5DD; font-size:0; line-height:0;">&nbsp;</td></tr>
+      <tr>
+        {% for b in interviews.buckets %}
+        {%- set parts = b.label.split(' ', 1) %}
+        <td align="center" valign="top" style="padding:9px 2px 0; font-size:12px; line-height:1.35;">
+          {% if is_weekly %}
+          <div style="font-weight:700; color:{{ ink }};">{{ parts[0] }}</div><div style="color:{{ muted }}; white-space:nowrap;">{{ parts[1] if parts|length > 1 }}</div>
+          {% else %}
+          <div style="font-weight:700; color:{{ ink }};">Wk {{ loop.index }}</div><div style="color:{{ muted }}; white-space:nowrap;">{{ b.label }}</div>
+          {% endif %}
+        </td>
+        {% endfor %}
+      </tr>
+    </table>
+
+    {%- set peak = interviews.buckets|sort(attribute='count', reverse=True)|first %}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:20px;"><tr>
+      <td bgcolor="#F8F9FC" style="background:#F8F9FC; border-radius:12px; padding:14px 16px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+          <td class="stack" valign="top" style="font-size:13px; color:{{ ink2 }};">
+            {% if interviews.by_round %}
+            <div style="font-size:11px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:{{ muted }}; padding-bottom:7px;">By round</div>
+            {% for r in interviews.by_round %}{{ chip(r.round ~ ' · ' ~ r.count, '#FFFFFF', '#344054') }}{% endfor %}
+            {% else %}
+            No interviews were completed this {{ period_noun }}.
+            {% endif %}
+          </td>
+          <td class="stack" valign="top" align="right" style="padding-left:16px; font-size:13px; color:{{ ink2 }}; white-space:nowrap;">
+            {% if peak and peak.count %}<div style="padding-bottom:4px;">Busiest {{ 'day' if is_weekly else 'week' }}: <strong style="color:{{ ink }};">{{ peak.label }}</strong> ({{ peak.count }})</div>{% endif %}
+            <div style="color:{{ muted }};">{{ interviews.cancelled }} cancelled · {{ interviews.no_show }} no-show</div>
+          </td>
+        </tr></table>
+      </td>
+    </tr></table>
+
+    <!-- 02 Offers closed -->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:44px;"><tr><td>
+      {{ section_head('02', 'Offers closed', 'Hires by recruiter & partner', hires.total, 'moved to Hired') }}
+    </td></tr></table>
+
+    {% if hires.total %}
+    {%- set int_pct = (hires.internal / hires.total * 100)|round|int %}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:20px; border-collapse:separate;"><tr>
+      {% if hires.internal %}<td width="{{ int_pct }}%" height="12" bgcolor="{{ blue }}" style="width:{{ int_pct }}%; height:12px; background:{{ blue }}; border-radius:{{ '6px' if not hires.partner else '6px 0 0 6px' }}; font-size:0; line-height:0;">&nbsp;</td>{% endif %}
+      {% if hires.internal and hires.partner %}<td width="2" style="width:2px; font-size:0; line-height:0; background:#FFFFFF;">&nbsp;</td>{% endif %}
+      {% if hires.partner %}<td height="12" bgcolor="{{ orange }}" style="height:12px; background:{{ orange }}; border-radius:{{ '6px' if not hires.internal else '0 6px 6px 0' }}; font-size:0; line-height:0;">&nbsp;</td>{% endif %}
+    </tr></table>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:10px;"><tr>
+      <td style="font-size:13px; color:{{ ink2 }}; padding-right:20px; white-space:nowrap;"><span style="display:inline-block; width:10px; height:10px; border-radius:3px; background:{{ blue }};"></span>&nbsp; Internal <strong style="color:{{ ink }};">{{ hires.internal }}</strong></td>
+      <td style="font-size:13px; color:{{ ink2 }}; white-space:nowrap;"><span style="display:inline-block; width:10px; height:10px; border-radius:3px; background:{{ orange }};"></span>&nbsp; Via partner <strong style="color:{{ ink }};">{{ hires.partner }}</strong></td>
+    </tr></table>
+
+    {%- set max_credit = hires.by_credit|map(attribute='count')|max %}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:18px;">
+      {% for c in hires.by_credit %}
+      {%- set partner = c.type == 'Partner' %}
+      <tr>
+        <td width="44" valign="middle" style="padding:11px 0; border-top:1px solid {{ line }};">
+          {{ avatar(c.name, '#FDEEE7' if partner else '#E8EEFD', '#B5461A' if partner else blue) }}
+        </td>
+        <td valign="middle" style="padding:11px 0; border-top:1px solid {{ line }};">
+          <div style="font-size:14px; font-weight:600; color:{{ ink }};">{{ c.name }}</div>
+          <div style="font-size:12px; color:{{ '#B5461A' if partner else '#3558D6' }}; font-weight:600;">{{ 'Partner agency' if partner else 'Internal recruiter' }}</div>
+        </td>
+        <td class="hide-sm" width="120" valign="middle" style="padding:11px 14px; border-top:1px solid {{ line }};">
+          {{ bar((c.count / max_credit * 100)|round|int, orange if partner else blue, height=6) }}
+        </td>
+        <td width="36" valign="middle" align="right" style="padding:11px 0; border-top:1px solid {{ line }}; font-size:18px; font-weight:800; color:{{ ink }};">{{ c.count }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+
+    <div style="font-size:11px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:{{ muted }}; padding:22px 0 8px;">Joined this {{ period_noun }}</div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#F8F9FC" style="background:#F8F9FC; border-radius:12px;">
+      {% for h in hires.list %}
+      <tr>
+        <td valign="top" style="padding:11px 16px; {{ 'border-top:1px solid #EAEDF3;' if not loop.first }}">
+          <div style="font-size:14px; font-weight:600; color:{{ ink }};">{{ h.candidate }}</div>
+          <div style="font-size:12px; color:{{ ink2 }};">{{ h.job }}</div>
+        </td>
+        <td valign="top" align="right" style="padding:11px 16px; {{ 'border-top:1px solid #EAEDF3;' if not loop.first }} white-space:nowrap;">
+          <div style="font-size:12px; font-weight:600; color:{{ '#B5461A' if h.type == 'Partner' else '#3558D6' }};">{{ h.credit }}</div>
+          <div style="font-size:12px; color:{{ muted }};">{{ h.source }} · {{ h.date }}</div>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% if hires.hidden %}<div style="font-size:12px; color:{{ muted }}; padding-top:8px;">…and {{ hires.hidden }} more.</div>{% endif %}
+    {% else %}
+    <div style="margin-top:16px; padding:18px; border-radius:12px; background:#F8F9FC; font-size:14px; color:{{ ink2 }};">No candidates were moved to Hired this {{ period_noun }}.</div>
+    {% endif %}
+
+    <!-- 03 Panels -->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:44px;"><tr><td>
+      {{ section_head('03', 'Panels', 'Interviews taken by each panel', panels|length, 'active panel' ~ ('s' if panels|length != 1 else '')) }}
+    </td></tr></table>
+
+    {% if panels %}
+    {%- set max_panel = panels|map(attribute='count')|max %}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px;">
+      {% for p in panels %}
+      <tr>
+        <td width="64" valign="top" style="padding:13px 0; border-top:1px solid {{ line }};">
+          <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+            {% if p.names %}
+              {% for name in p.names[:2] %}<td style="padding-right:3px;">{{ avatar(name, '#EEF2FF', '#3348B0', 28) }}</td>{% endfor %}
+            {% else %}
+              <td>{{ avatar('?', '#F2F4F7', '#667085', 28) }}</td>
+            {% endif %}
+          </tr></table>
+        </td>
+        <td valign="top" style="padding:13px 0 9px 6px; border-top:1px solid {{ line }};">
+          <div style="font-size:14px; font-weight:600; color:{{ ink }}; padding-top:4px;">{{ p.members }}</div>
+          <div style="padding-top:6px;">
+            {% for r in p.rounds.split(' · ') if r %}{{ chip(r) }}{% endfor %}
+            {% if p.feedback_pending %}{{ chip('⚠ ' ~ p.feedback_pending ~ ' feedback pending', '#FEF6E7', '#B54708') }}{% endif %}
+          </div>
+        </td>
+        <td width="120" valign="top" class="hide-sm" style="padding:24px 14px 13px; border-top:1px solid {{ line }};">
+          {{ bar((p.count / max_panel * 100)|round|int, blue, height=6) }}
+        </td>
+        <td width="54" valign="top" align="right" style="padding:13px 0; border-top:1px solid {{ line }};">
+          <div style="font-size:22px; font-weight:800; color:{{ ink }}; line-height:1.1;">{{ p.count }}</div>
+          <div style="font-size:11px; color:{{ muted }};">interview{{ 's' if p.count != 1 }}</div>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <div style="margin-top:16px; padding:18px; border-radius:12px; background:#F8F9FC; font-size:14px; color:{{ ink2 }};">No interviews were conducted this {{ period_noun }}.</div>
+    {% endif %}
+
+    <!-- 04 Open positions -->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:44px;"><tr><td>
+      {{ section_head('04', 'Open positions', 'Where we still need to hire', open_positions.remaining, 'to fill across ' ~ open_positions.jobs ~ ' job' ~ ('s' if open_positions.jobs != 1 else '')) }}
+    </td></tr></table>
+
+    {% if open_positions.paused_jobs %}
+    <div style="font-size:13px; color:{{ muted }}; padding-top:8px;">Plus {{ open_positions.paused_jobs }} paused job{{ 's' if open_positions.paused_jobs != 1 }}, not counted.</div>
+    {% endif %}
+
+    {% if open_positions.rows %}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;">
+      {% for r in open_positions.rows %}
+      {%- set no_pipeline = r.remaining and r.in_pipeline == 0 %}
+      {%- set aging = r.days_open is not none and r.days_open >= 60 %}
+      <tr>
+        <td valign="top" style="padding:15px 0; border-top:1px solid {{ line }};">
+          <div style="font-size:14px; font-weight:600; color:{{ ink }};">{{ r.title }}</div>
+          <div style="font-size:12px; color:{{ muted }}; padding:2px 0 9px;">{{ r.location }}{% if r.days_open is not none %} · open {{ r.days_open }} days{% endif %}</div>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:300px;"><tr>
+            <td>{{ bar((r.filled / r.openings * 100)|round|int if r.openings else 0, blue, height=6) }}</td>
+            <td width="70" align="right" style="font-size:12px; color:{{ ink2 }}; white-space:nowrap; padding-left:10px;">{{ r.filled }}/{{ r.openings }} filled</td>
+          </tr></table>
+        </td>
+        <td width="150" valign="top" align="right" style="padding:15px 0 15px 12px; border-top:1px solid {{ line }};">
+          {% if r.remaining %}
+          <div style="font-size:20px; font-weight:800; color:{{ ink }}; line-height:1.1;">{{ r.remaining }} <span style="font-size:12px; font-weight:600; color:{{ muted }};">open</span></div>
+          <div style="font-size:12px; color:{{ ink2 }}; padding:3px 0 6px;">{{ r.in_pipeline }} in pipeline</div>
+          {% if no_pipeline %}{{ chip('No pipeline', '#FDECEC', '#B42318') }}{% endif %}
+          {% if aging %}{{ chip('⏳ ' ~ r.days_open ~ 'd open', '#FEF6E7', '#B54708') }}{% endif %}
+          {% else %}
+          {{ chip('✓ Filled', '#E7F6EE', '#067647') }}
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% if open_positions.hidden %}<div style="font-size:12px; color:{{ muted }}; padding-top:6px;">…and {{ open_positions.hidden }} more open job{{ 's' if open_positions.hidden != 1 }}.</div>{% endif %}
+    {% endif %}
+
+    <!-- CTA -->
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:36px 0 30px;"><tr>
+      <td bgcolor="{{ blue }}" style="background:{{ blue }}; border-radius:10px;">
+        <a href="{{ reports_url }}" style="display:inline-block; padding:14px 26px; font-size:15px; font-weight:700; color:#FFFFFF; text-decoration:none;">Open the Reports dashboard &rarr;</a>
+      </td>
+    </tr></table>
+  </td></tr>
+
+  <!-- Footer -->
+  <tr><td class="px" style="padding:22px 32px 0; font-size:12px; line-height:1.6; color:#7A8399;">
+    <strong style="color:#475467;">How these are counted.</strong>
+    Interviews = completed, by scheduled time (IST). Offers closed = candidates moved to Hired, credited to the partner when they came through one, otherwise to the owning recruiter. Open positions = openings minus hires on published jobs.
+    <br><br>
+    You're receiving this as part of the hiring report list. <a href="{{ settings_url }}" style="color:#475467;">Manage recipients</a> in Settings → Scheduled reports.
+    <br><br>
+    <span style="color:#98A2B3;">© Nablon AI · careers.nablon.ai</span>
+  </td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>
