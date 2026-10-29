@@ -44,20 +44,112 @@ const schema = z.object({
   probation_months: z.coerce.number().int().min(0).default(3),
   template_id:      z.string().uuid().optional().or(z.literal('')),
   expires_at:       z.string().optional(),
+  letter_date:       z.string().optional(),
+  end_date:          z.string().optional(),
+  reporting_manager: z.string().optional(),
+  candidate_address: z.string().optional(),
 });
+
+// Mirrors _build_variables in backend/app/services/offer_service.py — keep the two in sync
+const ONES = [
+  '', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+  'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen',
+];
+const TENS = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+const SCALES_INDIAN = [[1e7, 'Crore'], [1e5, 'Lakh'], [1000, 'Thousand']];
+const SCALES_WESTERN = [[1e9, 'Billion'], [1e6, 'Million'], [1000, 'Thousand']];
+
+function intInWords(n, scales) {
+  if (n === 0) return '';
+  for (const [size, name] of scales) {
+    if (n >= size) {
+      const rest = intInWords(n % size, scales);
+      return `${intInWords(Math.floor(n / size), scales)} ${name}` + (rest ? ` ${rest}` : '');
+    }
+  }
+  if (n >= 100) {
+    const rest = intInWords(n % 100, scales);
+    return `${ONES[Math.floor(n / 100)]} Hundred` + (rest ? ` ${rest}` : '');
+  }
+  if (n >= 20) return TENS[Math.floor(n / 10)] + (n % 10 ? `-${ONES[n % 10]}` : '');
+  return ONES[n];
+}
+
+function amountInWords(amount, currency) {
+  if (amount === null || amount === undefined || amount === '') return '';
+  const cents = Math.round(Number(amount) * 100);
+  const whole = Math.floor(cents / 100);
+  const fraction = cents % 100;
+  const scales = currency === 'INR' ? SCALES_INDIAN : SCALES_WESTERN;
+  let words = intInWords(whole, scales) || 'Zero';
+  if (fraction) words += ` and ${intInWords(fraction, scales)} ${currency === 'INR' ? 'Paise' : 'Cents'}`;
+  return words;
+}
+
+function formatAmount(amount, currency) {
+  if (amount === null || amount === undefined || amount === '') return '';
+  const cents = Math.round(Number(amount) * 100);
+  const whole = Math.floor(cents / 100);
+  const fraction = cents % 100;
+  const grouped = whole.toLocaleString(currency === 'INR' ? 'en-IN' : 'en-US');
+  return grouped + (fraction ? `.${String(fraction).padStart(2, '0')}` : '');
+}
+
+// {{name}} stays ISO; _long is '5 November 2026', _us is 'November 5, 2026'
+function dateVariables(name, iso) {
+  if (!iso) return { [name]: '', [`${name}_long`]: '', [`${name}_us`]: '' };
+  const [y, m, d] = iso.split('T')[0].split('-').map(Number);
+  const month = new Date(Date.UTC(y, m - 1, d)).toLocaleString('en-US', { month: 'long', timeZone: 'UTC' });
+  return {
+    [name]: iso.split('T')[0],
+    [`${name}_long`]: `${d} ${month} ${y}`,
+    [`${name}_us`]: `${month} ${d}, ${y}`,
+  };
+}
+
+function durationMonths(start, end) {
+  if (!start || !end || end < start) return '';
+  const days = (Date.parse(end) - Date.parse(start)) / 86400000 + 1;
+  return String(Math.max(1, Math.round(days / 30.44)));
+}
+
+function escapeHtml(text) {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function signatureSlot(signature) {
+  const img = signature
+    ? `<img src="${signature}" style="position:absolute;left:0;bottom:0;max-height:56px;max-width:220px;" />`
+    : '';
+  return `<div style="position:relative;height:56px;">${img}</div>`;
+}
 
 function renderTemplate(html, values) {
   if (!html) return '<p style="color:#999;font-style:italic">No template selected.</p>';
+  const currency = values.salary_currency ?? 'INR';
+  const today = new Date().toISOString().split('T')[0];
   const vars = {
     candidate_name:   values.candidate_name ?? '',
+    candidate_first_name: (values.candidate_name ?? '').split(' ')[0],
+    candidate_address: escapeHtml(values.candidate_address ?? '').replace(/\n/g, '<br>'),
     designation:      values.designation ?? '',
     department:       values.department_name ?? '',
+    reporting_manager: escapeHtml(values.reporting_manager ?? ''),
     salary_ctc:       values.salary_ctc ? String(values.salary_ctc) : '',
-    salary_currency:  values.salary_currency ?? 'INR',
-    joining_date:     values.joining_date ?? '',
+    salary_ctc_formatted: formatAmount(values.salary_ctc, currency),
+    salary_ctc_words: amountInWords(values.salary_ctc, currency),
+    salary_currency:  currency,
+    ...dateVariables('letter_date', values.letter_date || values.created_at || today),
+    ...dateVariables('joining_date', values.joining_date),
+    ...dateVariables('end_date', values.end_date),
+    duration_months:  durationMonths(values.joining_date, values.end_date),
     probation_months: String(values.probation_months ?? 3),
     work_location:    values.work_location ?? '',
-    offer_expiry_date: values.expires_at ? values.expires_at.split('T')[0] : '',
+    ...dateVariables('offer_expiry_date', values.expires_at),
+    director_signature: signatureSlot(values.director_signature),
+    ...dateVariables('director_signed_date', values.director_approved_at),
+    candidate_signature: signatureSlot(values.candidate_signature),
+    ...dateVariables('candidate_signed_date', values.signed_at),
     company_name:     'Nablon AI',
   };
   let result = html;
@@ -214,6 +306,9 @@ function OfferSummary({ offer }) {
       <SummaryRow label="Department" value={offer.department_name} />
       <SummaryRow label="CTC" value={formatMoney(offer.salary_ctc, offer.salary_currency)} />
       <SummaryRow label="Joining Date" value={offer.joining_date} />
+      {offer.end_date && <SummaryRow label="End Date" value={offer.end_date} />}
+      {offer.reporting_manager && <SummaryRow label="Reporting To" value={offer.reporting_manager} />}
+      {offer.letter_date && <SummaryRow label="Letter Date" value={offer.letter_date} />}
       <SummaryRow label="Work Location" value={offer.work_location} />
       <SummaryRow label="Probation" value={offer.probation_months != null ? `${offer.probation_months} months` : null} />
       <SummaryRow label="Offer Expiry" value={offer.expires_at ? formatDate(offer.expires_at) : null} />
@@ -243,6 +338,10 @@ export default function OfferBuilderPage() {
       probation_months: 3,
       template_id: '',
       expires_at: '',
+      letter_date: '',
+      end_date: '',
+      reporting_manager: '',
+      candidate_address: '',
     },
   });
 
@@ -271,6 +370,10 @@ export default function OfferBuilderPage() {
         probation_months: offer.probation_months ?? 3,
         template_id:      offer.template_id ?? '',
         expires_at:       offer.expires_at ? offer.expires_at.split('T')[0] : '',
+        letter_date:       offer.letter_date ?? '',
+        end_date:          offer.end_date ?? '',
+        reporting_manager: offer.reporting_manager ?? '',
+        candidate_address: offer.candidate_address ?? '',
       });
     }
   }, [offer, reset]);
@@ -284,6 +387,9 @@ export default function OfferBuilderPage() {
   }, [isNew, templates, setValue]);
 
   const watchedValues = watch();
+  const selectedBody = templates.find((t) => t.id === watchedValues.template_id)?.body_html ?? '';
+  // Letter-specific inputs only show when the chosen template actually prints them
+  const usesVar = (name) => selectedBody.includes(`{{${name}`);
 
   // Live preview: update when form values or template changes
   useEffect(() => {
@@ -293,6 +399,11 @@ export default function OfferBuilderPage() {
       ...watchedValues,
       candidate_name: offer?.candidate_name ?? '',
       department_name: offer?.department_name ?? '',
+      created_at: offer?.created_at,
+      director_signature: offer?.director_signature,
+      director_approved_at: offer?.director_approved_at,
+      candidate_signature: offer?.candidate_signature,
+      signed_at: offer?.signed_at,
     };
     setPreviewHtml(renderTemplate(tmpl?.body_html ?? '', enriched));
   }, [watchedValues, templates, offer]);
@@ -352,6 +463,10 @@ export default function OfferBuilderPage() {
       probation_months: Number(data.probation_months),
       template_id:      data.template_id || null,
       expires_at:       data.expires_at ? new Date(data.expires_at).toISOString() : null,
+      letter_date:       data.letter_date || null,
+      end_date:          data.end_date || null,
+      reporting_manager: data.reporting_manager || null,
+      candidate_address: data.candidate_address || null,
     };
     if (isNew) {
       createMut.mutate(payload);
@@ -511,7 +626,9 @@ export default function OfferBuilderPage() {
 
               <div className="flex gap-2">
                 <div className="flex-1">
-                  <label className="block text-xs font-medium text-gray-500 mb-1">CTC</label>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    {usesVar('salary_ctc_words') ? 'Monthly Stipend' : 'CTC'}
+                  </label>
                   <input
                     type="number"
                     step="0.01"
@@ -534,13 +651,66 @@ export default function OfferBuilderPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Joining Date</label>
+                <label className="block text-xs font-medium text-gray-500 mb-1">
+                  {usesVar('end_date') ? 'Start Date' : 'Joining Date'}
+                </label>
                 <input
                   type="date"
                   {...register('joining_date')}
                   className="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300"
                 />
               </div>
+
+              {usesVar('end_date') && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">End Date</label>
+                  <input
+                    type="date"
+                    {...register('end_date')}
+                    className="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300"
+                  />
+                  {usesVar('duration_months') && watchedValues.joining_date && watchedValues.end_date && (
+                    <p className="text-xs text-gray-400 mt-1">
+                      Letter will state {durationMonths(watchedValues.joining_date, watchedValues.end_date) || '—'} months
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {usesVar('reporting_manager') && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Reporting To</label>
+                  <input
+                    {...register('reporting_manager')}
+                    className="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300"
+                    placeholder="e.g. Priya Sharma, Engineering Manager"
+                  />
+                </div>
+              )}
+
+              {usesVar('candidate_address') && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Candidate Address</label>
+                  <textarea
+                    {...register('candidate_address')}
+                    rows={2}
+                    className="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300"
+                    placeholder={'Street address\nCity, State - PIN / ZIP'}
+                  />
+                </div>
+              )}
+
+              {usesVar('letter_date') && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Letter Date</label>
+                  <input
+                    type="date"
+                    {...register('letter_date')}
+                    className="w-full px-3 py-2 border border-surface-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-300"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Leave blank to use the date the offer was created</p>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Work Location</label>
@@ -563,7 +733,9 @@ export default function OfferBuilderPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Offer Expiry Date</label>
+                <label className="block text-xs font-medium text-gray-500 mb-1">
+                  {usesVar('offer_expiry_date') ? 'Accept By (Offer Expiry)' : 'Offer Expiry Date'}
+                </label>
                 <input
                   type="date"
                   {...register('expires_at')}

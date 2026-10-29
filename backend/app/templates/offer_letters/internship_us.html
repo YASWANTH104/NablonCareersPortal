@@ -1,0 +1,83 @@
+<style>
+@page {
+  size: Letter;
+  margin: 31mm 21mm 20mm 21mm;
+  @top-center { content: element(letterhead); vertical-align: bottom; padding-bottom: 5mm; width: 100%; }
+  @bottom-center {
+    content: "Nablon AI Inc.  |  Internship Letter  |  Confidential  |  Page " counter(page) " of " counter(pages);
+    font-family: Arial, sans-serif; font-size: 8pt; color: #555555; white-space: pre;
+  }
+}
+.offer-letterhead { position: running(letterhead); }
+</style>
+
+<!-- HR: replace the two highlighted bracketed values below with the US registered address and contact e-mail -->
+<div class="offer-letterhead" style="font-family:Arial,sans-serif;text-align:center;border-bottom:1px solid #1F5C3A;padding-bottom:3px;margin-bottom:18px;">
+  <div style="font-size:12pt;font-weight:bold;color:#1F5C3A;">NABLON AI INC.</div>
+  <div style="font-size:8pt;font-weight:bold;color:#555555;">A Delaware Corporation</div>
+  <div style="font-size:8pt;font-weight:bold;color:#555555;"><span style="background:#FFF59D;color:#000000;">[US Registered Address]</span>  |  <span style="background:#FFF59D;color:#000000;">[US Contact E-mail]</span></div>
+</div>
+
+<div style="font-family:Arial,sans-serif;font-size:10pt;line-height:1.4;color:#000000;">
+  <p style="margin:0 0 12px;">{{letter_date_us}}</p>
+
+  <p style="margin:0;font-weight:bold;">{{candidate_name}}</p>
+  <p style="margin:0 0 12px;">{{candidate_address}}</p>
+
+  <p style="margin:0 0 12px;font-weight:bold;">Re: Internship Confirmation and Confidentiality Terms</p>
+
+  <p style="margin:0 0 8px;text-align:justify;">Dear {{candidate_first_name}},</p>
+  <p style="margin:0 0 6px;text-align:justify;">Nablon AI Inc., a Delaware corporation (the "Company"), is pleased to confirm your internship on the terms set out in this letter. Because you will have access to the Company's confidential information, this letter also sets out your confidentiality and related obligations. Please read it carefully.</p>
+
+  <p style="margin:12px 0 5px;font-weight:bold;">1. Internship Details</p>
+  <p style="margin:2px 0 5px;padding-left:36pt;text-indent:-36pt;text-align:justify;"><span style="display:inline-block;width:36pt;text-indent:0;font-weight:bold;">1.1</span>Position: <strong>{{designation}}</strong>, reporting to <strong>{{reporting_manager}}</strong>.</p>
+  <p style="margin:2px 0 5px;padding-left:36pt;text-indent:-36pt;text-align:justify;"><span style="display:inline-block;width:36pt;text-indent:0;font-weight:bold;">1.2</span>Internship Period: <strong>{{joining_date_us}}</strong> to <strong>{{end_date_us}}</strong> (the "Internship Period"), unless ended earlier by either party on written notice.</p>
+  <p style="margin:2px 0 5px;padding-left:36pt;text-indent:-36pt;text-align:justify;"><span style="display:inline-block;width:36pt;text-indent:0;font-weight:bold;">1.3</span>This internship is for a fixed period and is a learning engagement. It does not create any obligation on the Company to offer you employment at the end of the Internship Period. Either you or the Company may end the internship at any time.</p>
+  <p style="margin:12px 0 5px;font-weight:bold;">2. Confidential Information</p>
+  <p style="margin:2px 0 5px;padding-left:36pt;text-indent:-36pt;text-align:justify;"><span style="display:inline-block;width:36pt;text-indent:0;font-weight:bold;">2.1</span>"Confidential Information" means all non-public information of the Company, its parent Nablon AI Private Limited, its affiliates and its clients that you receive or access during the internship, in any form, including source code, models, algorithms, data sets, product plans, client information, business and financial information, and any notes or materials derived from them.</p>
+  <p style="margin:2px 0 5px;padding-left:36pt;text-indent:-36pt;text-align:justify;"><span style="display:inline-block;width:36pt;text-indent:0;font-weight:bold;">2.2</span>You will use Confidential Information only to perform your internship work, will not disclose it to anyone except Company personnel who need to know it, and will protect it with at least the same care you would use for your own sensitive information, and in any case no less than reasonable care.</p>
+  <p style="margin:2px 0 5px;padding-left:36pt;text-indent:-36pt;text-align:justify;"><span style="display:inline-block;width:36pt;text-indent:0;font-weight:bold;">2.3</span>These obligations do not apply to information that (a) is or becomes public through no fault of yours; (b) you lawfully knew before receiving it from the Company, as shown by written records; or (c) you lawfully receive from a third party without a duty of confidentiality.</p>
+  <p style="margin:12px 0 5px;font-weight:bold;">3. Intellectual Property</p>
+  <p style="margin:2px 0 5px;padding-left:36pt;text-indent:-36pt;text-align:justify;"><span style="display:inline-block;width:36pt;text-indent:0;font-weight:bold;">3.1</span>All work product, inventions, code, documentation, data, models and other materials that you create, alone or with others, in the course of the internship or using Company resources ("Work Product") are the sole property of the Company and, to the extent permitted by law, are "works made for hire" under the U.S. Copyright Act.</p>
+  <p style="margin:2px 0 5px;padding-left:36pt;text-indent:-36pt;text-align:justify;"><span style="display:inline-block;width:36pt;text-indent:0;font-weight:bold;">3.2</span>To the extent any Work Product is not a work made for hire, you hereby assign to the Company all of your right, title and interest in it, including all intellectual property rights, and you agree to sign any documents reasonably needed to confirm or register the Company's ownership.</p>
+  <p style="margin:2px 0 5px;padding-left:36pt;text-indent:-36pt;text-align:justify;"><span style="display:inline-block;width:36pt;text-indent:0;font-weight:bold;">3.3</span>You will not incorporate into any Work Product any third-party material or any of your own prior work without the Company's written approval.</p>
+  <p style="margin:12px 0 5px;font-weight:bold;">4. No Reverse Engineering and Information Security</p>
+  <p style="margin:2px 0 5px;padding-left:36pt;text-indent:-36pt;text-align:justify;"><span style="display:inline-block;width:36pt;text-indent:0;font-weight:bold;">4.1</span>You will not reverse engineer, decompile or disassemble any software, model or system of the Company or its clients, or attempt to derive source code or underlying data from it.</p>
+  <p style="margin:2px 0 5px;padding-left:36pt;text-indent:-36pt;text-align:justify;"><span style="display:inline-block;width:36pt;text-indent:0;font-weight:bold;">4.2</span>You will follow the Company's information security policies, use only Company-approved accounts, devices and tools for Company work, not copy Confidential Information to personal devices or accounts, and not input Confidential Information into any AI tool or external service that the Company has not approved in writing.</p>
+  <p style="margin:12px 0 5px;font-weight:bold;">5. Compelled Disclosure and Equitable Relief</p>
+  <p style="margin:2px 0 5px;padding-left:36pt;text-indent:-36pt;text-align:justify;"><span style="display:inline-block;width:36pt;text-indent:0;font-weight:bold;">5.1</span>If you are required by law, subpoena or court order to disclose any Confidential Information, you will, where legally permitted, give the Company prompt written notice so it can seek a protective order, and you will disclose only the portion legally required.</p>
+  <p style="margin:2px 0 5px;padding-left:36pt;text-indent:-36pt;text-align:justify;"><span style="display:inline-block;width:36pt;text-indent:0;font-weight:bold;">5.2</span>You acknowledge that a breach of this letter may cause the Company irreparable harm, and that the Company may seek injunctive relief in addition to any other remedy available at law or in equity, without the need to post a bond to the extent permitted by law.</p>
+  <p style="margin:2px 0 5px;padding-left:36pt;text-indent:-36pt;text-align:justify;"><span style="display:inline-block;width:36pt;text-indent:0;font-weight:bold;">5.3</span>Nothing in this letter prevents you from reporting possible violations of law to a government agency or from making disclosures protected under whistleblower laws. Under the Defend Trade Secrets Act, 18 U.S.C. 1833(b), you will not be held criminally or civilly liable for disclosing a trade secret in confidence to a government official or an attorney solely for the purpose of reporting or investigating a suspected violation of law, or in a complaint or other document filed under seal in a lawsuit.</p>
+  <p style="margin:12px 0 5px;font-weight:bold;">6. Return of Materials</p>
+  <p style="margin:2px 0 5px;padding-left:36pt;text-indent:-36pt;text-align:justify;"><span style="display:inline-block;width:36pt;text-indent:0;font-weight:bold;">6.1</span>At the end of the internship, or earlier on the Company's request, you will promptly return or, if the Company so directs, permanently delete all Confidential Information and Company property in your possession, and will confirm in writing that you have done so.</p>
+  <p style="margin:12px 0 5px;font-weight:bold;">7. Non-Solicitation</p>
+  <p style="margin:2px 0 5px;padding-left:36pt;text-indent:-36pt;text-align:justify;"><span style="display:inline-block;width:36pt;text-indent:0;font-weight:bold;">7.1</span>During the Internship Period and for 12 (twelve) months after it ends, you will not, directly or indirectly, solicit or encourage any employee or contractor of the Company or its affiliates to leave the Company, or solicit any client of the Company with whom you worked during the internship for a competing purpose.</p>
+  <p style="margin:12px 0 5px;font-weight:bold;">8. Survival, Governing Law and General</p>
+  <p style="margin:2px 0 5px;padding-left:36pt;text-indent:-36pt;text-align:justify;"><span style="display:inline-block;width:36pt;text-indent:0;font-weight:bold;">8.1</span>Your obligations under Sections 2 to 7 survive the end of the internship for 24 (twenty-four) months, except that obligations relating to trade secrets continue for as long as the information remains a trade secret under applicable law, and Section 3 survives indefinitely.</p>
+  <p style="margin:2px 0 5px;padding-left:36pt;text-indent:-36pt;text-align:justify;"><span style="display:inline-block;width:36pt;text-indent:0;font-weight:bold;">8.2</span>This letter is governed by the laws of the State of Delaware, without regard to its conflict-of-laws rules. The state and federal courts located in Delaware will have exclusive jurisdiction over any dispute arising from this letter.</p>
+  <p style="margin:2px 0 5px;padding-left:36pt;text-indent:-36pt;text-align:justify;"><span style="display:inline-block;width:36pt;text-indent:0;font-weight:bold;">8.3</span>This letter is the entire agreement between you and the Company about the internship and may be changed only in writing signed by both parties. If any provision is held unenforceable, it will be enforced to the maximum extent permitted and the remainder will continue in effect.</p>
+
+  <div style="page-break-inside:avoid;">
+  <p style="margin:14px 0 20px;text-align:justify;">Please sign below to confirm your acceptance of these terms. We look forward to working with you.</p>
+
+  <table style="width:100%;border-collapse:collapse;font-size:10pt;">
+    <tr>
+      <td style="width:50%;padding:0 12px 0 0;border:none;vertical-align:top;">
+        <p style="margin:0;font-weight:bold;">NABLON AI INC.</p>
+        {{director_signature}}
+        <p style="margin:0;">______________________________</p>
+        <p style="margin:0;">Sagar Balan</p>
+        <p style="margin:0;">Chief Executive Officer</p>
+        <p style="margin:0;">Date: {{director_signed_date_us}}</p>
+      </td>
+      <td style="width:50%;padding:0 0 0 12px;border:none;vertical-align:top;">
+        <p style="margin:0;font-weight:bold;">ACCEPTED AND AGREED</p>
+        {{candidate_signature}}
+        <p style="margin:0;">______________________________</p>
+        <p style="margin:0;">Name: {{candidate_name}}</p>
+        <p style="margin:0;">Date: {{candidate_signed_date_us}}</p>
+      </td>
+    </tr>
+  </table>
+  </div>
+</div>

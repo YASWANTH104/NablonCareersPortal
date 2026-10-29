@@ -32,6 +32,12 @@ class OfferLetter(Base):
     probation_months: Mapped[int] = mapped_column(Integer, default=3)
     work_location: Mapped[str | None] = mapped_column(Text)
 
+    # Letter fields HR fills per offer — currently used by the internship templates
+    letter_date: Mapped[date | None] = mapped_column(Date)
+    end_date: Mapped[date | None] = mapped_column(Date)
+    reporting_manager: Mapped[str | None] = mapped_column(String(255))
+    candidate_address: Mapped[str | None] = mapped_column(Text)
+
     template_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("offer_templates.id"))
     pdf_url: Mapped[str | None] = mapped_column(Text)
 
