@@ -1023,29 +1023,10 @@ async def _send_offer_email_async(offer_id: str):
         if template and template.body_html:
             try:
                 from weasyprint import HTML as WeasyprintHTML
-                variables = {
-                    "candidate_name": candidate_name or "",
-                    "designation": offer.designation or "",
-                    "department": dept_name or "",
-                    "salary_ctc": str(offer.salary_ctc) if offer.salary_ctc else "",
-                    "salary_currency": offer.salary_currency or "",
-                    "joining_date": str(offer.joining_date) if offer.joining_date else "",
-                    "probation_months": str(offer.probation_months),
-                    "work_location": offer.work_location or "",
-                    "offer_expiry_date": str(offer.expires_at.date()) if offer.expires_at else "",
-                    "company_name": "Nablon AI",
-                }
-                body_html = template.body_html
-                for key, value in variables.items():
-                    body_html = body_html.replace(f"{{{{{key}}}}}", value)
-
-                full_html = (
-                    "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-                    "<style>body{font-family:Arial,sans-serif;font-size:14px;"
-                    "line-height:1.6;color:#111;margin:40px;}"
-                    "@page{margin:40px;}</style></head>"
-                    f"<body>{body_html}</body></html>"
-                )
+                from app.services.offer_service import _build_offer_full_html
+                # Same renderer as the portal download, so the attachment carries the
+                # letterhead and the director's signature
+                full_html = _build_offer_full_html(offer, template, candidate_name, dept_name)
                 pdf_bytes = WeasyprintHTML(string=full_html).write_pdf()
             except Exception as exc:
                 logger.warning(f"PDF generation failed for offer {offer_id}, sending without: {exc}")

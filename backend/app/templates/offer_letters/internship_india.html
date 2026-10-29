@@ -1,0 +1,80 @@
+<style>
+@page {
+  size: A4;
+  margin: 36mm 21mm 20mm 21mm;
+  @top-center { content: element(letterhead); vertical-align: bottom; padding-bottom: 5mm; width: 100%; }
+  @bottom-center {
+    content: "Nablon AI Private Limited  |  Internship Letter  |  Page " counter(page) " of " counter(pages);
+    font-family: Arial, sans-serif; font-size: 8pt; color: #555555; white-space: pre;
+  }
+}
+.offer-letterhead { position: running(letterhead); }
+</style>
+
+<div class="offer-letterhead" style="font-family:Arial,sans-serif;text-align:center;border-bottom:1px solid #1F5C3A;padding-bottom:3px;margin-bottom:18px;">
+  <div style="font-size:12pt;font-weight:bold;color:#1F5C3A;">NABLON AI PRIVATE LIMITED</div>
+  <div style="font-size:8pt;font-weight:bold;color:#555555;">CIN: U62099KA2025PTC211604</div>
+  <div style="font-size:8pt;font-weight:bold;color:#555555;">Regd. Office: WeWork IWF Campus, Survey No. 192, Whitefield Main Road, B Narayanapura, Mahadevapura, Bhattarahalli, Bangalore, Bangalore North, Karnataka, India - 560048</div>
+  <div style="font-size:8pt;font-weight:bold;color:#555555;">E-mail: hr@nablon.ai</div>
+</div>
+
+<div style="font-family:Arial,sans-serif;font-size:10pt;line-height:1.4;color:#000000;">
+  <p style="margin:0 0 12px;">Date: {{letter_date_long}}</p>
+
+  <p style="margin:0;font-weight:bold;">{{candidate_name}}</p>
+  <p style="margin:0 0 12px;">{{candidate_address}}</p>
+
+  <p style="margin:0 0 12px;font-weight:bold;">Subject: Internship Confirmation - {{designation}}</p>
+
+  <p style="margin:0 0 8px;text-align:justify;">Dear {{candidate_first_name}},</p>
+  <p style="margin:0 0 10px;text-align:justify;">We are pleased to confirm your internship with Nablon AI Private Limited (the "Company") on the following terms:</p>
+
+  <table style="width:100%;border-collapse:collapse;margin:0 0 14px;font-size:10pt;">
+    <tr>
+      <td style="width:28%;padding:5px 8px;border:1px solid #999999;background:#E9F4EF;font-weight:bold;vertical-align:top;">Internship Title</td>
+      <td style="padding:5px 8px;border:1px solid #999999;vertical-align:top;">{{designation}}</td>
+    </tr>
+    <tr>
+      <td style="width:28%;padding:5px 8px;border:1px solid #999999;background:#E9F4EF;font-weight:bold;vertical-align:top;">Duration</td>
+      <td style="padding:5px 8px;border:1px solid #999999;vertical-align:top;">{{duration_months}} months, from {{joining_date_long}} to {{end_date_long}}</td>
+    </tr>
+    <tr>
+      <td style="width:28%;padding:5px 8px;border:1px solid #999999;background:#E9F4EF;font-weight:bold;vertical-align:top;">Reporting To</td>
+      <td style="padding:5px 8px;border:1px solid #999999;vertical-align:top;">{{reporting_manager}}</td>
+    </tr>
+    <tr>
+      <td style="width:28%;padding:5px 8px;border:1px solid #999999;background:#E9F4EF;font-weight:bold;vertical-align:top;">Work Mode</td>
+      <td style="padding:5px 8px;border:1px solid #999999;vertical-align:top;">Remote, with travel to office or client locations when required</td>
+    </tr>
+    <tr>
+      <td style="width:28%;padding:5px 8px;border:1px solid #999999;background:#E9F4EF;font-weight:bold;vertical-align:top;">Stipend</td>
+      <td style="padding:5px 8px;border:1px solid #999999;vertical-align:top;">{{salary_currency}} {{salary_ctc_formatted}} ({{salary_ctc_words}}) per month, paid monthly, subject to tax deduction at source as applicable</td>
+    </tr>
+  </table>
+
+  <p style="margin:0 0 8px;text-align:justify;"><strong>Confidentiality and IP:</strong> You will keep all information of the Company and its clients confidential during and after the internship. All work, code, data and other material you create during the internship will belong to the Company.</p>
+  <p style="margin:0 0 8px;text-align:justify;"><strong>Full-Time Conversion:</strong> Based on your performance during the internship and the requirements of the business, the Company may consider you for a full-time role. Any such offer will be made separately in writing at the Company's discretion, and this letter does not create any obligation of employment.</p>
+  <p style="margin:0 0 8px;text-align:justify;"><strong>Early Closure:</strong> Either party may end the internship by giving 7 (seven) days' written notice. On successful completion, you will receive an internship completion certificate.</p>
+  <div style="page-break-inside:avoid;">
+  <p style="margin:0 0 20px;text-align:justify;">Please sign and return a copy of this letter as your acceptance by <strong>{{offer_expiry_date_long}}</strong>. We look forward to working with you.</p>
+
+  <table style="width:100%;border-collapse:collapse;font-size:10pt;">
+    <tr>
+      <td style="width:50%;padding:0 12px 0 0;border:none;vertical-align:top;">
+        <p style="margin:0;font-weight:bold;">For Nablon AI Private Limited</p>
+        {{director_signature}}
+        <p style="margin:0;">______________________________</p>
+        <p style="margin:0;">Ravindra Patil</p>
+        <p style="margin:0;">Director</p>
+      </td>
+      <td style="width:50%;padding:0 0 0 12px;border:none;vertical-align:top;">
+        <p style="margin:0;font-weight:bold;">Accepted by the Intern</p>
+        {{candidate_signature}}
+        <p style="margin:0;">______________________________</p>
+        <p style="margin:0;">Name: {{candidate_name}}</p>
+        <p style="margin:0;">Date: {{candidate_signed_date_long}}</p>
+      </td>
+    </tr>
+  </table>
+  </div>
+</div>

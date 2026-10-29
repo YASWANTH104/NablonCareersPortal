@@ -177,6 +177,11 @@ function TemplateModal({ onClose }) {
                       Use {'{{'} {'}}'}candidate_name{'{{'} {'}}'}, {'{{'} {'}}'}designation{'{{'} {'}}'}, {'{{'} {'}}'}salary_ctc{'{{'} {'}}'}, etc.
                     </span>
                   </label>
+                  <p className="text-[11px] text-gray-400 mb-1.5 leading-relaxed">
+                    Also: candidate_first_name, candidate_address, reporting_manager, salary_ctc_formatted,
+                    salary_ctc_words, end_date, duration_months, letter_date, director_signature,
+                    candidate_signature. Dates take a _long (5 November 2026) or _us (November 5, 2026) suffix.
+                  </p>
                   <textarea
                     {...register('body_html', { required: true })}
                     rows={16}

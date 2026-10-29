@@ -40,6 +40,10 @@ class OfferLetterCreate(BaseModel):
     salary_currency: str = "INR"
     probation_months: int = 3
     work_location: Optional[str] = None
+    letter_date: Optional[date] = None
+    end_date: Optional[date] = None
+    reporting_manager: Optional[str] = None
+    candidate_address: Optional[str] = None
     template_id: Optional[uuid.UUID] = None
     expires_at: Optional[datetime] = None
 
@@ -52,6 +56,10 @@ class OfferLetterUpdate(BaseModel):
     salary_currency: Optional[str] = None
     probation_months: Optional[int] = None
     work_location: Optional[str] = None
+    letter_date: Optional[date] = None
+    end_date: Optional[date] = None
+    reporting_manager: Optional[str] = None
+    candidate_address: Optional[str] = None
     template_id: Optional[uuid.UUID] = None
     expires_at: Optional[datetime] = None
 
@@ -68,6 +76,10 @@ class OfferLetterResponse(BaseModel):
     salary_currency: str
     probation_months: int
     work_location: Optional[str] = None
+    letter_date: Optional[date] = None
+    end_date: Optional[date] = None
+    reporting_manager: Optional[str] = None
+    candidate_address: Optional[str] = None
     template_id: Optional[uuid.UUID] = None
     status: str
     sent_at: Optional[datetime] = None

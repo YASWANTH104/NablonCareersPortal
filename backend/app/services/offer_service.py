@@ -1,6 +1,7 @@
+import html
 import uuid
 import secrets
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +26,10 @@ def _offer_to_dict(offer: OfferLetter) -> dict:
         "salary_currency": offer.salary_currency,
         "probation_months": offer.probation_months,
         "work_location": offer.work_location,
+        "letter_date": offer.letter_date,
+        "end_date": offer.end_date,
+        "reporting_manager": offer.reporting_manager,
+        "candidate_address": offer.candidate_address,
         "template_id": offer.template_id,
         "status": offer.status,
         "sent_at": offer.sent_at,
@@ -47,17 +52,117 @@ def _render_template(body_html: str, variables: dict) -> str:
     return result
 
 
+_ONES = [
+    "", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
+    "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen",
+]
+_TENS = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"]
+# INR letters use the Indian system (lakh/crore); everything else uses million/billion
+_SCALES_INDIAN = [(10**7, "Crore"), (10**5, "Lakh"), (1000, "Thousand")]
+_SCALES_WESTERN = [(10**9, "Billion"), (10**6, "Million"), (1000, "Thousand")]
+
+
+def _int_in_words(n: int, scales: list) -> str:
+    if n == 0:
+        return ""
+    for size, name in scales:
+        if n >= size:
+            rest = _int_in_words(n % size, scales)
+            return f"{_int_in_words(n // size, scales)} {name}" + (f" {rest}" if rest else "")
+    if n >= 100:
+        rest = _int_in_words(n % 100, scales)
+        return f"{_ONES[n // 100]} Hundred" + (f" {rest}" if rest else "")
+    if n >= 20:
+        return _TENS[n // 10] + (f"-{_ONES[n % 10]}" if n % 10 else "")
+    return _ONES[n]
+
+
+def _amount_in_words(amount, currency: str) -> str:
+    if amount is None:
+        return ""
+    cents = round(float(amount) * 100)
+    whole, fraction = divmod(cents, 100)
+    scales = _SCALES_INDIAN if currency == "INR" else _SCALES_WESTERN
+    words = _int_in_words(whole, scales) or "Zero"
+    if fraction:
+        words += f" and {_int_in_words(fraction, scales)} {'Paise' if currency == 'INR' else 'Cents'}"
+    return words
+
+
+def _format_amount(amount, currency: str) -> str:
+    if amount is None:
+        return ""
+    cents = round(float(amount) * 100)
+    whole, fraction = divmod(cents, 100)
+    digits = str(whole)
+    if currency == "INR" and len(digits) > 3:
+        # 1234567 -> 12,34,567
+        head, tail = digits[:-3], digits[-3:]
+        groups = []
+        while len(head) > 2:
+            groups.insert(0, head[-2:])
+            head = head[:-2]
+        groups.insert(0, head)
+        grouped = ",".join(groups) + "," + tail
+    else:
+        grouped = f"{whole:,}"
+    return grouped + (f".{fraction:02d}" if fraction else "")
+
+
+def _date_variables(name: str, value: Optional[date]) -> dict:
+    """{{name}} stays ISO for existing templates; _long is '5 November 2026', _us is 'November 5, 2026'."""
+    if not value:
+        return {name: "", f"{name}_long": "", f"{name}_us": ""}
+    return {
+        name: str(value),
+        f"{name}_long": f"{value.day} {value:%B %Y}",
+        f"{name}_us": f"{value:%B} {value.day}, {value.year}",
+    }
+
+
+def _duration_months(start: Optional[date], end: Optional[date]) -> str:
+    if not start or not end or end < start:
+        return ""
+    return str(max(1, round(((end - start).days + 1) / 30.44)))
+
+
+def _signature_slot(signature: Optional[str]) -> str:
+    # Fixed height so the signature line sits in the same place before and after signing
+    img = (
+        f'<img src="{signature}" style="position:absolute;left:0;bottom:0;max-height:56px;max-width:220px;" />'
+        if signature else ""
+    )
+    return f'<div style="position:relative;height:56px;">{img}</div>'
+
+
 def _build_variables(offer: OfferLetter, candidate_name: str, dept_name: Optional[str]) -> dict:
+    currency = offer.salary_currency or ""
+    letter_date = offer.letter_date or (offer.created_at.date() if offer.created_at else None)
     return {
         "candidate_name": candidate_name or "",
+        "candidate_first_name": (candidate_name or "").split(" ")[0],
+        "candidate_address": html.escape(offer.candidate_address or "").replace("\n", "<br>"),
         "designation": offer.designation or "",
         "department": dept_name or "",
+        "reporting_manager": html.escape(offer.reporting_manager or ""),
         "salary_ctc": str(offer.salary_ctc) if offer.salary_ctc else "",
-        "salary_currency": offer.salary_currency or "",
-        "joining_date": str(offer.joining_date) if offer.joining_date else "",
+        "salary_ctc_formatted": _format_amount(offer.salary_ctc, currency),
+        "salary_ctc_words": _amount_in_words(offer.salary_ctc, currency),
+        "salary_currency": currency,
+        **_date_variables("letter_date", letter_date),
+        **_date_variables("joining_date", offer.joining_date),
+        **_date_variables("end_date", offer.end_date),
+        "duration_months": _duration_months(offer.joining_date, offer.end_date),
         "probation_months": str(offer.probation_months),
         "work_location": offer.work_location or "",
-        "offer_expiry_date": str(offer.expires_at.date()) if offer.expires_at else "",
+        **_date_variables("offer_expiry_date", offer.expires_at.date() if offer.expires_at else None),
+        "director_signature": _signature_slot(offer.director_signature),
+        **_date_variables(
+            "director_signed_date",
+            offer.director_approved_at.date() if offer.director_approved_at else None,
+        ),
+        "candidate_signature": _signature_slot(offer.candidate_signature),
+        **_date_variables("candidate_signed_date", offer.signed_at.date() if offer.signed_at else None),
         "company_name": "Nablon AI",
     }
 
@@ -433,12 +538,15 @@ async def revoke_offer(db: AsyncSession, offer_id: uuid.UUID) -> OfferLetterResp
 
 def _build_offer_full_html(offer, template, candidate_name: str, dept_name: Optional[str]) -> str:
     body_html = "<p>No template content available.</p>"
-    if template and template.body_html:
+    raw_body = template.body_html if template and template.body_html else ""
+    if raw_body:
         variables = _build_variables(offer, candidate_name or "", dept_name)
-        body_html = _render_template(template.body_html, variables)
+        body_html = _render_template(raw_body, variables)
 
+    # Templates that place {{director_signature}} / {{candidate_signature}} in their own
+    # sign-off block render the image there, so the generic block below is skipped
     signature_block = ""
-    if offer.director_signature:
+    if offer.director_signature and "{{director_signature}}" not in raw_body:
         approved_label = (
             offer.director_approved_at.strftime("%d %B %Y") if offer.director_approved_at else "Approved"
         )
@@ -449,7 +557,7 @@ def _build_offer_full_html(offer, template, candidate_name: str, dept_name: Opti
        style="max-height:80px;border:1px solid #e5e7eb;border-radius:6px;padding:6px;background:#fff;" />
   <p style="font-size:11px;color:#9ca3af;margin-top:4px;">Approved on {approved_label}</p>
 </div>"""
-    if offer.candidate_signature:
+    if offer.candidate_signature and "{{candidate_signature}}" not in raw_body:
         signed_label = (
             offer.signed_at.strftime("%d %B %Y") if offer.signed_at else "Signed"
         )
@@ -461,6 +569,7 @@ def _build_offer_full_html(offer, template, candidate_name: str, dept_name: Opti
   <p style="font-size:11px;color:#9ca3af;margin-top:4px;">Signed on {signed_label}</p>
 </div>"""
 
+    body_class = "letterhead" if "offer-letterhead" in raw_body else ""
     return (
         "<!DOCTYPE html><html><head><meta charset='utf-8'>"
         "<style>"
@@ -469,8 +578,10 @@ def _build_offer_full_html(offer, template, candidate_name: str, dept_name: Opti
         "h1,h2,h3{color:#111827;}"
         "table{width:100%;border-collapse:collapse;}"
         "td,th{padding:8px;border:1px solid #e5e7eb;}"
+        # Letterhead templates set their own @page margins, header and footer
+        "@media print{body.letterhead{padding:0;max-width:none;}}"
         "</style></head>"
-        f"<body>{body_html}{signature_block}</body></html>"
+        f"<body class='{body_class}'>{body_html}{signature_block}</body></html>"
     )
 
 
