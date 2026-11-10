@@ -6,24 +6,18 @@ import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
   ArrowLeft, Eye, Save, Send, RotateCcw, XCircle,
-  AlertTriangle, ExternalLink, Copy, FileText, Check, Link2,
+  AlertTriangle, ExternalLink, Copy, FileText, Check, Link2, PenLine,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { offersApi } from '@/api/offers';
-
-const STATUS_CONFIG = {
-  draft:             { label: 'Draft',                      color: 'text-gray-600 bg-gray-100',   dot: 'bg-gray-400' },
-  pending_director:  { label: 'Awaiting Director Approval',  color: 'text-amber-700 bg-amber-50',  dot: 'bg-amber-400' },
-  director_rejected: { label: 'Rejected by Director',        color: 'text-red-700 bg-red-50',      dot: 'bg-red-500' },
-  sent:              { label: 'Awaiting Candidate Signature',color: 'text-blue-700 bg-blue-50',    dot: 'bg-blue-500' },
-  accepted:          { label: 'Accepted',                    color: 'text-green-700 bg-green-50',  dot: 'bg-green-500' },
-  rejected:          { label: 'Declined by Candidate',       color: 'text-red-700 bg-red-50',      dot: 'bg-red-500' },
-  revoked:           { label: 'Revoked',                     color: 'text-orange-700 bg-orange-50',dot: 'bg-orange-400' },
-  expired:           { label: 'Expired',                     color: 'text-yellow-700 bg-yellow-50',dot: 'bg-yellow-500' },
-};
+import { esignApi } from '@/api/esign';
+import { offerStatus, EDITABLE_OFFER_STATUSES } from '@/constants/offerStatus';
+import SendForSignatureModal from '@/components/offers/SendForSignatureModal';
+import SignatureTracker from '@/components/offers/SignatureTracker';
 
 const BANNERS = {
-  director_rejected: { tone: 'red',    text: 'The director rejected this offer. Revise the details below and resend it for approval.' },
+  director_rejected:  { tone: 'red',    text: 'The company signatory declined this offer. Revise the details below and send it again.' },
+  signature_declined: { tone: 'red',    text: 'Someone on the signing list declined. Their reason is in the tracker. Revise the letter and send it again.' },
   rejected:           { tone: 'red',    text: 'The candidate declined this offer.' },
   revoked:            { tone: 'orange', text: 'This offer was revoked and is no longer active.' },
   expired:            { tone: 'yellow', text: 'This offer expired before it was signed.' },
@@ -324,6 +318,7 @@ export default function OfferBuilderPage() {
 
   const [previewHtml, setPreviewHtml] = useState('');
   const [showConfirmSend, setShowConfirmSend] = useState(false);
+  const [showEsign, setShowEsign] = useState(false);
   const [showConfirmRevoke, setShowConfirmRevoke] = useState(false);
   const [activePanel, setActivePanel] = useState('form'); // 'form' | 'preview' on mobile
 
@@ -351,6 +346,14 @@ export default function OfferBuilderPage() {
     queryFn: () => offersApi.getById(offerId).then((r) => r.data),
     enabled: Boolean(offerId),
   });
+
+  // Zoho Sign takes over sending once its keys are configured
+  const { data: esignStatus } = useQuery({
+    queryKey: ['esign-status'],
+    queryFn: () => esignApi.status().then((r) => r.data),
+    staleTime: 10 * 60 * 1000,
+  });
+  const esignEnabled = Boolean(esignStatus?.configured);
 
   // Fetch templates
   const { data: templates = [] } = useQuery({
@@ -447,6 +450,7 @@ export default function OfferBuilderPage() {
     onSuccess: () => {
       toast.success('Offer revoked');
       queryClient.invalidateQueries({ queryKey: ['offer', offerId] });
+      queryClient.invalidateQueries({ queryKey: ['offer-esign', offerId] });
       queryClient.invalidateQueries({ queryKey: ['offers'] });
       setShowConfirmRevoke(false);
     },
@@ -468,25 +472,58 @@ export default function OfferBuilderPage() {
       reporting_manager: data.reporting_manager || null,
       candidate_address: data.candidate_address || null,
     };
-    if (isNew) {
-      createMut.mutate(payload);
-    } else {
-      updateMut.mutate(payload);
-    }
+    return isNew ? createMut.mutateAsync(payload) : updateMut.mutateAsync(payload);
   }
 
   async function handleSendClick() {
-    // Save first if dirty
+    // Save first if dirty — and wait for it, so the letter that goes out is the one on screen
     if (isDirty) {
-      await handleSubmit(onSave)();
+      let saved = false;
+      await handleSubmit(async (data) => {
+        try { await onSave(data); saved = true; } catch { /* toast already shown */ }
+      })();
+      if (!saved) return;
+      reset(watch(), { keepValues: true });
     }
-    setShowConfirmSend(true);
+    if (esignEnabled) setShowEsign(true);
+    else setShowConfirmSend(true);
   }
 
-  const isEditable = !offer || ['draft', 'director_rejected'].includes(offer.status);
+  function onEsignSent(detail) {
+    queryClient.setQueryData(['offer-esign', offerId], detail);
+    queryClient.invalidateQueries({ queryKey: ['offer', offerId] });
+    queryClient.invalidateQueries({ queryKey: ['offers'] });
+    queryClient.invalidateQueries({ queryKey: ['application-offer'] });
+  }
+
+  async function viewSigned() {
+    try {
+      const url = await offersApi.fetchHtmlBlob(offerId);
+      window.open(url, '_blank', 'noopener');
+    } catch {
+      toast.error("Couldn't open the signed letter");
+    }
+  }
+
+  const isEditable = !offer || EDITABLE_OFFER_STATUSES.includes(offer.status);
   const status = offer?.status ?? 'draft';
-  const statusCfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.draft;
+  const statusCfg = offerStatus(status);
   const banner = BANNERS[status];
+  // Offers that went through the in-portal director → candidate flow keep its stepper
+  // Once everyone has signed, the preview panel shows Zoho's signed PDF (fetched live) instead of the template
+  const signedByZoho = Boolean(offer?.esign_completed_at);
+  const [signedUrl, setSignedUrl] = useState(null);
+  useEffect(() => {
+    if (!signedByZoho) return undefined;
+    let alive = true;
+    let created;
+    offersApi.fetchHtmlBlob(offerId).then((u) => { created = u; if (alive) setSignedUrl(u); }).catch(() => {});
+    return () => { alive = false; if (created) URL.revokeObjectURL(created); };
+  }, [signedByZoho, offerId]);
+
+  const usesLegacyFlow = Boolean(
+    offer && !offer.esign && (['pending_director', 'sent'].includes(status) || offer.director_approved_at || offer.candidate_signature)
+  );
 
   const respondLink = offer?.candidate_token
     ? `${window.location.origin}/offers/respond/${offer.candidate_token}`
@@ -589,14 +626,15 @@ export default function OfferBuilderPage() {
             </div>
           )}
 
-          {/* Approval pipeline */}
-          {offer && (
+          {/* Signing progress: Zoho Sign tracker, or the legacy approval pipeline */}
+          {offer?.esign && <SignatureTracker offerId={offer.id} onViewSigned={viewSigned} />}
+          {(usesLegacyFlow || (offer && !offer.esign && !esignEnabled)) && (
             <ApprovalStepper offer={offer} respondLink={respondLink} onCopyLink={copyRespondLink} />
           )}
 
           {/* Details: editable form or read-only summary */}
           {isEditable ? (
-            <form onSubmit={handleSubmit(onSave)} className="bg-white border border-surface-200 rounded-2xl p-5 space-y-4">
+            <form onSubmit={handleSubmit((d) => onSave(d).catch(() => {}))} className="bg-white border border-surface-200 rounded-2xl p-5 space-y-4">
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Offer Details</p>
 
               <div>
@@ -752,7 +790,23 @@ export default function OfferBuilderPage() {
                   <Save className="w-4 h-4" />
                   {createMut.isPending || updateMut.isPending ? 'Saving...' : 'Save Draft'}
                 </button>
-                {!isNew && (
+                {!isNew && esignEnabled && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleSendClick}
+                      disabled={createMut.isPending || updateMut.isPending}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-brand-500 text-white text-sm font-semibold rounded-xl hover:bg-brand-600 transition-colors disabled:opacity-50"
+                    >
+                      <PenLine className="w-4 h-4" />
+                      {status === 'draft' && !offer?.esign ? 'Send for signature' : 'Send for signature again'}
+                    </button>
+                    <p className="text-[11px] text-gray-400 text-center">
+                      Pick who signs, then Zoho Sign emails each person in turn
+                    </p>
+                  </>
+                )}
+                {!isNew && !esignEnabled && (
                   <button
                     type="button"
                     onClick={handleSendClick}
@@ -768,7 +822,7 @@ export default function OfferBuilderPage() {
           ) : (
             <>
               <OfferSummary offer={offer} />
-              {['pending_director', 'sent'].includes(status) && (
+              {['pending_director', 'sent', 'pending_signatures'].includes(status) && (
                 <button
                   type="button"
                   onClick={() => setShowConfirmRevoke(true)}
@@ -786,11 +840,20 @@ export default function OfferBuilderPage() {
         <div className={`flex-1 min-w-0 ${activePanel === 'form' ? 'hidden lg:flex' : 'flex'} flex-col`}>
           <div className="flex items-center justify-between mb-3 flex-shrink-0">
             <div className="flex items-center gap-2 text-sm font-medium text-gray-600">
-              <Eye className="w-4 h-4 text-gray-400" />
-              <span>Live Preview</span>
+              {signedByZoho ? <PenLine className="w-4 h-4 text-emerald-500" /> : <Eye className="w-4 h-4 text-gray-400" />}
+              <span>{signedByZoho ? 'Signed Letter' : 'Live Preview'}</span>
             </div>
-            <span className="text-xs text-gray-300">Variables are substituted in real-time</span>
+            <span className="text-xs text-gray-300">
+              {signedByZoho ? 'The final PDF from Zoho Sign, with every signature' : 'Variables are substituted in real-time'}
+            </span>
           </div>
+          {signedByZoho ? (
+            <div className="flex-1 min-h-[480px] bg-surface-100 rounded-2xl overflow-hidden">
+              {signedUrl
+                ? <iframe title="Signed offer letter" src={signedUrl} className="w-full h-full min-h-[480px] bg-white" />
+                : <div className="h-full flex items-center justify-center"><div className="w-6 h-6 border-2 border-brand-300 border-t-brand-600 rounded-full animate-spin" /></div>}
+            </div>
+          ) : (
           <div className="flex-1 bg-surface-100 rounded-2xl overflow-auto p-3 sm:p-6">
             <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-sm border border-surface-200 min-h-full">
               <div className="flex items-center gap-2 px-4 sm:px-6 py-3 border-b border-surface-100">
@@ -803,8 +866,13 @@ export default function OfferBuilderPage() {
               />
             </div>
           </div>
+          )}
         </div>
       </div>
+
+      {showEsign && offer && (
+        <SendForSignatureModal offer={offer} onClose={() => setShowEsign(false)} onSent={onEsignSent} />
+      )}
 
       {/* Confirm Send Dialog */}
       {showConfirmSend && (
@@ -846,7 +914,9 @@ export default function OfferBuilderPage() {
             </div>
             <h3 className="font-display text-lg font-bold text-gray-900 mb-2">Revoke this Offer?</h3>
             <p className="text-sm text-gray-500 mb-5">
-              Any pending director or candidate response link will be invalidated immediately. This action cannot be undone.
+              {status === 'pending_signatures'
+                ? 'Zoho Sign cancels every open signing link right away, and the offer closes for good. To change the letter instead, use Recall & edit.'
+                : 'Any pending director or candidate response link will be invalidated immediately. This action cannot be undone.'}
             </p>
             <div className="flex gap-3">
               <button

@@ -8,12 +8,15 @@ import {
   Building2, Users, Plus, Trash2, Pencil, Check, X, UserPlus, Loader2, Search,
   UserCog, ShieldCheck, KeyRound, Mail, BadgeCheck, AlertCircle, Info, Clock,
   MailWarning, CircleSlash, ArrowRight, Save, CalendarClock, Send,
+  Plug, PenLine, Copy, Webhook, PlugZap, CheckCircle2, XCircle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { jobsApi } from '@/api/jobs';
 import { usersApi } from '@/api/users';
 import { authApi } from '@/api/auth';
 import { scheduledReportsApi } from '@/api/scheduledReports';
+import { esignApi } from '@/api/esign';
+import { PARTY_ROLES, ASSIGNABLE_PARTY_ROLES } from '@/constants/offerStatus';
 import { useAuthStore } from '@/store/authStore';
 import { ROLES, ADMIN_ROLES } from '@/utils/permissions';
 import { useDebounced } from '@/hooks/useDebounced';
@@ -26,6 +29,7 @@ const SECTIONS = [
   { key: 'departments', label: 'Departments', icon: Building2, blurb: 'Used across jobs and reports' },
   { key: 'team', label: 'Team access', icon: Users, blurb: 'Who can use this console' },
   { key: 'reports', label: 'Scheduled reports', icon: CalendarClock, blurb: 'Weekly and monthly hiring emails' },
+  { key: 'integrations', label: 'Integrations', icon: Plug, blurb: 'Zoho Sign for offer letters' },
 ];
 
 const ROLE_LABELS = {
@@ -1414,6 +1418,349 @@ function ScheduledReportsSection() {
   );
 }
 
+// ── Integrations ─────────────────────────────────────────────────────────────
+
+const ZOHO_WEBHOOK_STEPS = [
+  'In Zoho Sign, open Settings → Developer settings → Webhooks and choose Create webhook.',
+  'Paste the URL above, select every document event, and turn on HMAC with a secret key.',
+  'Put that same secret in the backend as ZOHO_SIGN_WEBHOOK_SECRET.',
+];
+
+function EsignDefaultsForm({ data, canManage }) {
+  const qc = useQueryClient();
+  const [draft, setDraft] = useState(data);
+  const [partyInput, setPartyInput] = useState({ name: '', email: '', role: 'viewer' });
+  const [partyError, setPartyError] = useState('');
+
+  useEffect(() => { setDraft(data); }, [data]);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(data);
+
+  const saveMut = useMutation({
+    mutationFn: (payload) => esignApi.updateSettings(payload).then((r) => r.data),
+    onSuccess: (saved) => {
+      toast.success('Signing defaults saved');
+      qc.setQueryData(['esign-settings'], saved);
+    },
+    onError: (err) => toast.error(err.response?.data?.detail?.[0]?.msg ?? err.response?.data?.detail ?? 'Could not save'),
+  });
+
+  const addParty = () => {
+    const name = partyInput.name.trim();
+    const email = partyInput.email.trim().toLowerCase();
+    if (!name) return setPartyError('Add a name');
+    if (!EMAIL_RE.test(email)) return setPartyError('Not a valid email');
+    if (draft.default_parties.some((p) => p.email === email) || email === draft.signatory_email?.toLowerCase()) {
+      return setPartyError('Already on the list');
+    }
+    if (draft.default_parties.length >= 5) return setPartyError('Up to 5 standing parties');
+    setDraft({ ...draft, default_parties: [...draft.default_parties, { name, email, role: partyInput.role }] });
+    setPartyInput({ name: '', email: '', role: partyInput.role });
+    setPartyError('');
+  };
+
+  const save = () => saveMut.mutate({
+    signatory_name: draft.signatory_name?.trim() || null,
+    signatory_email: draft.signatory_email?.trim() || null,
+    default_parties: draft.default_parties,
+    expiration_days: Number(draft.expiration_days),
+    reminder_days: draft.reminder_days ? Number(draft.reminder_days) : null,
+    note: draft.note?.trim() || null,
+  });
+
+  return (
+    <>
+      <Card
+        title="Signing defaults"
+        description="What the Send for signature dialog starts with. HR can still change anything per offer."
+        icon={PenLine}
+      >
+        <div className="space-y-5">
+          <div className="grid sm:grid-cols-2 gap-3">
+            <Field label="Signs for Nablon" hint="first signer by default">
+              <input
+                value={draft.signatory_name ?? ''}
+                disabled={!canManage}
+                onChange={(e) => setDraft({ ...draft, signatory_name: e.target.value })}
+                placeholder="e.g. Ravindra Patil"
+                className={inputClass}
+              />
+            </Field>
+            <Field label="Their email">
+              <input
+                type="email"
+                value={draft.signatory_email ?? ''}
+                disabled={!canManage}
+                onChange={(e) => setDraft({ ...draft, signatory_email: e.target.value })}
+                placeholder="director@nablon.ai"
+                className={inputClass}
+              />
+            </Field>
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-gray-700 mb-1">Always include</p>
+            <p className="text-[11px] text-gray-500 mb-2.5">Added to every envelope after the candidate, e.g. HR getting a copy of every signed letter.</p>
+            {draft.default_parties.length > 0 && (
+              <ul className="space-y-1.5 mb-2.5">
+                {draft.default_parties.map((p) => (
+                  <li key={p.email} className="flex items-center gap-3 px-3 py-2 rounded-lg border border-surface-200 bg-surface-50/60">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-900 truncate">{p.name}</p>
+                      <p className="text-xs text-gray-500 truncate">{p.email}</p>
+                    </div>
+                    <span className={cn('text-[11px] font-semibold rounded-full border px-2 py-0.5', PARTY_ROLES[p.role]?.tone)}>
+                      {PARTY_ROLES[p.role]?.label}
+                    </span>
+                    {canManage && (
+                      <button
+                        type="button"
+                        onClick={() => setDraft({ ...draft, default_parties: draft.default_parties.filter((x) => x.email !== p.email) })}
+                        aria-label={`Remove ${p.name}`}
+                        className="p-1 rounded text-gray-400 hover:text-rose-600 hover:bg-white"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {canManage && (
+              <>
+                <div className="grid sm:grid-cols-[1fr_1fr_auto_auto] gap-2">
+                  <input
+                    value={partyInput.name}
+                    onChange={(e) => { setPartyInput({ ...partyInput, name: e.target.value }); setPartyError(''); }}
+                    placeholder="Name"
+                    className={inputClass}
+                    aria-label="Party name"
+                  />
+                  <input
+                    value={partyInput.email}
+                    onChange={(e) => { setPartyInput({ ...partyInput, email: e.target.value }); setPartyError(''); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addParty(); } }}
+                    placeholder="Email"
+                    className={inputClass}
+                    aria-label="Party email"
+                  />
+                  <select
+                    value={partyInput.role}
+                    onChange={(e) => setPartyInput({ ...partyInput, role: e.target.value })}
+                    className={cn(inputClass, 'w-auto')}
+                    aria-label="What they do"
+                  >
+                    {ASSIGNABLE_PARTY_ROLES.map((r) => <option key={r} value={r}>{PARTY_ROLES[r].label}</option>)}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={addParty}
+                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 border border-surface-300 text-gray-700 text-sm font-semibold rounded-lg hover:bg-surface-50"
+                  >
+                    <Plus className="w-4 h-4" /> Add
+                  </button>
+                </div>
+                {partyError && (
+                  <p className="flex items-center gap-1 text-[11px] text-rose-600 mt-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" /> {partyError}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+
+          <div className="grid sm:grid-cols-2 gap-3">
+            <Field label="Signing link expires after">
+              <select
+                value={draft.expiration_days}
+                disabled={!canManage}
+                onChange={(e) => setDraft({ ...draft, expiration_days: Number(e.target.value) })}
+                className={inputClass}
+              >
+                {[7, 10, 14, 21, 30, 45, 60].map((d) => <option key={d} value={d}>{d} days</option>)}
+              </select>
+            </Field>
+            <Field label="Automatic reminders">
+              <select
+                value={draft.reminder_days ?? ''}
+                disabled={!canManage}
+                onChange={(e) => setDraft({ ...draft, reminder_days: e.target.value ? Number(e.target.value) : null })}
+                className={inputClass}
+              >
+                <option value="">Off</option>
+                {[1, 2, 3, 5, 7].map((d) => <option key={d} value={d}>Every {d} day{d > 1 ? 's' : ''}</option>)}
+              </select>
+            </Field>
+          </div>
+
+          <Field label="Default message to signers" hint="optional">
+            <textarea
+              value={draft.note ?? ''}
+              disabled={!canManage}
+              onChange={(e) => setDraft({ ...draft, note: e.target.value })}
+              rows={3}
+              maxLength={1000}
+              placeholder="Leave blank to use: Hi, please review and sign the offer letter for <candidate> (<role>)."
+              className={cn(inputClass, 'resize-none')}
+            />
+          </Field>
+        </div>
+      </Card>
+
+      {canManage ? (
+        <div className="flex items-center justify-end gap-2">
+          {dirty && (
+            <button type="button" onClick={() => setDraft(data)} className="px-4 py-2.5 text-sm font-semibold text-gray-600 hover:text-gray-900">
+              Discard
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={!dirty || saveMut.isPending}
+            onClick={save}
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-brand-500 text-white text-sm font-semibold rounded-lg hover:bg-brand-600 disabled:opacity-50 transition-colors"
+          >
+            {saveMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            Save changes
+          </button>
+        </div>
+      ) : (
+        <Notice>Only admins can change signing defaults.</Notice>
+      )}
+    </>
+  );
+}
+
+function IntegrationsSection() {
+  const { user: currentUser } = useAuthStore();
+  // PUT /esign/settings and POST /esign/test are ADMIN/SUPER_ADMIN on the backend
+  const canManage = ADMIN_ROLES.includes(currentUser?.role);
+  const [testResult, setTestResult] = useState(null);
+
+  const { data: status, isLoading: statusLoading } = useQuery({
+    queryKey: ['esign-status'],
+    queryFn: () => esignApi.status().then((r) => r.data),
+  });
+  const { data: defaults } = useQuery({
+    queryKey: ['esign-settings'],
+    queryFn: () => esignApi.getSettings().then((r) => r.data),
+  });
+
+  const testMut = useMutation({
+    mutationFn: () => esignApi.testConnection().then((r) => r.data),
+    onSuccess: setTestResult,
+    onError: (err) => setTestResult({ ok: false, message: err.response?.data?.detail ?? 'Could not reach the backend' }),
+  });
+
+  if (statusLoading || !status) {
+    return (
+      <Card title="Zoho Sign" description="Loading…" icon={PenLine}>
+        <div className="h-24 bg-surface-50 rounded-xl animate-pulse" />
+      </Card>
+    );
+  }
+
+  const copyWebhook = () => {
+    navigator.clipboard.writeText(status.webhook_url);
+    toast.success('Webhook URL copied');
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card
+        title="Zoho Sign"
+        description="Offer letters are signed through Zoho Sign: legally binding, with reminders and an audit certificate."
+        icon={PenLine}
+        action={
+          <span className={cn(
+            'inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1',
+            status.configured ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+          )}>
+            <span className={cn('w-1.5 h-1.5 rounded-full', status.configured ? 'bg-emerald-500' : 'bg-amber-500')} />
+            {status.configured ? 'Keys added' : 'Not set up'}
+          </span>
+        }
+      >
+        <div className="space-y-3">
+          {status.configured ? (
+            <p className="text-xs text-gray-600">
+              <strong className="text-gray-800">Send for signature</strong> is live in the offer builder. Region: <code className="text-[11px] bg-surface-100 rounded px-1 py-0.5">{status.api_base}</code>
+            </p>
+          ) : (
+            <Notice tone="warn" icon={PlugZap}>
+              Add these to the backend environment (all three Container Apps) to switch offers to Zoho Sign:{' '}
+              {status.missing_keys.map((k, i) => (
+                <span key={k}>
+                  <code className="text-[11px] bg-white/70 border border-amber-200 rounded px-1 py-px">{k}</code>
+                  {i < status.missing_keys.length - 1 ? ' ' : ''}
+                </span>
+              ))}
+              . Until then, offers keep the in-portal director → candidate signing.
+            </Notice>
+          )}
+
+          {canManage && (
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => { setTestResult(null); testMut.mutate(); }}
+                disabled={!status.configured || testMut.isPending}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 border border-surface-300 text-gray-700 text-sm font-semibold rounded-lg hover:bg-surface-50 disabled:opacity-50"
+              >
+                {testMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plug className="w-4 h-4" />}
+                Test connection
+              </button>
+              {testResult && (
+                <span className={cn('inline-flex items-center gap-1.5 text-xs font-medium', testResult.ok ? 'text-emerald-700' : 'text-rose-600')}>
+                  {testResult.ok ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                  {testResult.message}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </Card>
+
+      <Card
+        title="Live status updates"
+        description="Zoho calls this URL the moment someone views, signs or declines, so the tracker updates on its own."
+        icon={Webhook}
+        action={
+          <span className={cn(
+            'inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1',
+            status.webhook_configured ? 'bg-emerald-50 text-emerald-700' : 'bg-surface-100 text-gray-600'
+          )}>
+            {status.webhook_configured ? 'Secret set' : 'Secret not set'}
+          </span>
+        }
+      >
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <input readOnly value={status.webhook_url} className={cn(inputClass, 'font-mono text-xs bg-surface-50')} aria-label="Webhook URL" onFocus={(e) => e.target.select()} />
+            <button
+              type="button"
+              onClick={copyWebhook}
+              className="shrink-0 inline-flex items-center gap-1.5 px-3.5 py-2.5 border border-surface-300 text-gray-700 text-sm font-semibold rounded-lg hover:bg-surface-50"
+            >
+              <Copy className="w-4 h-4" /> Copy
+            </button>
+          </div>
+          <ol className="space-y-1.5">
+            {ZOHO_WEBHOOK_STEPS.map((step, i) => (
+              <li key={step} className="flex items-start gap-2.5 text-xs text-gray-600">
+                <span className="w-5 h-5 rounded-full bg-surface-100 text-gray-500 text-[11px] font-bold flex items-center justify-center shrink-0">{i + 1}</span>
+                <span className="pt-0.5">{step}</span>
+              </li>
+            ))}
+          </ol>
+          <p className="text-[11px] text-gray-400">Missed events are caught by a 30-minute background check, and HR can hit refresh on any offer.</p>
+        </div>
+      </Card>
+
+      {defaults && <EsignDefaultsForm data={defaults} canManage={canManage} />}
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
@@ -1423,7 +1770,7 @@ export default function SettingsPage() {
     <div className="max-w-[1200px]">
       <PageHeader
         title="Settings"
-        description="Your account, the departments jobs are filed under, who can use this console, and scheduled report emails."
+        description="Your account, the departments jobs are filed under, who can use this console, scheduled report emails, and Zoho Sign."
       />
 
       <div className="grid lg:grid-cols-[232px_1fr] gap-4 lg:gap-6 items-start">
@@ -1463,6 +1810,7 @@ export default function SettingsPage() {
           {section === 'departments' && <DepartmentsSection />}
           {section === 'team' && <TeamSection />}
           {section === 'reports' && <ScheduledReportsSection />}
+          {section === 'integrations' && <IntegrationsSection />}
         </div>
       </div>
     </div>

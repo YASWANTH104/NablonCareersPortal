@@ -1,19 +1,19 @@
 import uuid
 from typing import Optional
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user, require_roles, Role
-from typing import Optional
 from app.schemas.offer import (
     OfferTemplateCreate, OfferTemplateUpdate, OfferTemplateResponse,
     OfferLetterCreate, OfferLetterUpdate, OfferLetterResponse,
     OfferLetterListResponse, OfferRespondRequest, CandidateOfferResponse,
     DirectorOfferResponse, DirectorDecisionRequest,
 )
-from app.services import offer_service
+from app.schemas.esign import EsignSendRequest
+from app.services import offer_service, esign_service
 
 router = APIRouter(prefix="/offers", tags=["offers"])
 
@@ -103,20 +103,45 @@ async def respond_my_offer(
     )
 
 
+async def _my_offer(db: AsyncSession, application_id: uuid.UUID, user_id: uuid.UUID):
+    """The caller's own offer, once it's been released to them."""
+    from app.models.offer import OfferLetter
+    from app.models.application import Application
+    from sqlalchemy import select as _select
+    offer = (await db.execute(
+        _select(OfferLetter)
+        .join(Application, Application.id == OfferLetter.application_id)
+        .where(OfferLetter.application_id == application_id, Application.applicant_id == user_id)
+    )).scalar_one_or_none()
+    if not offer or offer.status not in offer_service.CANDIDATE_VISIBLE_STATUSES:
+        raise HTTPException(404, "Offer not found or not yet sent")
+    return offer
+
+
+async def _signed_pdf_response(db: AsyncSession, offer, disposition: str, kind: str = "pdf") -> Response:
+    """Streams the Zoho-signed document straight through — fetched from Zoho per
+    request, never stored by us, and marked no-store so browsers don't keep it either."""
+    content = await esign_service.fetch_signed_document(db, offer.id, kind)
+    filename = "offer_signing_certificate.pdf" if kind == "certificate" else "offer_letter_signed.pdf"
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'{disposition}; filename="{filename}"',
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
 @router.get("/mine/{application_id}/view")
 async def view_my_offer_html(
     application_id: uuid.UUID,
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    from app.models.offer import OfferLetter
-    from sqlalchemy import select as _select
-    from fastapi import HTTPException
-    offer = (await db.execute(
-        _select(OfferLetter).where(OfferLetter.application_id == application_id)
-    )).scalar_one_or_none()
-    if not offer or offer.status not in ("sent", "accepted", "rejected", "expired", "revoked"):
-        raise HTTPException(404, "Offer not found or not yet sent")
+    offer = await _my_offer(db, application_id, current_user.id)
+    if offer.esign_completed_at:
+        return await _signed_pdf_response(db, offer, "inline")
     html = await offer_service.build_offer_html(db, offer.id)
     return Response(content=html, media_type="text/html; charset=utf-8")
 
@@ -127,14 +152,9 @@ async def download_my_offer_pdf(
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    from app.models.offer import OfferLetter
-    from sqlalchemy import select as _select
-    from fastapi import HTTPException
-    offer = (await db.execute(
-        _select(OfferLetter).where(OfferLetter.application_id == application_id)
-    )).scalar_one_or_none()
-    if not offer or offer.status not in ("sent", "accepted", "rejected", "expired", "revoked"):
-        raise HTTPException(404, "Offer not found or not yet sent")
+    offer = await _my_offer(db, application_id, current_user.id)
+    if offer.esign_completed_at:
+        return await _signed_pdf_response(db, offer, "attachment")
     pdf_bytes = await offer_service.build_offer_pdf(db, offer.id)
     filename = "offer_letter_signed.pdf" if offer.candidate_signature else "offer_letter.pdf"
     return Response(
@@ -197,6 +217,8 @@ async def view_offer_html(
     offer = await db.get(OfferLetter, offer_id)
     if not offer:
         raise _HTTPException(404, "Offer not found")
+    if offer.esign_completed_at:
+        return await _signed_pdf_response(db, offer, "inline")
     html = await offer_service.build_offer_html(db, offer_id)
     return Response(content=html, media_type="text/html; charset=utf-8")
 
@@ -212,6 +234,8 @@ async def download_offer_pdf(
     offer = await db.get(OfferLetter, offer_id)
     if not offer:
         raise _HTTPException(404, "Offer not found")
+    if offer.esign_completed_at:
+        return await _signed_pdf_response(db, offer, "attachment")
     pdf_bytes = await offer_service.build_offer_pdf(db, offer_id)
     filename = "offer_letter_signed.pdf" if offer.candidate_signature else "offer_letter.pdf"
     return Response(
@@ -266,3 +290,64 @@ async def revoke_offer(
     db: AsyncSession = Depends(get_db),
 ):
     return await offer_service.revoke_offer(db, offer_id)
+
+
+# ── Zoho Sign e-signature ─────────────────────────────────────────────────────
+
+@router.get("/{offer_id}/esign")
+async def get_offer_esign(
+    offer_id: uuid.UUID,
+    user=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await esign_service.get_detail(db, offer_id)
+
+
+@router.post("/{offer_id}/esign/send")
+async def send_offer_for_signature(
+    offer_id: uuid.UUID,
+    data: EsignSendRequest,
+    user=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await esign_service.send_for_signature(db, offer_id, data, user.id)
+
+
+@router.post("/{offer_id}/esign/remind")
+async def remind_offer_signers(
+    offer_id: uuid.UUID,
+    user=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await esign_service.remind(db, offer_id, user)
+
+
+@router.post("/{offer_id}/esign/recall")
+async def recall_offer_signature(
+    offer_id: uuid.UUID,
+    user=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await esign_service.recall(db, offer_id, user)
+
+
+@router.post("/{offer_id}/esign/refresh")
+async def refresh_offer_signature(
+    offer_id: uuid.UUID,
+    user=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await esign_service.refresh(db, offer_id)
+
+
+@router.get("/{offer_id}/certificate")
+async def download_offer_certificate(
+    offer_id: uuid.UUID,
+    user=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models.offer import OfferLetter
+    offer = await db.get(OfferLetter, offer_id)
+    if not offer:
+        raise HTTPException(404, "Offer not found")
+    return await _signed_pdf_response(db, offer, "attachment", kind="certificate")

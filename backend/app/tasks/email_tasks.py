@@ -1178,6 +1178,67 @@ async def _notify_hr_offer_accepted_async(offer_id: str):
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def notify_hr_offer_signature_declined(self, offer_id: str):
+    try:
+        asyncio.run(_notify_hr_offer_signature_declined_async(offer_id))
+    except Exception as exc:
+        logger.error(f"HR e-sign decline notification failed: offer={offer_id}: {exc}")
+        raise self.retry(exc=exc)
+
+
+async def _notify_hr_offer_signature_declined_async(offer_id: str):
+    """Someone declined to sign the offer in Zoho Sign — HR needs to know who and why."""
+    from app.models.offer import OfferLetter
+    from app.models.application import Application
+    from app.models.user import User
+    from app.models.job import Job
+    from app.models.esign import OfferSignatureRequest, OfferSigner
+    from app.services.email_service import send_email
+    from app.config import settings
+    from sqlalchemy import select
+
+    offer_uuid = uuid.UUID(offer_id)
+
+    async with _task_session() as db:
+        row = (await db.execute(
+            select(OfferLetter, User.full_name, Job.title.label("job_title"))
+            .join(Application, Application.id == OfferLetter.application_id)
+            .join(User, User.id == Application.applicant_id)
+            .join(Job, Job.id == Application.job_id)
+            .where(OfferLetter.id == offer_uuid)
+        )).first()
+        if not row:
+            logger.warning(f"Offer {offer_id} not found for e-sign decline notification")
+            return
+        offer, candidate_name, job_title = row
+
+        decliner = (await db.execute(
+            select(OfferSigner)
+            .join(OfferSignatureRequest, OfferSignatureRequest.id == OfferSigner.signature_request_id)
+            .where(OfferSignatureRequest.offer_id == offer_uuid, OfferSigner.status == "declined")
+            .order_by(OfferSignatureRequest.created_at.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+
+        is_candidate = bool(decliner and decliner.role == "candidate")
+        await send_email(
+            to_email=settings.HR_NOTIFICATION_EMAIL,
+            subject=f"Offer {'declined' if is_candidate else 'not signed'}: {candidate_name} — {job_title}",
+            template_name="offer_signature_declined",
+            context={
+                "candidate_name": candidate_name or "",
+                "job_title": job_title or "",
+                "decliner_name": decliner.name if decliner else "A signing party",
+                "decliner_email": decliner.email if decliner else "",
+                "is_candidate": is_candidate,
+                "reason": (decliner.decline_reason if decliner else None) or "",
+                "portal_url": f"{settings.FRONTEND_URL}/hr/offers/{offer_id}",
+            },
+        )
+        logger.info(f"HR e-sign decline notification sent: offer={offer_id}")
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def send_report_email_task(self, to_emails: list[str], report_title: str, xlsx_base64: str, sent_by_name: str):
     try:
         asyncio.run(_send_report_email_async(to_emails, report_title, xlsx_base64, sent_by_name))

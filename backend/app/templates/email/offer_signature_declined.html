@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Offer Not Signed – Nablon AI{% endblock %}
+
+{% block content %}
+{% if is_candidate %}
+<h2>Offer Declined</h2>
+<p>
+  <strong>{{ candidate_name }}</strong> declined to sign the offer letter for the
+  <strong>{{ job_title }}</strong> role in Zoho Sign.
+</p>
+{% else %}
+<h2>Offer Signature Declined</h2>
+<p>
+  <strong>{{ decliner_name }}</strong> declined to sign the offer letter for
+  <strong>{{ candidate_name }}</strong> ({{ job_title }}) in Zoho Sign. The candidate
+  hasn't been asked to sign yet, or their copy is now void.
+</p>
+{% endif %}
+
+<table style="width:100%; border-collapse:collapse; margin:20px 0; font-size:14px;">
+  <tr style="border-bottom:1px solid #E5E7EB;">
+    <td style="padding:8px 4px; color:#6B7280; width:40%;">Declined by</td>
+    <td style="padding:8px 4px; font-weight:600; color:#111827;">{{ decliner_name }}{% if decliner_email %} ({{ decliner_email }}){% endif %}</td>
+  </tr>
+  <tr>
+    <td style="padding:8px 4px; color:#6B7280;">Reason given</td>
+    <td style="padding:8px 4px; font-weight:600; color:#111827;">{{ reason or "No reason given" }}</td>
+  </tr>
+</table>
+
+{% if is_candidate %}
+<p>The offer is now marked as declined.</p>
+{% else %}
+<p>You can edit the letter and send it for signature again from the offer builder.</p>
+{% endif %}
+
+<a href="{{ portal_url }}" class="cta">Open the Offer</a>
+{% endblock %}

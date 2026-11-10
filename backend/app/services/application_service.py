@@ -1061,7 +1061,8 @@ async def move_stage(
         offer = (await db.execute(
             _select(OfferLetter).where(OfferLetter.application_id == application_id)
         )).scalar_one_or_none()
-        if not offer or offer.status != "accepted" or not offer.candidate_signature:
+        from app.services.offer_service import is_offer_signed
+        if not offer or not is_offer_signed(offer):
             raise HTTPException(
                 400,
                 "Cannot mark as hired — candidate must accept and digitally sign the offer letter first."
@@ -1205,6 +1206,9 @@ async def mark_offer_accepted(
     offer = (await db.execute(
         _select(OfferLetter).where(OfferLetter.application_id == application_id)
     )).scalar_one_or_none()
+    if offer and offer.status == "pending_signatures":
+        # A live Zoho Sign envelope would keep collecting signatures on an offer we'd already closed
+        raise HTTPException(400, "This offer is out for signature in Zoho Sign. Wait for it to complete, or recall it first.")
 
     now = datetime.now(timezone.utc)
     if not offer:

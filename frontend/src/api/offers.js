@@ -1,5 +1,7 @@
 import client from './client';
 
+const viewType = (res) => (res.headers['content-type']?.includes('pdf') ? 'application/pdf' : 'text/html');
+
 export const offersApi = {
   // Templates
   listTemplates: () => client.get('/offers/templates'),
@@ -28,16 +30,16 @@ export const offersApi = {
   getMyOffer: (applicationId) => client.get(`/offers/mine/${applicationId}`),
   respondMyOffer: (applicationId, data) => client.post(`/offers/mine/${applicationId}/respond`, data),
 
-  // Inline HTML view — no WeasyPrint, instant
+  // Inline view — the HTML letter, or the Zoho-signed PDF once there is one
   fetchMyHtmlBlob: async (applicationId) => {
     const res = await client.get(`/offers/mine/${applicationId}/view`, { responseType: 'blob' });
-    return URL.createObjectURL(new Blob([res.data], { type: 'text/html' }));
+    return URL.createObjectURL(new Blob([res.data], { type: viewType(res) }));
   },
 
-  // HR inline HTML view
+  // HR inline view — same rule as above
   fetchHtmlBlob: async (offerId) => {
     const res = await client.get(`/offers/${offerId}/view`, { responseType: 'blob' });
-    return URL.createObjectURL(new Blob([res.data], { type: 'text/html' }));
+    return URL.createObjectURL(new Blob([res.data], { type: viewType(res) }));
   },
 
   // Forces a file-save PDF download (uses WeasyPrint)

@@ -1,42 +1,51 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { format, parseISO } from 'date-fns';
-import { FileText, Send, CheckCircle, XCircle, RotateCcw, Clock, AlertCircle, Plus, Settings, Trash2, Edit2 } from 'lucide-react';
+import { FileText, Send, Plus, Settings, Trash2, Edit2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import { offersApi } from '@/api/offers';
+import { offerStatus } from '@/constants/offerStatus';
 
 const STATUS_TABS = [
   { value: '', label: 'All' },
   { value: 'draft', label: 'Draft' },
+  { value: 'pending_signatures', label: 'Out for Signature' },
+  { value: 'accepted', label: 'Signed' },
+  { value: 'signature_declined', label: 'Signature Declined' },
   { value: 'pending_director', label: 'Awaiting Director' },
-  { value: 'director_rejected', label: 'Director Rejected' },
+  { value: 'director_rejected', label: 'Signatory Declined' },
   { value: 'sent', label: 'Sent' },
-  { value: 'accepted', label: 'Accepted' },
   { value: 'rejected', label: 'Rejected' },
   { value: 'revoked', label: 'Revoked' },
   { value: 'expired', label: 'Expired' },
 ];
 
-const STATUS_CONFIG = {
-  draft:             { icon: Clock,         label: 'Draft',             color: 'bg-gray-100 text-gray-600',    dot: 'bg-gray-400' },
-  pending_director:  { icon: Clock,         label: 'Awaiting Director', color: 'bg-amber-100 text-amber-700',  dot: 'bg-amber-400' },
-  director_rejected: { icon: XCircle,       label: 'Director Rejected', color: 'bg-red-100 text-red-700',      dot: 'bg-red-500' },
-  sent:              { icon: Send,          label: 'Sent',              color: 'bg-blue-100 text-blue-700',    dot: 'bg-blue-500' },
-  accepted:          { icon: CheckCircle,   label: 'Accepted',          color: 'bg-green-100 text-green-700',  dot: 'bg-green-500' },
-  rejected:          { icon: XCircle,       label: 'Rejected',          color: 'bg-red-100 text-red-700',      dot: 'bg-red-500' },
-  revoked:           { icon: RotateCcw,     label: 'Revoked',           color: 'bg-orange-100 text-orange-700',dot: 'bg-orange-400' },
-  expired:           { icon: AlertCircle,   label: 'Expired',           color: 'bg-yellow-100 text-yellow-700',dot: 'bg-yellow-400' },
-};
-
 function StatusBadge({ status }) {
-  const cfg = STATUS_CONFIG[status] ?? { label: status, color: 'bg-gray-100 text-gray-600', dot: 'bg-gray-400' };
+  const cfg = offerStatus(status);
   return (
     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${cfg.color}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
       {cfg.label}
     </span>
+  );
+}
+
+// "1 of 2 signed" under the badge, while a Zoho Sign envelope is live
+function SigningProgress({ esign }) {
+  if (!esign || esign.status !== 'inprogress' || !esign.total_signers) return null;
+  const pct = Math.round((esign.signed_count / esign.total_signers) * 100);
+  return (
+    <div className="mt-1.5 w-36">
+      <div className="h-1 rounded-full bg-surface-100 overflow-hidden">
+        <div className="h-full bg-brand-500 rounded-full" style={{ width: `${Math.max(pct, esign.signed_count ? 8 : 0)}%` }} />
+      </div>
+      <p className="text-[11px] text-gray-400 mt-1 truncate">
+        {esign.signed_count}/{esign.total_signers} signed
+        {esign.waiting_on?.length ? ` · with ${esign.waiting_on[0].split(' ')[0]}` : ''}
+      </p>
+    </div>
   );
 }
 
@@ -181,6 +190,7 @@ function TemplateModal({ onClose }) {
                     Also: candidate_first_name, candidate_address, reporting_manager, salary_ctc_formatted,
                     salary_ctc_words, end_date, duration_months, letter_date, director_signature,
                     candidate_signature. Dates take a _long (5 November 2026) or _us (November 5, 2026) suffix.
+                    With Zoho Sign, director_signature and candidate_signature mark where the signature boxes go.
                   </p>
                   <textarea
                     {...register('body_html', { required: true })}
@@ -253,7 +263,7 @@ export default function OffersPage() {
     queryKey: ['offers', { status: activeTab, page }],
     queryFn: () =>
       offersApi.list({ status: activeTab || undefined, page, limit: 20 }).then((r) => r.data),
-    keepPreviousData: true,
+    placeholderData: keepPreviousData,
   });
 
   const offers = data?.items ?? [];
@@ -358,6 +368,7 @@ export default function OffersPage() {
                   </td>
                   <td className="px-5 py-4">
                     <StatusBadge status={offer.status} />
+                    <SigningProgress esign={offer.esign} />
                   </td>
                   <td className="px-5 py-4 text-xs text-gray-400">
                     {offer.sent_at

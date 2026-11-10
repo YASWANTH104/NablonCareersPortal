@@ -11,7 +11,7 @@ import {
   Clock, User, Github, Linkedin, Globe, ChevronDown, Plus, Loader2,
   Video, Phone, MapPin, CheckCircle2, AlertCircle, Send, FolderOpen, Download, Eye, X,
   Pencil, Wallet, Briefcase, GraduationCap, AlertTriangle, Pause, PlayCircle, ArrowRightLeft,
-  Paperclip, XCircle, Trash2, Layers, UserPlus, Users,
+  Paperclip, XCircle, Trash2, Layers, UserPlus, Users, PenLine,
 } from 'lucide-react';
 import { PendingAttachmentChip, NoteAttachmentGallery } from '@/components/shared/NoteAttachments';
 import FilePreviewModal from '@/components/shared/FilePreviewModal';
@@ -24,6 +24,8 @@ import { ASSESSMENT_STATUS_STYLES } from '@/constants/assessmentResults';
 import { ASSESSMENT_PRESETS } from '@/constants/assessmentPresets';
 import { jobsApi } from '@/api/jobs';
 import { offersApi } from '@/api/offers';
+import { offerStatus } from '@/constants/offerStatus';
+import SignatureTracker from '@/components/offers/SignatureTracker';
 import { usersApi } from '@/api/users';
 import { documentsApi } from '@/api/documents';
 import { screeningApi } from '@/api/screening';
@@ -2000,15 +2002,6 @@ export default function ApplicationDetailPage() {
     ? [...app.stage_history].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0]
     : null;
 
-  const OFFER_STATUS_COLORS = {
-    draft:    'bg-gray-100 text-gray-600',
-    sent:     'bg-blue-100 text-blue-700',
-    accepted: 'bg-green-100 text-green-700',
-    rejected: 'bg-red-100 text-red-700',
-    revoked:  'bg-orange-100 text-orange-700',
-    expired:  'bg-yellow-100 text-yellow-700',
-  };
-
   const TABS = [
     { key: 'overview', label: 'Overview' },
     { key: 'resume', label: 'Resume' },
@@ -2124,8 +2117,7 @@ export default function ApplicationDetailPage() {
                     <p className="px-3 pt-1 pb-1.5 text-xs text-gray-400 font-medium">Move to</p>
                     {validNext.map((stage) => {
                       const s = STAGE_MAP[stage];
-                      const offerSigned =
-                        offerData?.status === 'accepted' && !!offerData?.candidate_signature;
+                      const offerSigned = Boolean(offerData?.is_signed);
                       const blockedHired = stage === 'hired' && !offerSigned;
                       const disabled = blockedHired || stageMutation.isPending;
                       return (
@@ -2163,10 +2155,19 @@ export default function ApplicationDetailPage() {
               )}
             </div>
             {canManage && app.stage === 'offer' && !app.on_hold && (
-              offerData?.status === 'accepted' && offerData?.candidate_signature ? (
+              offerData?.is_signed ? (
                 <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold bg-green-50 text-green-700">
                   <CheckCircle2 className="w-3.5 h-3.5" /> Offer accepted — Hired unlocked
                 </span>
+              ) : offerData?.status === 'pending_signatures' ? (
+                <button
+                  onClick={() => { setActiveTab('offer'); setSearchParams({ tab: 'offer' }, { replace: true, state: location.state }); }}
+                  title="Hired unlocks automatically once everyone signs in Zoho Sign"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold bg-brand-50 text-brand-700 hover:bg-brand-100"
+                >
+                  <PenLine className="w-3.5 h-3.5" /> Out for signature
+                  {offerData.esign?.total_signers ? ` · ${offerData.esign.signed_count}/${offerData.esign.total_signers}` : ''}
+                </button>
               ) : (
                 <button
                   onClick={() => setConfirmOfferAccept(true)}
@@ -3291,12 +3292,13 @@ export default function ApplicationDetailPage() {
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div>
                   <p className="text-xs text-gray-400 mb-1">Status</p>
-                  <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold capitalize ${OFFER_STATUS_COLORS[offerData.status] ?? 'bg-gray-100 text-gray-600'}`}>
-                    {offerData.status}
+                  <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-semibold ${offerStatus(offerData.status).color}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${offerStatus(offerData.status).dot}`} />
+                    {offerStatus(offerData.status).label}
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
-                  {['sent', 'accepted', 'rejected', 'expired', 'revoked'].includes(offerData.status) && (
+                  {['sent', 'pending_signatures', 'accepted', 'rejected', 'expired', 'revoked'].includes(offerData.status) && (
                     <button
                       onClick={async () => {
                         if (offerPdfUrl) { setOfferPdfUrl(null); return; }
@@ -3312,7 +3314,7 @@ export default function ApplicationDetailPage() {
                     >
                       {offerPdfLoading
                         ? <><span className="w-3.5 h-3.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" /> Loading…</>
-                        : <><Eye className="w-3.5 h-3.5" />{offerData.candidate_signature ? 'View Signed Offer' : 'View Offer'}</>
+                        : <><Eye className="w-3.5 h-3.5" />{offerData.is_signed ? 'View Signed Offer' : 'View Offer'}</>
                       }
                     </button>
                   )}
@@ -3324,6 +3326,9 @@ export default function ApplicationDetailPage() {
                   </button>
                 </div>
               </div>
+
+              {/* Zoho Sign progress — who has signed and who it's with now */}
+              {offerData.esign && <SignatureTracker offerId={offerData.id} compact />}
 
               {/* Details grid */}
               <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm border-t border-surface-100 pt-5">
@@ -3378,7 +3383,7 @@ export default function ApplicationDetailPage() {
               </dl>
 
               {/* Signature */}
-              {offerData.candidate_signature && (
+              {offerData.candidate_signature?.startsWith('data:') && (
                 <div className="border-t border-surface-100 pt-4">
                   <p className="text-xs font-medium text-gray-500 mb-2">Candidate Signature</p>
                   <img
@@ -3394,7 +3399,7 @@ export default function ApplicationDetailPage() {
                   <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl flex flex-col" style={{ height: '90dvh' }}>
                     <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200 flex-shrink-0">
                       <h3 className="font-display font-semibold text-gray-900">
-                        {offerData.candidate_signature ? 'Signed Offer Letter' : 'Offer Letter'}
+                        {offerData.is_signed ? 'Signed Offer Letter' : 'Offer Letter'}
                       </h3>
                       <button
                         onClick={() => setOfferPdfUrl(null)}

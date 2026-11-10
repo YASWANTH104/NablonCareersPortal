@@ -9,6 +9,7 @@ import {
   Briefcase, ChevronRight, FileText, AlertTriangle, Pencil, X, Loader2,
   Upload, CheckCircle2, ChevronDown, ChevronUp, PartyPopper, Calendar,
   MessageSquarePlus, ThumbsUp, PenLine, RotateCcw, Eye, Download,
+  Mail, Clock, Inbox,
 } from 'lucide-react';
 import { applicationsApi } from '@/api/applications';
 import { interviewsApi } from '@/api/interviews';
@@ -340,6 +341,91 @@ function SignaturePad({ onCapture, onClear }) {
   );
 }
 
+// The candidate's side of a Zoho Sign envelope: whose turn it is, where to look
+// for the email, and the letter itself. Signing happens in Zoho, not here.
+function EsignStatusCard({ offer, onView, viewing }) {
+  const e = offer.esign ?? {};
+  if (offer.status === 'signature_declined') {
+    return (
+      <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3.5">
+        <RotateCcw className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+        <div>
+          <p className="text-sm font-semibold text-amber-900">Your offer letter is being updated</p>
+          <p className="text-xs text-amber-800 mt-0.5">
+            We're making a change to the letter. You'll get a fresh copy to sign by email shortly. Nothing to do for now.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const signed = ['signed', 'approved'].includes(e.my_status);
+  const waitingOn = (e.waiting_on ?? []).map((n) => n.split(' ')[0]).join(' and ');
+  const title = signed
+    ? "You've signed. Thank you!"
+    : e.my_turn
+      ? "It's your turn to sign"
+      : 'Your offer letter is almost ready';
+  const body = signed
+    ? "We're collecting the remaining signatures. Your fully signed copy will appear right here."
+    : e.my_turn
+      ? <>Zoho Sign has emailed a secure signing link to <strong className="text-gray-800">{e.email}</strong>. Open it, review the letter and sign. It takes about a minute.</>
+      : <>{waitingOn || 'Nablon'} signs first. Right after, Zoho Sign will email you at <strong className="text-gray-800">{e.email}</strong> to add your signature.</>;
+  const pct = e.total_signers ? Math.round(((e.signed_count ?? 0) / e.total_signers) * 100) : 0;
+
+  return (
+    <div className={`rounded-xl border p-4 ${e.my_turn && !signed ? 'border-brand-200 bg-gradient-to-br from-brand-50 to-white' : 'border-surface-200 bg-white'}`}>
+      <div className="flex items-start gap-3">
+        <span className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${signed ? 'bg-green-100 text-green-600' : e.my_turn ? 'bg-brand-500 text-white' : 'bg-surface-100 text-gray-500'}`}>
+          {signed ? <CheckCircle2 className="w-4 h-4" /> : e.my_turn ? <PenLine className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-gray-900">{title}</p>
+          <p className="text-xs text-gray-600 mt-0.5 leading-relaxed">{body}</p>
+        </div>
+      </div>
+
+      {e.total_signers > 0 && (
+        <div className="mt-3.5">
+          <div className="flex items-center justify-between text-[11px] text-gray-500 mb-1">
+            <span>{e.signed_count ?? 0} of {e.total_signers} signatures</span>
+            {e.my_position && <span>You're signer {e.my_position}</span>}
+          </div>
+          <div className="h-1.5 rounded-full bg-surface-100 overflow-hidden">
+            <div className="h-full bg-brand-500 rounded-full transition-all duration-700" style={{ width: `${Math.max(pct, e.signed_count ? 6 : 0)}%` }} />
+          </div>
+        </div>
+      )}
+
+      {!signed && (
+        <div className="mt-3 flex items-start gap-2 text-[11px] text-gray-500 bg-surface-50 border border-surface-200 rounded-lg px-2.5 py-2">
+          <Inbox className="w-3.5 h-3.5 shrink-0 mt-px text-gray-400" />
+          <span>
+            Look for an email from <strong className="text-gray-700">Zoho Sign</strong>. Not there? Check spam or promotions.
+            {e.expires_at && <> Please sign by <strong className="text-gray-700">{format(new Date(e.expires_at), 'dd MMM yyyy')}</strong>.</>}
+          </span>
+        </div>
+      )}
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          onClick={onView}
+          disabled={viewing}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-surface-200 text-xs text-gray-700 font-medium rounded-lg hover:bg-surface-50 transition-colors disabled:opacity-60"
+        >
+          {viewing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Eye className="w-3.5 h-3.5" />}
+          Read the letter
+        </button>
+        {e.my_turn && !signed && (
+          <span className="inline-flex items-center gap-1 text-[11px] text-brand-700">
+            <Mail className="w-3.5 h-3.5" /> Signing link sent to your inbox
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function OfferActionPanel({ applicationId }) {
   const qc = useQueryClient();
 
@@ -353,6 +439,8 @@ function OfferActionPanel({ applicationId }) {
     queryKey: ['my-offer', applicationId],
     queryFn: () => offersApi.getMyOffer(applicationId).then((r) => r.data),
     retry: false,
+    // While it's out for signature, pick up "your turn" / "signed" without a reload
+    refetchInterval: (q) => (q.state.data?.status === 'pending_signatures' ? 30000 : false),
   });
 
   const [sigStep, setSigStep] = useState(false);
@@ -429,7 +517,7 @@ function OfferActionPanel({ applicationId }) {
 
         {isAccepted && (
           <>
-            {offer.candidate_signature && (
+            {offer.candidate_signature?.startsWith('data:') && (
               <div className="bg-surface-50 border border-surface-200 rounded-lg p-3">
                 <p className="text-xs text-gray-400 mb-2">Your signature</p>
                 <img
@@ -452,7 +540,7 @@ function OfferActionPanel({ applicationId }) {
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-brand-50 border border-brand-200 text-xs text-brand-700 font-medium rounded-lg hover:bg-brand-100 transition-colors disabled:opacity-60"
               >
                 {pdfLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Eye className="w-3.5 h-3.5" />}
-                {offer.candidate_signature ? 'View Signed PDF' : 'View PDF'}
+                {offer.is_signed ? 'View Signed PDF' : 'View PDF'}
               </button>
               <button
                 onClick={handleDownloadPdf}
@@ -469,7 +557,7 @@ function OfferActionPanel({ applicationId }) {
                 <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl flex flex-col" style={{ height: '90dvh' }}>
                   <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-surface-200 flex-shrink-0">
                     <h3 className="font-semibold text-gray-900">
-                      {offer.candidate_signature ? 'Signed Offer Letter' : 'Offer Letter'}
+                      {offer.is_signed ? 'Signed Offer Letter' : 'Offer Letter'}
                     </h3>
                     <button
                       onClick={() => setPdfBlobUrl(null)}
@@ -530,6 +618,11 @@ function OfferActionPanel({ applicationId }) {
           <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
           All documents submitted. Your offer letter will be sent shortly.
         </div>
+      )}
+
+      {/* Zoho Sign — the candidate signs from Zoho's email, this shows where things stand */}
+      {offer && ['pending_signatures', 'signature_declined'].includes(offer.status) && (
+        <EsignStatusCard offer={offer} onView={handleTogglePdf} viewing={pdfLoading} />
       )}
 
       {/* Offer letter accept/decline */}
@@ -642,7 +735,7 @@ function OfferActionPanel({ applicationId }) {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl flex flex-col" style={{ height: '90dvh' }}>
             <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-surface-200 flex-shrink-0">
               <h3 className="font-semibold text-gray-900">
-                {offer?.candidate_signature ? 'Signed Offer Letter' : 'Offer Letter'}
+                {offer?.is_signed ? 'Signed Offer Letter' : 'Offer Letter'}
               </h3>
               <button
                 onClick={() => setPdfBlobUrl(null)}
