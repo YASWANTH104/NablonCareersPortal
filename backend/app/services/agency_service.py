@@ -237,6 +237,63 @@ async def _portal_assessments(db: AsyncSession, application_ids: list) -> dict:
     return out
 
 
+async def _portal_interviews(db: AsyncSession, application_ids: list) -> dict:
+    """Every interview per application with an agency-facing status. Three
+    batched queries for the whole list (interviews, panel, feedback), using the
+    same "done" rule as the Action Center: completed, or still live but past its
+    end time."""
+    from datetime import timedelta
+    from app.models.interview import Interview, InterviewPanelist, InterviewFeedback
+    from app.constants.stages import ROUND_LABELS
+    from app.schemas.agency import AgencyPortalInterview
+
+    if not application_ids:
+        return {}
+    ivs = (await db.execute(
+        select(Interview).where(Interview.application_id.in_(application_ids))
+        .order_by(Interview.scheduled_at.desc())
+    )).scalars().all()
+    if not ivs:
+        return {}
+    iv_ids = [iv.id for iv in ivs]
+    interviewers: dict = {}
+    for p in (await db.execute(
+        select(InterviewPanelist.interview_id, InterviewPanelist.user_id)
+        .where(InterviewPanelist.interview_id.in_(iv_ids), InterviewPanelist.role == "interviewer")
+    )).all():
+        interviewers.setdefault(p.interview_id, set()).add(p.user_id)
+    submitted: dict = {}
+    for f in (await db.execute(
+        select(InterviewFeedback.interview_id, InterviewFeedback.submitted_by)
+        .where(InterviewFeedback.interview_id.in_(iv_ids))
+    )).all():
+        submitted.setdefault(f.interview_id, set()).add(f.submitted_by)
+
+    now = datetime.now(timezone.utc)
+    out: dict = {}
+    for iv in ivs:
+        start = iv.scheduled_at if iv.scheduled_at.tzinfo else iv.scheduled_at.replace(tzinfo=timezone.utc)
+        live = iv.status in ("scheduled", "rescheduled")
+        done = iv.status == "completed" or (live and start + timedelta(minutes=iv.duration_mins or 60) <= now)
+        if iv.status in ("cancelled", "no_show"):
+            status = iv.status
+        elif done:
+            missing = interviewers.get(iv.id, set()) - submitted.get(iv.id, set())
+            # No panel recorded at all → nothing to wait on
+            status = "awaiting_feedback" if missing else "feedback_received"
+        else:
+            status = iv.status
+        out.setdefault(iv.application_id, []).append(AgencyPortalInterview(
+            round_type=iv.round_type,
+            round_label=ROUND_LABELS.get(iv.round_type or "", iv.title or f"Round {iv.round_number}"),
+            scheduled_at=iv.scheduled_at,
+            duration_mins=iv.duration_mins or 60,
+            interview_type=iv.interview_type,
+            status=status,
+        ))
+    return out
+
+
 async def get_agency_portal(
     db: AsyncSession,
     portal_token: str,
@@ -274,6 +331,7 @@ async def get_agency_portal(
     )
 
     assessment_by_app = await _portal_assessments(db, [app.id for app, _ in rows])
+    interviews_by_app = await _portal_interviews(db, [app.id for app, _ in rows])
 
     candidates = [
         AgencyPortalCandidate(
@@ -284,6 +342,7 @@ async def get_agency_portal(
             stage_updated_at=app.stage_updated_at,
             booked_rounds=sorted(booked_by_app.get(app.id, set())),
             assessment=assessment_by_app.get(app.id),
+            interviews=interviews_by_app.get(app.id, []),
         )
         for app, full_name in rows
     ]

@@ -54,7 +54,7 @@ export function ViolationBadge({ total }) {
   );
 }
 
-// What the nightly sync did with the candidate because of this result.
+// What the scheduled sync did with the candidate because of this result.
 export function DecisionBadge({ decision }) {
   const d = DECISION_LABELS[decision];
   if (!d) return null;

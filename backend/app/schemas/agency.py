@@ -77,6 +77,19 @@ class AgencyPortalAssessment(BaseModel):
     decision: Optional[str] = None
 
 
+class AgencyPortalInterview(BaseModel):
+    """One interview round as the agency sees it: when, which round, and where
+    it stands. Never the interviewers or what they wrote — the slot flow is
+    deliberately anonymous, and feedback is HR's to share."""
+    round_type: Optional[str] = None
+    round_label: str
+    scheduled_at: datetime
+    duration_mins: int
+    interview_type: Optional[str] = None
+    # scheduled | rescheduled | awaiting_feedback | feedback_received | cancelled | no_show
+    status: str
+
+
 class AgencyPortalCandidate(BaseModel):
     application_id: uuid.UUID
     candidate_name: str
@@ -88,6 +101,8 @@ class AgencyPortalCandidate(BaseModel):
     # interview drops the round out of here and the name comes back on its own.
     booked_rounds: list[str] = []
     assessment: Optional[AgencyPortalAssessment] = None
+    # Newest first
+    interviews: list[AgencyPortalInterview] = []
 
 
 class AgencyPortalResponse(BaseModel):
@@ -98,3 +113,54 @@ class AgencyPortalResponse(BaseModel):
     expires_at: Optional[datetime] = None
     submission_count: int
     candidates: list[AgencyPortalCandidate]
+
+
+# ── Agency slot requests ─────────────────────────────────────────────────────
+
+from datetime import date as _date
+from typing import Literal
+from pydantic import Field, model_validator
+
+
+class AgencySlotRequestCreate(BaseModel):
+    round_type: Literal["screening", "tr1", "tr2", "final_tr", "hr"]
+    candidates_count: int = Field(default=1, ge=1, le=50)
+    date_from: _date
+    date_to: _date
+    time_preference: Literal["any", "morning", "afternoon", "evening"] = "any"
+    note: Optional[str] = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def _dates(self):
+        if self.date_to < self.date_from:
+            raise ValueError("The end date can't be before the start date")
+        if (self.date_to - self.date_from).days > 30:
+            raise ValueError("Pick a window of 30 days or less")
+        return self
+
+
+class AgencySlotRequestResponse(BaseModel):
+    id: uuid.UUID
+    round_type: str
+    round_label: str
+    candidates_count: int
+    date_from: _date
+    date_to: _date
+    time_preference: str
+    note: Optional[str] = None
+    status: str
+    created_at: datetime
+    resolved_at: Optional[datetime] = None
+    resolution_note: Optional[str] = None
+    slots_published: Optional[int] = None
+    # HR inbox only
+    agency_id: Optional[uuid.UUID] = None
+    agency_name: Optional[str] = None
+    job_id: Optional[uuid.UUID] = None
+    job_title: Optional[str] = None
+    open_slots_now: Optional[int] = None
+
+
+class AgencySlotRequestResolve(BaseModel):
+    status: Literal["fulfilled", "dismissed"]
+    note: Optional[str] = Field(default=None, max_length=500)

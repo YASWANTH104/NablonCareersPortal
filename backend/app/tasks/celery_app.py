@@ -55,8 +55,9 @@ conf = dict(
         },
         "sync-autoproctor-results": {
             "task": "sync_autoproctor_results",
-            # 18:30 UTC = 00:00 IST, every day (attempts and drop deadlines don't stop at weekends).
-            "schedule": crontab(hour=18, minute=30),
+            # 18:30 and 06:30 UTC = 00:00 and 12:00 IST, every day (attempts and drop
+            # deadlines don't stop at weekends). Twice a day so results act within ~12h.
+            "schedule": crontab(hour="6,18", minute=30),
         },
         "send-weekly-hiring-report": {
             "task": "send_weekly_hiring_report",

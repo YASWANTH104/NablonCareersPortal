@@ -15,4 +15,7 @@ export const interviewSlotsApi = {
   bookedRounds: (jobId) => client.get(`/interview-slots/booked-rounds/${jobId}`),
   book: (data) => client.post('/interview-slots/book', data),
   bookUnassigned: (data) => client.post('/interview-slots/book-unassigned', data),
+  // Agency → HR slot requests
+  agencyRequests: (status = 'open') => client.get('/interview-slots/agency-requests', { params: { status } }),
+  resolveAgencyRequest: (id, data) => client.post(`/interview-slots/agency-requests/${id}/resolve`, data),
 };

@@ -19,6 +19,8 @@ import { HR_ROLES } from '@/utils/permissions';
 import { ROUND_TYPES, ROUND_MAP, ROUND_ELIGIBLE_STAGE } from '@/constants/interviewRounds';
 import { toIST, fromISTDateTime, istDateKey, istTimeKey } from '@/utils/formatters';
 import { Modal, Segmented, StatTile, EmptyState } from '@/components/ui';
+import AgencySlotRequestsInbox, { useOpenAgencyRequests, AGENCY_REQUESTS_KEY } from '@/components/interviews/AgencySlotRequestsInbox';
+import { useSearchParams } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 
 const SLOT_MINUTES = 30;
@@ -618,11 +620,18 @@ function PickJobRoundForBookingModal({ slot, jobsData, onCancel, onContinue }) {
 // across an interviewer's whole upcoming availability in one pass.
 
 function PublishSlotsPanel({
-  slots, jobsData, onPublish, isPending, onUnassign, unassigningId, isLoading,
+  slots, jobsData, onPublish, isPending, onUnassign, unassigningId, isLoading, prefill,
 }) {
   const [jobId, setJobId] = useState('');
   const [roundType, setRoundType] = useState('tr1');
   const [selectedIds, setSelectedIds] = useState(() => new Set());
+
+  // "Publish for this" on an agency request points the panel at its job + round
+  useEffect(() => {
+    if (!prefill) return;
+    setJobId(String(prefill.jobId));
+    setRoundType(prefill.roundType);
+  }, [prefill]);
 
   const available = useMemo(() => {
     const now = new Date();
@@ -1836,7 +1845,20 @@ export default function AvailabilityPage() {
   // own availability | 'publish' = pick a job, tick several of that
   // interviewer's open slots, publish them all to agencies at once
   // (PublishSlotsPanel).
-  const [hrMode, setHrMode] = useState('manage');
+  const [searchParams] = useSearchParams();
+  // Deep link from the "agency needs slots" notification/email: ?mode=publish&request=<id>
+  const [hrMode, setHrMode] = useState(() => (
+    HR_MODES.some((m) => m.value === searchParams.get('mode')) ? searchParams.get('mode') : 'manage'
+  ));
+  const highlightRequestId = searchParams.get('request');
+  const [publishPrefill, setPublishPrefill] = useState(null);
+  const { data: agencyRequests } = useOpenAgencyRequests(isHR);
+  const openRequestCount = agencyRequests?.open_count ?? 0;
+  const hrModeOptions = useMemo(() => HR_MODES.map((m) => (
+    m.value === 'publish' && openRequestCount
+      ? { ...m, label: `${m.label} (${openRequestCount})`, shortLabel: `${m.shortLabel} (${openRequestCount})` }
+      : m
+  )), [openRequestCount]);
 
   const startHour = showFullDay ? FULL_START_HOUR : WORK_START_HOUR;
   const endHour = showFullDay ? FULL_END_HOUR : WORK_END_HOUR;
@@ -2088,6 +2110,8 @@ export default function AvailabilityPage() {
     try {
       const res = await assignBatchMutation.mutateAsync({ slot_ids, job_id, round_type });
       invalidateSlots();
+      // Publishing closes matching agency requests server-side
+      queryClient.invalidateQueries({ queryKey: AGENCY_REQUESTS_KEY });
       const published = res.data?.length ?? 0;
       if (published === 0) {
         toast.error('None of those slots could be published — they may have just been booked or removed.');
@@ -2395,7 +2419,7 @@ export default function AvailabilityPage() {
             <Segmented
               value={hrMode}
               onChange={setHrMode}
-              options={HR_MODES}
+              options={hrModeOptions}
               className="shrink-0 self-start"
             />
           )}
@@ -2504,7 +2528,17 @@ export default function AvailabilityPage() {
 
       {/* ── Publish-to-agencies mode ── */}
       {isHR && hrMode === 'publish' && (
+        <AgencySlotRequestsInbox
+          highlightId={highlightRequestId}
+          onFill={(r) => {
+            setPublishPrefill({ jobId: r.job_id, roundType: r.round_type, nonce: Date.now() });
+            toast(`Pick ${r.round_label} times below for ${r.job_title}, then publish.`, { icon: '👇' });
+          }}
+        />
+      )}
+      {isHR && hrMode === 'publish' && (
         <PublishSlotsPanel
+          prefill={publishPrefill}
           slots={publishPanelSlots}
           jobsData={jobsData}
           onPublish={handlePublishBatch}

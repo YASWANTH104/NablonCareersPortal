@@ -8,12 +8,12 @@ from app.dependencies import require_roles, Role
 from app.schemas.agency import (
     AgencyCreate, AgencyUpdate, AgencyResponse,
     JobAgencyAssignmentCreate, JobAgencyAssignmentUpdate, JobAgencyAssignmentResponse,
-    AgencyPortalResponse,
+    AgencyPortalResponse, AgencySlotRequestCreate, AgencySlotRequestResponse,
 )
 from app.schemas.interview_slot import (
     AvailableSlotGroup, AgencySlotBookRequest, AgencyBookingConfirmation,
 )
-from app.services import agency_service, interview_slot_service
+from app.services import agency_service, interview_slot_service, agency_slot_request_service
 
 router = APIRouter(tags=["agencies"])
 
@@ -185,6 +185,36 @@ async def agency_submit_candidate(
 
 
 # ── Agency portal: interview slots ────────────────────────────────────────────
+
+@router.get(
+    "/agency-portal/{portal_token}/assignments/{assignment_id}/slot-requests",
+    response_model=list[AgencySlotRequestResponse],
+)
+async def agency_slot_requests(
+    portal_token: str,
+    assignment_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    _agency, assignment = await agency_service.validate_portal_access(db, portal_token, assignment_id)
+    return await agency_slot_request_service.list_for_assignment(db, assignment.id)
+
+
+@router.post(
+    "/agency-portal/{portal_token}/assignments/{assignment_id}/slot-requests",
+    response_model=AgencySlotRequestResponse,
+    status_code=201,
+)
+async def agency_request_slots(
+    portal_token: str,
+    assignment_id: uuid.UUID,
+    data: AgencySlotRequestCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Ask HR to open interview times for a round. One open request per round
+    per role; it closes itself once HR publishes matching slots."""
+    agency, assignment = await agency_service.validate_portal_access(db, portal_token, assignment_id)
+    return await agency_slot_request_service.create_request(db, agency, assignment, data)
+
 
 @router.get(
     "/agency-portal/{portal_token}/assignments/{assignment_id}/slots",

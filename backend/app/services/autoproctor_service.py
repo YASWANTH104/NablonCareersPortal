@@ -1,6 +1,6 @@
 """AutoProctor results sync and assessment follow-ups.
 
-Nightly (tasks/autoproctor_tasks.py, 00:00 IST):
+Scheduled twice daily (tasks/autoproctor_tasks.py, 00:00 and 12:00 IST):
   1. Log into AutoProctor and import every newly finished attempt: top-level
      data, violation counters, and the candidate's slice of the test's
      responses workbook (stored in blob storage).
@@ -10,7 +10,7 @@ Nightly (tasks/autoproctor_tasks.py, 00:00 IST):
      AND trust >= 90% moves the candidate to their next round; anything
      less moves them to Rejected, and the rejection email goes out
      immediately (user's call for this flow, 2026-10-21). Decided once per attempt.
-  4. Nightly only: a candidate still in the assessment stage with nothing
+  4. Scheduled runs only: a candidate still in the assessment stage with nothing
      submitted 30 days after the assessment was sent moves to
      interview_drop (never before the deadline they were given).
   5. Daily at 10:00 IST (send_reminders, its own beat task so candidates
