@@ -16,6 +16,7 @@ from app.models.screening import ScreeningResponse
 from app.models.action_snooze import ActionSnooze
 from app.models.autoproctor import AutoproctorAttempt, AutoproctorSyncRun
 from app.models.scheduled_report import ScheduledReportSettings
+from app.models.esign import OfferSignatureRequest, OfferSigner, OfferSignatureEvent, EsignSettings
 
 __all__ = [
     "User",
@@ -35,4 +36,5 @@ __all__ = [
     "ActionSnooze",
     "AutoproctorAttempt", "AutoproctorSyncRun",
     "ScheduledReportSettings",
+    "OfferSignatureRequest", "OfferSigner", "OfferSignatureEvent", "EsignSettings",
 ]

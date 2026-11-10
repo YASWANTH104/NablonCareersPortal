@@ -8,7 +8,7 @@ celery_app = Celery(
     "nablon_careers",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=["app.tasks.email_tasks", "app.tasks.pdf_tasks", "app.tasks.interview_tasks", "app.tasks.calendar_tasks", "app.tasks.referral_tasks", "app.tasks.screening_tasks", "app.tasks.action_center_tasks", "app.tasks.autoproctor_tasks", "app.tasks.scheduled_report_tasks"],
+    include=["app.tasks.email_tasks", "app.tasks.pdf_tasks", "app.tasks.interview_tasks", "app.tasks.calendar_tasks", "app.tasks.referral_tasks", "app.tasks.screening_tasks", "app.tasks.action_center_tasks", "app.tasks.autoproctor_tasks", "app.tasks.scheduled_report_tasks", "app.tasks.esign_tasks"],
 )
 
 conf = dict(
@@ -30,6 +30,10 @@ conf = dict(
         "auto-expire-referrals": {
             "task": "auto_expire_referrals",
             "schedule": 900,  # every 15 minutes
+        },
+        "poll-inflight-esign-requests": {
+            "task": "poll_inflight_esign_requests",
+            "schedule": 1800,  # every 30 minutes — webhook is primary, this catches misses
         },
         "auto-reject-expired-screening-requests": {
             "task": "auto_reject_expired_screening_requests",

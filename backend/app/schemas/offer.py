@@ -89,6 +89,9 @@ class OfferLetterResponse(BaseModel):
     director_approved_at: Optional[datetime] = None
     candidate_signature: Optional[str] = None
     signed_at: Optional[datetime] = None
+    esign_completed_at: Optional[datetime] = None
+    # Accepted and signed, by either flow — what the Hired stage gate checks
+    is_signed: bool = False
     created_by: Optional[uuid.UUID] = None
     created_at: datetime
     updated_at: datetime
@@ -98,6 +101,8 @@ class OfferLetterResponse(BaseModel):
     candidate_email: Optional[str] = None
     job_title: Optional[str] = None
     department_name: Optional[str] = None
+    # Live Zoho Sign envelope: {status, signed_count, total_signers, waiting_on, request_id}
+    esign: Optional[dict] = None
 
 
 class OfferLetterListResponse(BaseModel):
@@ -151,3 +156,7 @@ class CandidateOfferResponse(BaseModel):
     signed_at: Optional[datetime] = None
     body_html: Optional[str] = None
     job_title: Optional[str] = None
+    is_signed: bool = False
+    # Zoho Sign progress from the candidate's side: {status, email, my_order,
+    # my_status, total_signers, waiting_on, signed_pdf_available}
+    esign: Optional[dict] = None

@@ -43,6 +43,7 @@ class OfferLetter(Base):
 
     status: Mapped[str] = mapped_column(String(30), default="draft")
     # draft | pending_director | director_rejected | sent | accepted | rejected | expired | revoked
+    # Zoho Sign flow adds: pending_signatures | signature_declined
 
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -55,6 +56,10 @@ class OfferLetter(Base):
     candidate_token: Mapped[str | None] = mapped_column(Text, unique=True)
     candidate_signature: Mapped[str | None] = mapped_column(Text)
     signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # Set when every party has signed in Zoho Sign. The signed PDF itself is never
+    # stored on our side — it's fetched from Zoho on each view/download.
+    esign_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)

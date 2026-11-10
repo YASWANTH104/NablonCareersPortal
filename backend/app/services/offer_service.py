@@ -15,6 +15,19 @@ from app.schemas.offer import (
 )
 
 
+# Statuses HR can still edit and (re)send from
+EDITABLE_STATUSES = ("draft", "director_rejected", "signature_declined")
+# Statuses the candidate can see the offer in
+CANDIDATE_VISIBLE_STATUSES = (
+    "sent", "pending_signatures", "signature_declined", "accepted", "rejected", "expired", "revoked",
+)
+
+
+def is_offer_signed(offer: OfferLetter) -> bool:
+    """Accepted and signed — by drawn signature (legacy flow) or Zoho Sign."""
+    return offer.status == "accepted" and bool(offer.candidate_signature or offer.esign_completed_at)
+
+
 def _offer_to_dict(offer: OfferLetter) -> dict:
     return {
         "id": offer.id,
@@ -39,6 +52,8 @@ def _offer_to_dict(offer: OfferLetter) -> dict:
         "director_approved_at": offer.director_approved_at,
         "candidate_signature": offer.candidate_signature,
         "signed_at": offer.signed_at,
+        "esign_completed_at": offer.esign_completed_at,
+        "is_signed": is_offer_signed(offer),
         "created_by": offer.created_by,
         "created_at": offer.created_at,
         "updated_at": offer.updated_at,
@@ -127,12 +142,86 @@ def _duration_months(start: Optional[date], end: Optional[date]) -> str:
 
 
 def _signature_slot(signature: Optional[str]) -> str:
-    # Fixed height so the signature line sits in the same place before and after signing
+    # Fixed height so the signature line sits in the same place before and after signing.
+    # Only drawn/uploaded data-URLs are images — mark_offer_accepted stores a text note here.
     img = (
         f'<img src="{signature}" style="position:absolute;left:0;bottom:0;max-height:56px;max-width:220px;" />'
-        if signature else ""
+        if signature and signature.startswith("data:") else ""
     )
     return f'<div style="position:relative;height:56px;">{img}</div>'
+
+
+# ── Zoho Sign field anchors ──────────────────────────────────────────────────
+# In e-sign mode the signature and signed-date slots render empty but carry an
+# id. WeasyPrint exposes every id's position on the page (Page.anchors), which
+# is where esign_service places the Zoho Signature / Date fields — so the field
+# always sits exactly on the letter's own signature line, whatever the template.
+
+ESIGN_SIG_SIZE_PX = (200, 48)
+ESIGN_DATE_SIZE_PX = (110, 16)
+
+
+def esign_sig_anchor(key: str) -> str:
+    return f"zs-sig-{key}"
+
+
+def esign_date_anchor(key: str) -> str:
+    return f"zs-date-{key}"
+
+
+def _esign_signature_slot(key: str) -> str:
+    return f'<div id="{esign_sig_anchor(key)}" style="position:relative;height:56px;"></div>'
+
+
+def _esign_date_slot(key: str) -> str:
+    w, h = ESIGN_DATE_SIZE_PX
+    return f'<span id="{esign_date_anchor(key)}" style="display:inline-block;width:{w}px;height:{h}px;vertical-align:bottom;"></span>'
+
+
+def _esign_overrides(raw_body: str) -> dict:
+    """Variable overrides for e-sign mode: empty anchored slots in place of the
+    drawn-signature images and signed dates."""
+    out: dict = {}
+    for var, key in (("director", "company_signatory"), ("candidate", "candidate")):
+        out[f"{var}_signature"] = _esign_signature_slot(key)
+        for suffix in ("", "_long", "_us"):
+            out[f"{var}_signed_date{suffix}"] = _esign_date_slot(key)
+    return out
+
+
+def _esign_signature_block(parties: list[dict], raw_body: str) -> str:
+    """Sign-off block for parties the template has no inline slot for: the two
+    main signatories on templates without {{director_signature}} /
+    {{candidate_signature}}, plus any additional signers HR added."""
+    cells = []
+    for p in parties:
+        key = p["key"]
+        if key == "company_signatory" and "{{director_signature}}" in raw_body:
+            continue
+        if key == "candidate" and "{{candidate_signature}}" in raw_body:
+            continue
+        label = {
+            "company_signatory": "For Nablon AI",
+            "candidate": "Accepted by",
+        }.get(key, p.get("title") or "Signatory")
+        cells.append(f"""
+<td style="width:50%;padding:0 12px 18px 0;border:none;vertical-align:top;">
+  <p style="margin:0;font-weight:bold;font-size:12px;">{html.escape(label)}</p>
+  {_esign_signature_slot(key)}
+  <p style="margin:0;">______________________________</p>
+  <p style="margin:0;">{html.escape(p.get("name") or "")}</p>
+  <p style="margin:0;font-size:12px;color:#6b7280;">Date: {_esign_date_slot(key)}</p>
+</td>""")
+    if not cells:
+        return ""
+    rows = "".join(
+        "<tr>" + "".join(cells[i:i + 2]) + "</tr>" for i in range(0, len(cells), 2)
+    )
+    return (
+        '<div style="margin-top:40px;page-break-inside:avoid;">'
+        '<table style="width:100%;border-collapse:collapse;font-size:13px;">'
+        f"{rows}</table></div>"
+    )
 
 
 def _build_variables(offer: OfferLetter, candidate_name: str, dept_name: Optional[str]) -> dict:
@@ -288,9 +377,13 @@ async def list_offers(
         base.order_by(OfferLetter.created_at.desc()).offset(offset).limit(limit)
     )).all()
 
+    from app.services.esign_service import summaries_for_offers
+    esign = await summaries_for_offers(db, [r[0].id for r in rows])
+
     items = []
     for offer, candidate_name, candidate_email, job_title, dept_name in rows:
         d = _offer_to_dict(offer)
+        d["esign"] = esign.get(offer.id)
         d["candidate_name"] = candidate_name
         d["candidate_email"] = candidate_email
         d["job_title"] = job_title
@@ -329,6 +422,8 @@ async def get_offer(db: AsyncSession, offer_id: uuid.UUID) -> OfferLetterRespons
     d["candidate_email"] = candidate_email
     d["job_title"] = job_title
     d["department_name"] = dept_name
+    from app.services.esign_service import summaries_for_offers
+    d["esign"] = (await summaries_for_offers(db, [offer.id])).get(offer.id)
     return OfferLetterResponse.model_validate(d)
 
 
@@ -355,6 +450,8 @@ async def get_offer_by_application(db: AsyncSession, application_id: uuid.UUID) 
     d["candidate_email"] = candidate_email
     d["job_title"] = job_title
     d["department_name"] = dept_name
+    from app.services.esign_service import summaries_for_offers
+    d["esign"] = (await summaries_for_offers(db, [offer.id])).get(offer.id)
     return OfferLetterResponse.model_validate(d)
 
 
@@ -366,7 +463,7 @@ async def update_offer(
     offer = await db.get(OfferLetter, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
-    if offer.status not in ("draft", "director_rejected"):
+    if offer.status not in EDITABLE_STATUSES:
         raise HTTPException(400, f"Only draft offers can be edited (current status: {offer.status})")
 
     for field, value in data.model_dump(exclude_unset=True).items():
@@ -378,7 +475,11 @@ async def update_offer(
 
 
 async def send_offer(db: AsyncSession, offer_id: uuid.UUID) -> OfferLetterResponse:
-    """HR sends the offer for director approval — it does not reach the candidate yet."""
+    """HR sends the offer for director approval — it does not reach the candidate yet.
+    Legacy path: once Zoho Sign is configured, offers go out via esign_service instead."""
+    from app.config import settings
+    if settings.zoho_sign_configured:
+        raise HTTPException(400, "Offers are now signed through Zoho Sign — use Send for signature.")
     offer = await db.get(OfferLetter, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
@@ -527,8 +628,13 @@ async def revoke_offer(db: AsyncSession, offer_id: uuid.UUID) -> OfferLetterResp
     offer = await db.get(OfferLetter, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
-    if offer.status not in ("pending_director", "sent"):
+    if offer.status not in ("pending_director", "sent", "pending_signatures"):
         raise HTTPException(400, f"Only sent offers can be revoked (current status: {offer.status})")
+
+    if offer.status == "pending_signatures":
+        # Pull the envelope back first so nobody can keep signing a revoked offer
+        from app.services import esign_service
+        await esign_service.recall_live_request(db, offer, reason="revoked")
 
     offer.status = "revoked"
     offer.updated_at = datetime.now(timezone.utc)
@@ -536,17 +642,30 @@ async def revoke_offer(db: AsyncSession, offer_id: uuid.UUID) -> OfferLetterResp
     return await get_offer(db, offer_id)
 
 
-def _build_offer_full_html(offer, template, candidate_name: str, dept_name: Optional[str]) -> str:
+def _build_offer_full_html(
+    offer,
+    template,
+    candidate_name: str,
+    dept_name: Optional[str],
+    esign_parties: Optional[list[dict]] = None,
+) -> str:
+    """esign_parties switches to the Zoho Sign render: [{key, name, title}] for
+    every party that signs (key company_signatory / candidate / p<n>), each
+    getting an empty anchored signature + date slot instead of a drawn image."""
     body_html = "<p>No template content available.</p>"
     raw_body = template.body_html if template and template.body_html else ""
     if raw_body:
         variables = _build_variables(offer, candidate_name or "", dept_name)
+        if esign_parties is not None:
+            variables.update(_esign_overrides(raw_body))
         body_html = _render_template(raw_body, variables)
 
     # Templates that place {{director_signature}} / {{candidate_signature}} in their own
     # sign-off block render the image there, so the generic block below is skipped
     signature_block = ""
-    if offer.director_signature and "{{director_signature}}" not in raw_body:
+    if esign_parties is not None:
+        signature_block = _esign_signature_block(esign_parties, raw_body)
+    elif offer.director_signature and "{{director_signature}}" not in raw_body:
         approved_label = (
             offer.director_approved_at.strftime("%d %B %Y") if offer.director_approved_at else "Approved"
         )
@@ -557,7 +676,11 @@ def _build_offer_full_html(offer, template, candidate_name: str, dept_name: Opti
        style="max-height:80px;border:1px solid #e5e7eb;border-radius:6px;padding:6px;background:#fff;" />
   <p style="font-size:11px;color:#9ca3af;margin-top:4px;">Approved on {approved_label}</p>
 </div>"""
-    if offer.candidate_signature and "{{candidate_signature}}" not in raw_body:
+    if (
+        esign_parties is None
+        and offer.candidate_signature and offer.candidate_signature.startswith("data:")
+        and "{{candidate_signature}}" not in raw_body
+    ):
         signed_label = (
             offer.signed_at.strftime("%d %B %Y") if offer.signed_at else "Signed"
         )
@@ -614,6 +737,47 @@ async def build_offer_pdf(db: AsyncSession, offer_id: uuid.UUID) -> bytes:
     return WeasyprintHTML(string=full_html).write_pdf()
 
 
+def _render_esign_pdf(full_html: str, keys: list[str]) -> tuple[bytes, dict]:
+    """Renders once and reads each anchor's position from that same layout, so
+    the field coordinates always match the bytes we upload."""
+    from weasyprint import HTML as WeasyprintHTML
+
+    document = WeasyprintHTML(string=full_html).render()
+    wanted = {esign_sig_anchor(k): (k, "sig") for k in keys}
+    wanted.update({esign_date_anchor(k): (k, "date") for k in keys})
+
+    placements: dict = {k: {} for k in keys}
+    for page_no, page in enumerate(document.pages):
+        for anchor, (x, y) in page.anchors.items():
+            if anchor in wanted and wanted[anchor][1] not in placements[wanted[anchor][0]]:
+                key, kind = wanted[anchor]
+                placements[key][kind] = {
+                    "page_no": page_no,
+                    "x": x,
+                    "y": y,
+                    "page_width": page.width,
+                    "page_height": page.height,
+                }
+    return document.write_pdf(), placements
+
+
+async def build_offer_esign_pdf(
+    db: AsyncSession, offer_id: uuid.UUID, parties: list[dict],
+) -> tuple[bytes, dict]:
+    """PDF for Zoho Sign plus, per signing party key, where its Signature and
+    Date fields go: {key: {"sig": {page_no, x, y, page_width, page_height}, "date": {...}}}
+    in CSS px from the page's top-left."""
+    import asyncio
+    offer, template, candidate_name, dept_name = await _fetch_offer_render_row(db, offer_id)
+    full_html = _build_offer_full_html(offer, template, candidate_name, dept_name, esign_parties=parties)
+    return await asyncio.to_thread(_render_esign_pdf, full_html, [p["key"] for p in parties])
+
+
+async def candidate_esign_view(db: AsyncSession, offer: OfferLetter) -> Optional[dict]:
+    from app.services.esign_service import candidate_view
+    return await candidate_view(db, offer)
+
+
 async def get_offer_for_applicant(
     db: AsyncSession,
     application_id: uuid.UUID,
@@ -636,7 +800,7 @@ async def get_offer_for_applicant(
         select(OfferLetter).where(OfferLetter.application_id == application_id)
     )).scalar_one_or_none()
 
-    if not offer or offer.status not in ("sent", "accepted", "rejected", "expired", "revoked"):
+    if not offer or offer.status not in CANDIDATE_VISIBLE_STATUSES:
         return None
 
     row = (await db.execute(
@@ -675,6 +839,8 @@ async def get_offer_for_applicant(
         signed_at=offer.signed_at,
         body_html=body_html,
         job_title=row[0] if row else None,
+        is_signed=is_offer_signed(offer),
+        esign=await candidate_esign_view(db, offer),
     )
 
 
