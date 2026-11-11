@@ -11,6 +11,9 @@ bcrypt==4.0.1
 python-multipart==0.0.12
 redis==5.2.0
 celery==5.4.0
+# Pinned: celery only bounds kombu to <6.0, so an unpinned rebuild pulled kombu 5.7,
+# which hard-fails on redis-py < 6.1 and crash-looped the worker + beat (2026-11-10).
+kombu==5.4.2
 azure-storage-blob==12.23.0
 jinja2==3.1.4
 weasyprint==62.3
