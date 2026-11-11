@@ -119,7 +119,11 @@ async def publish_slots(
     # round trip per slot for data we already have, which is what made a
     # multi-slot drag-publish feel slow against a remote Postgres instance.
     await db.commit()
-    return [_to_response(s) for s in created]
+    out = [_to_response(s) for s in created]
+    # Built before this: fulfil_matching commits again, which would expire `created`
+    from app.services.agency_slot_request_service import fulfil_matching
+    await fulfil_matching(db, job_id, round_type, len(created))
+    return out
 
 
 async def unpublish_slot(db: AsyncSession, slot_id: uuid.UUID, requesting_user) -> None:
@@ -241,7 +245,10 @@ async def assign_slots_batch(
         slot.round_type = round_type
 
     await db.commit()  # see unassign_slot above — no per-row refresh needed
-    return [_to_response(s, job_title=job.title) for s in updated]
+    out = [_to_response(s, job_title=job.title) for s in updated]
+    from app.services.agency_slot_request_service import fulfil_matching
+    await fulfil_matching(db, job_id, round_type, len(updated))
+    return out
 
 
 # How far either side of today an interviewer's calendar is loaded. This query

@@ -6,6 +6,7 @@ import {
   Building2, ChevronLeft, Users, Clock, UserPlus, Briefcase,
   CalendarClock, CalendarX, Loader2, Info, Search, Check, Send, Award,
   AlertCircle, ShieldCheck, Hourglass, LifeBuoy, Sparkles, ArrowRight, Link2,
+  CheckCircle2, UserX, Video, CalendarPlus, Minus, Plus,
 } from 'lucide-react';
 import { formatDistanceToNow, isSameDay, addDays } from 'date-fns';
 import { agenciesApi } from '@/api/agencies';
@@ -52,6 +53,71 @@ const STAGE_COLORS = {
 };
 
 const TERMINAL_STAGES = new Set(['rejected', 'withdrawn', 'interview_drop', 'offer_drop']);
+
+// Where each interview round stands, in the agency's words. Interviewer names
+// and feedback content are never sent to the portal — only the round, the IST
+// time and one of these statuses.
+const INTERVIEW_STATUS = {
+  scheduled:         { label: 'Scheduled',         icon: CalendarClock, tone: 'bg-blue-50 text-blue-700 border-blue-200' },
+  rescheduled:       { label: 'Rescheduled',       icon: CalendarClock, tone: 'bg-amber-50 text-amber-700 border-amber-200' },
+  awaiting_feedback: { label: 'Awaiting feedback', icon: Hourglass,     tone: 'bg-violet-50 text-violet-700 border-violet-200' },
+  feedback_received: { label: 'Feedback in',       icon: CheckCircle2,  tone: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  cancelled:         { label: 'Cancelled',         icon: CalendarX,     tone: 'bg-surface-100 text-gray-500 border-surface-200' },
+  no_show:           { label: 'No-show',           icon: UserX,         tone: 'bg-rose-50 text-rose-700 border-rose-200' },
+};
+
+function interviewWhen(iv) {
+  const upcoming = ['scheduled', 'rescheduled'].includes(iv.status);
+  const day = isSameDay(toIST(iv.scheduled_at), toIST(new Date()))
+    ? 'Today'
+    : isSameDay(toIST(iv.scheduled_at), addDays(toIST(new Date()), 1))
+      ? 'Tomorrow'
+      : formatIST(iv.scheduled_at, 'EEE d MMM');
+  return upcoming ? `${day}, ${formatIST(iv.scheduled_at, 'h:mm a')} IST` : `Held ${formatIST(iv.scheduled_at, 'd MMM')}`;
+}
+
+function InterviewStrip({ interviews }) {
+  // Latest interview per round — a reschedule history would only add noise
+  const latest = [];
+  const seen = new Set();
+  for (const iv of interviews ?? []) {
+    const key = iv.round_type ?? iv.round_label;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    latest.push(iv);
+  }
+  if (!latest.length) return null;
+  return (
+    <div className="w-full flex flex-wrap gap-2">
+      {latest.map((iv) => {
+        const st = INTERVIEW_STATUS[iv.status] ?? INTERVIEW_STATUS.scheduled;
+        const Icon = st.icon;
+        const round = ROUND_MAP[iv.round_type];
+        return (
+          <div
+            key={`${iv.round_type}-${iv.scheduled_at}`}
+            className="inline-flex items-center gap-2 rounded-xl border border-surface-200 bg-white pl-1 pr-2.5 py-1 text-[11px]"
+            title={iv.status === 'awaiting_feedback'
+              ? 'The interview is done. The panel is writing up feedback; the stage updates once HR reviews it.'
+              : undefined}
+          >
+            <span className={cn('px-2 py-0.5 rounded-lg font-semibold border whitespace-nowrap',
+              round?.accent?.badge ?? 'bg-surface-100 text-gray-600 border-surface-200')}>
+              {round?.short ?? iv.round_label}
+            </span>
+            <span className={cn('inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md font-semibold border whitespace-nowrap', st.tone)}>
+              <Icon className="w-3 h-3" /> {st.label}
+            </span>
+            <span className="text-gray-500 whitespace-nowrap inline-flex items-center gap-1">
+              {iv.interview_type === 'video' && ['scheduled', 'rescheduled'].includes(iv.status) && <Video className="w-3 h-3" />}
+              {interviewWhen(iv)}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function StageBadge({ stage }) {
   return (
@@ -394,9 +460,221 @@ function groupSlotsByRound(slots) {
     );
 }
 
+// ── Slot requests (agency → HR) ───────────────────────────────────────────────
+
+const TIME_PREFS = [
+  { value: 'any', label: 'Any time' },
+  { value: 'morning', label: 'Morning', title: 'Before 12 PM IST' },
+  { value: 'afternoon', label: 'Afternoon', title: '12–4 PM IST' },
+  { value: 'evening', label: 'Evening', title: 'After 4 PM IST' },
+];
+
+const isoDay = (d) => formatIST(d, 'yyyy-MM-dd');
+
+function RequestSlotsModal({ portalToken, assignmentId, candidates, defaultRound, onClose }) {
+  const queryClient = useQueryClient();
+  const eligibleCount = (rt) => (candidates ?? []).filter((c) => isBookableForRound(c, rt)).length;
+  // Default to the round the agency is looking at, else the one most of its candidates are waiting for
+  const initialRound = defaultRound
+    ?? [...ROUND_TYPES].sort((a, b) => eligibleCount(b.key) - eligibleCount(a.key))[0]?.key
+    ?? 'tr1';
+  const [round, setRound] = useState(initialRound);
+  const [count, setCount] = useState(Math.max(1, eligibleCount(initialRound)));
+  const [from, setFrom] = useState(isoDay(new Date()));
+  const [to, setTo] = useState(isoDay(addDays(new Date(), 7)));
+  const [pref, setPref] = useState('any');
+  const [note, setNote] = useState('');
+  const [error, setError] = useState('');
+
+  const pickRound = (rt) => {
+    setRound(rt);
+    setCount(Math.max(1, eligibleCount(rt)));
+    setError('');
+  };
+
+  const mutation = useMutation({
+    mutationFn: () => agenciesApi.portalRequestSlots(portalToken, assignmentId, {
+      round_type: round, candidates_count: count, date_from: from, date_to: to,
+      time_preference: pref, note: note.trim() || null,
+    }),
+    onSuccess: () => {
+      toast.success("Request sent. The hiring team has been notified, and we'll email you when times open.");
+      queryClient.invalidateQueries({ queryKey: ['agency-slot-requests', portalToken, assignmentId] });
+      onClose();
+    },
+    onError: (err) => {
+      const d = err.response?.data?.detail;
+      setError(typeof d === 'string' ? d : Array.isArray(d) ? d[0]?.msg?.replace(/^Value error, /, '') : 'Could not send the request. Please try again.');
+    },
+  });
+
+  const roundMeta = ROUND_MAP[round];
+  const inputCls = 'w-full px-3 py-2.5 text-sm border border-surface-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-300';
+
+  return (
+    <Modal
+      onClose={mutation.isPending ? undefined : onClose}
+      size="lg"
+      icon={CalendarPlus}
+      title="Request interview times"
+      description="Tell the hiring team what you need. They're notified right away, and you'll get an email once slots open."
+      footer={
+        <div className="flex items-center justify-end gap-2">
+          <button type="button" onClick={onClose} className="px-3 py-2 text-sm font-medium text-gray-500 hover:text-gray-800">Cancel</button>
+          <button
+            type="button"
+            onClick={() => mutation.mutate()}
+            disabled={mutation.isPending}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-brand-500 text-white text-sm font-semibold rounded-xl hover:bg-brand-600 disabled:opacity-60"
+          >
+            {mutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            Send request
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-5">
+        <div>
+          <p className="text-xs font-semibold text-gray-700 mb-2">Which round?</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {ROUND_TYPES.map((r) => {
+              const n = eligibleCount(r.key);
+              const active = r.key === round;
+              return (
+                <button
+                  key={r.key}
+                  type="button"
+                  onClick={() => pickRound(r.key)}
+                  aria-pressed={active}
+                  className={cn(
+                    'px-3 py-2.5 rounded-xl border text-left transition-all',
+                    active ? (r.accent?.tab ?? 'bg-brand-500 border-brand-500 text-white') + ' shadow-sm' : 'bg-white border-surface-200 hover:border-surface-300'
+                  )}
+                >
+                  <span className={cn('block text-xs font-semibold', active ? 'text-white' : 'text-gray-800')}>{r.label}</span>
+                  <span className={cn('block text-[11px] mt-0.5', active ? 'text-white/80' : 'text-gray-400')}>
+                    {n ? `${n} candidate${n !== 1 ? 's' : ''} waiting` : 'none waiting'}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {roundMeta?.blurb && <p className="text-[11px] text-gray-500 mt-2">{roundMeta.blurb}</p>}
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <p className="text-xs font-semibold text-gray-700 mb-2">How many candidates?</p>
+            <div className="flex items-center">
+            <div className="inline-flex items-center rounded-xl border border-surface-200 overflow-hidden">
+              <button type="button" onClick={() => setCount((c) => Math.max(1, c - 1))} className="p-2.5 hover:bg-surface-50 text-gray-500" aria-label="Fewer">
+                <Minus className="w-4 h-4" />
+              </button>
+              <span className="w-12 text-center text-sm font-bold text-gray-900 tabular-nums">{count}</span>
+              <button type="button" onClick={() => setCount((c) => Math.min(50, c + 1))} className="p-2.5 hover:bg-surface-50 text-gray-500" aria-label="More">
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+            <span className="text-[11px] text-gray-400 ml-3">Roughly how many slots you need</span>
+            </div>
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-gray-700 mb-2">Preferred time of day</p>
+            <Segmented size="sm" fullWidth value={pref} onChange={setPref} options={TIME_PREFS} />
+          </div>
+        </div>
+
+        <div>
+          <p className="text-xs font-semibold text-gray-700 mb-2">Between which dates?</p>
+          <div className="grid grid-cols-2 gap-2">
+            <input type="date" value={from} min={isoDay(new Date())} onChange={(e) => { setFrom(e.target.value); setError(''); }} className={inputCls} aria-label="From" />
+            <input type="date" value={to} min={from} onChange={(e) => { setTo(e.target.value); setError(''); }} className={inputCls} aria-label="To" />
+          </div>
+        </div>
+
+        <div>
+          <p className="text-xs font-semibold text-gray-700 mb-2">Anything the team should know? <span className="font-normal text-gray-400">(optional)</span></p>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            maxLength={500}
+            rows={2}
+            placeholder="e.g. Two candidates can only do weekdays after 5 PM"
+            className={cn(inputCls, 'resize-none')}
+          />
+        </div>
+
+        {error && (
+          <div className="flex items-start gap-2 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-2.5" role="alert">
+            <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-px" /> {error}
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+const REQUEST_STATUS = {
+  open:      { label: 'Waiting for the hiring team', tone: 'text-amber-700 bg-amber-50 border-amber-200', icon: Hourglass },
+  fulfilled: { label: 'Times opened',                tone: 'text-emerald-700 bg-emerald-50 border-emerald-200', icon: CheckCircle2 },
+  dismissed: { label: 'Not opened',                  tone: 'text-gray-600 bg-surface-100 border-surface-200', icon: CalendarX },
+};
+
+function SlotRequestsList({ portalToken, assignmentId }) {
+  const { data: requests = [] } = useQuery({
+    queryKey: ['agency-slot-requests', portalToken, assignmentId],
+    queryFn: () => agenciesApi.portalSlotRequests(portalToken, assignmentId).then((r) => r.data),
+    refetchInterval: 60000,
+  });
+  // Open ones always; closed ones only for a week, so the list doesn't grow forever
+  const weekAgo = Date.now() - 7 * 86400000;
+  const shown = requests.filter((r) => r.status === 'open' || new Date(r.resolved_at ?? r.created_at).getTime() > weekAgo).slice(0, 4);
+  if (!shown.length) return null;
+  return (
+    <ul className="mt-3 space-y-1.5">
+      {shown.map((r) => {
+        const st = REQUEST_STATUS[r.status] ?? REQUEST_STATUS.open;
+        const Icon = st.icon;
+        return (
+          <li key={r.id} className="flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-xl border border-surface-200 bg-white px-3 py-2 text-[11px]">
+            <span className={cn('px-2 py-0.5 rounded-lg font-semibold border whitespace-nowrap', ROUND_MAP[r.round_type]?.accent?.badge ?? 'bg-surface-100 text-gray-600 border-surface-200')}>
+              {ROUND_MAP[r.round_type]?.short ?? r.round_label}
+            </span>
+            <span className="text-gray-600">
+              You asked for {r.candidates_count} slot{r.candidates_count !== 1 ? 's' : ''}, {formatIST(r.date_from, 'd MMM')}–{formatIST(r.date_to, 'd MMM')}
+            </span>
+            <span className={cn('inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md font-semibold border whitespace-nowrap', st.tone)}>
+              <Icon className="w-3 h-3" />
+              {r.status === 'fulfilled' && r.slots_published ? `${r.slots_published} new time${r.slots_published !== 1 ? 's' : ''} opened` : st.label}
+            </span>
+            <span className="text-gray-400 ml-auto">{formatDistanceToNow(new Date(r.created_at), { addSuffix: true })}</span>
+            {r.resolution_note && <span className="w-full text-gray-500">"{r.resolution_note}"</span>}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function RequestSlotsButton({ onClick, variant = 'link' }) {
+  if (variant === 'primary') {
+    return (
+      <button type="button" onClick={onClick} className="inline-flex items-center gap-1.5 px-4 py-2 bg-brand-500 text-white text-sm font-semibold rounded-xl hover:bg-brand-600">
+        <CalendarPlus className="w-4 h-4" /> Request interview times
+      </button>
+    );
+  }
+  return (
+    <button type="button" onClick={onClick} className="inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-700">
+      <CalendarPlus className="w-3.5 h-3.5" /> Need other times?
+    </button>
+  );
+}
+
 function SlotPicker({ portalToken, assignmentId, candidates, disabled }) {
   const queryClient = useQueryClient();
   const [bookingSlot, setBookingSlot] = useState(null);
+  const [requesting, setRequesting] = useState(false);
   const [activeRound, setActiveRound] = useState(null);
   const [activeDay, setActiveDay] = useState(null);
 
@@ -484,6 +762,16 @@ function SlotPicker({ portalToken, assignmentId, candidates, disabled }) {
     );
   }
 
+  const requestModal = requesting && (
+    <RequestSlotsModal
+      portalToken={portalToken}
+      assignmentId={assignmentId}
+      candidates={candidates}
+      defaultRound={activeRoundGroup?.key}
+      onClose={() => setRequesting(false)}
+    />
+  );
+
   if (rounds.length === 0 || !activeRoundGroup) {
     return (
       <div>
@@ -493,9 +781,12 @@ function SlotPicker({ portalToken, assignmentId, candidates, disabled }) {
             compact
             icon={CalendarX}
             title="No interview times open yet"
-            description="The hiring team hasn’t published slots for this role. This list refreshes on its own — no need to reload."
+            description="Ask the hiring team for times and we'll email you the moment they're published. This list also refreshes on its own."
+            action={<RequestSlotsButton variant="primary" onClick={() => setRequesting(true)} />}
           />
         </div>
+        <SlotRequestsList portalToken={portalToken} assignmentId={assignmentId} />
+        {requestModal}
       </div>
     );
   }
@@ -511,9 +802,12 @@ function SlotPicker({ portalToken, assignmentId, candidates, disabled }) {
         count={totalAvailable}
         hint="all times IST"
         action={
-          <span className="inline-flex items-center gap-1 text-[11px] text-gray-400">
-            <ShieldCheck className="w-3 h-3" />
-            Interviewer stays anonymous until booked
+          <span className="inline-flex items-center gap-3">
+            <span className="hidden md:inline-flex items-center gap-1 text-[11px] text-gray-400">
+              <ShieldCheck className="w-3 h-3" />
+              Interviewer stays anonymous until booked
+            </span>
+            <RequestSlotsButton onClick={() => setRequesting(true)} />
           </span>
         }
       />
@@ -634,6 +928,9 @@ function SlotPicker({ portalToken, assignmentId, candidates, disabled }) {
           </p>
         </div>
       </div>
+
+      <SlotRequestsList portalToken={portalToken} assignmentId={assignmentId} />
+      {requestModal}
 
       {bookingSlot && (
         <BookSlotModal
@@ -901,28 +1198,15 @@ function RoleDetail({ portalToken, assignment, onBack }) {
                         </div>
                       </div>
                       <div className="flex items-center gap-2.5 flex-wrap">
-                        {/* Rounds this candidate already has scheduled. Same
-                            colours as the booking tabs, so "why can't I book
-                            them again" answers itself here rather than in the
-                            modal. Disappears when an interview is cancelled. */}
-                        {(c.booked_rounds ?? []).map((rt) => (
-                          <span
-                            key={rt}
-                            title={`${ROUND_MAP[rt]?.label ?? rt} already booked`}
-                            className={cn(
-                              'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border whitespace-nowrap',
-                              ROUND_MAP[rt]?.accent?.badge ?? 'bg-surface-100 text-gray-600 border-surface-200'
-                            )}
-                          >
-                            <CalendarClock className="w-2.5 h-2.5" />
-                            {ROUND_MAP[rt]?.short ?? rt}
-                          </span>
-                        ))}
                         <StageBadge stage={c.stage} />
                         <span className="text-[11px] text-gray-400 hidden sm:block whitespace-nowrap">
                           moved {formatDistanceToNow(new Date(c.stage_updated_at), { addSuffix: true })}
                         </span>
                       </div>
+                      {/* Each interview round with its status and IST time.
+                          Replaces the old "booked" chips: same round colours,
+                          but now also says where the round stands. */}
+                      <InterviewStrip interviews={c.interviews} />
                       {/* Their assessment, so the agency can chase a pending one
                           and see the result. Scores only — never the answers. */}
                       <AgencyAssessmentStrip a={c.assessment} />

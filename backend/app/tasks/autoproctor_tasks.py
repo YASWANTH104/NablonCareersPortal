@@ -18,7 +18,7 @@ def _task_session():
 @celery_app.task(name="sync_autoproctor_results", soft_time_limit=3 * 3600 - 300, time_limit=3 * 3600)
 def sync_autoproctor_results(trigger: str = "schedule", date_from: str | None = None, date_to: str | None = None,
                              run_id: str | None = None):
-    """Nightly 00:00 IST: import new AutoProctor attempts, mark matching
+    """Scheduled 00:00 and 12:00 IST: import new AutoProctor attempts, mark matching
     assessments completed, act on graded results (advance / reject), then
     run the 30-day auto-drop. Reminders are a separate 10:00 IST task. See
     autoproctor_service for the guards.
@@ -79,7 +79,7 @@ def auto_send_assessment(self, application_id: str):
 def send_assessment_reminders():
     """Daily 10:00 IST: day-3 and day-6 reminders for unsubmitted AutoProctor
     assessments. Separate from the midnight sync so candidates aren't emailed
-    at midnight; relies on that sync having succeeded (checked inside)."""
+    at midnight; relies on a scheduled sync having succeeded (checked inside)."""
     from app.config import settings
     from app.services import autoproctor_service
 

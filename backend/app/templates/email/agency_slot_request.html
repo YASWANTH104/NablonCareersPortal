@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Interview Slot Request – Nablon AI{% endblock %}
+
+{% block content %}
+<h2>{{ agency_name }} needs interview slots</h2>
+
+<p>
+  <strong>{{ agency_contact }}</strong> from {{ agency_name }} asked for
+  <strong>{{ round_label }}</strong> times for the <strong>{{ job_title }}</strong> role.
+</p>
+
+<table style="width:100%; border-collapse:collapse; margin:20px 0; font-size:14px;">
+  <tr style="border-bottom:1px solid #E5E7EB;">
+    <td style="padding:8px 4px; color:#6B7280; width:40%;">Round</td>
+    <td style="padding:8px 4px; font-weight:600; color:#111827;">{{ round_label }}</td>
+  </tr>
+  <tr style="border-bottom:1px solid #E5E7EB;">
+    <td style="padding:8px 4px; color:#6B7280;">Candidates to schedule</td>
+    <td style="padding:8px 4px; font-weight:600; color:#111827;">{{ candidates_count }}</td>
+  </tr>
+  <tr style="border-bottom:1px solid #E5E7EB;">
+    <td style="padding:8px 4px; color:#6B7280;">Dates</td>
+    <td style="padding:8px 4px; font-weight:600; color:#111827;">{{ date_range }}</td>
+  </tr>
+  <tr{% if note %} style="border-bottom:1px solid #E5E7EB;"{% endif %}>
+    <td style="padding:8px 4px; color:#6B7280;">Preferred time</td>
+    <td style="padding:8px 4px; font-weight:600; color:#111827;">{{ time_preference }}</td>
+  </tr>
+  {% if note %}
+  <tr>
+    <td style="padding:8px 4px; color:#6B7280;">Note</td>
+    <td style="padding:8px 4px; color:#111827;">{{ note }}</td>
+  </tr>
+  {% endif %}
+</table>
+
+<p>Publishing slots for this role and round closes the request and lets the agency know automatically.</p>
+
+<a href="{{ publish_url }}" class="cta">Publish Slots</a>
+{% endblock %}

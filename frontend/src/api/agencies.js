@@ -39,4 +39,9 @@ export const agenciesApi = {
     client.get(`/agency-portal/${portalToken}/assignments/${assignmentId}/slots`),
   portalBookSlot: (portalToken, assignmentId, data) =>
     client.post(`/agency-portal/${portalToken}/assignments/${assignmentId}/slots/book`, data),
+  // Ask HR to open interview times for a round
+  portalSlotRequests: (portalToken, assignmentId) =>
+    client.get(`/agency-portal/${portalToken}/assignments/${assignmentId}/slot-requests`),
+  portalRequestSlots: (portalToken, assignmentId, data) =>
+    client.post(`/agency-portal/${portalToken}/assignments/${assignmentId}/slot-requests`, data),
 };

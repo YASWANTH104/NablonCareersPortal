@@ -26,12 +26,12 @@ const ACTIVE = ['queued', 'running'];
 function runLabel(run) {
   return run.range_from
     ? `Manual scrape ${run.range_from}${run.range_to && run.range_to !== run.range_from ? ` → ${run.range_to}` : ''}`
-    : 'Nightly sync';
+    : 'Scheduled sync';
 }
 
 function RunStatus({ run, lastSuccessAt }) {
   if (!run) {
-    return <p className="text-xs text-gray-500">No sync has run yet. The nightly sync runs at 12:00 AM IST.</p>;
+    return <p className="text-xs text-gray-500">No sync has run yet. It runs automatically at 12:00 AM and 12:00 PM IST.</p>;
   }
   const label = runLabel(run);
   if (run.status === 'queued') {
@@ -66,7 +66,7 @@ function RunStatus({ run, lastSuccessAt }) {
       {label} {run.status === 'failed' ? 'failed' : 'finished'} {formatIST(run.finished_at || run.started_at, 'dd MMM, h:mm a')}
       {run.status !== 'failed' && ` · ${run.attempts_imported} new, ${run.attempts_skipped} already imported`}
       {run.status === 'failed' && run.error && ` — ${run.error.slice(0, 120)}`}
-      {lastSuccessAt && run.status === 'failed' && ` · last good nightly sync ${formatIST(lastSuccessAt, 'dd MMM, h:mm a')}`}
+      {lastSuccessAt && run.status === 'failed' && ` · last good scheduled sync ${formatIST(lastSuccessAt, 'dd MMM, h:mm a')}`}
     </p>
   );
 }
@@ -131,7 +131,7 @@ function ScrapeModal({ onClose, onQueued }) {
         <li>Attempts already imported are skipped, so overlapping ranges are safe to run.</li>
         <li>Each new attempt takes about 20–30 seconds. It runs in the background, so you can leave this page.</li>
         <li>Imported results are acted on straight away: score ≥ 75% and trust ≥ 90% moves the candidate to the next round, anything less rejects them and sends the rejection email right away. Only candidates still in Assessment are moved.</li>
-        <li>The 30-day auto-drop only runs with the nightly sync.</li>
+        <li>The 30-day auto-drop only runs with the scheduled syncs (12:00 AM and 12:00 PM IST).</li>
       </ul>
     </Modal>
   );
@@ -324,7 +324,7 @@ function RunsTable({ rows }) {
             <tr key={r.id} className="align-top">
               <td className="px-4 py-3 text-xs text-gray-700 whitespace-nowrap">{formatIST(r.started_at, 'dd MMM, h:mm a')}</td>
               <td className="px-4 py-3 text-xs text-gray-700">
-                {r.range_from ? `Manual · ${r.range_from}${r.range_to && r.range_to !== r.range_from ? ` → ${r.range_to}` : ''}` : 'Nightly'}
+                {r.range_from ? `Manual · ${r.range_from}${r.range_to && r.range_to !== r.range_from ? ` → ${r.range_to}` : ''}` : 'Scheduled'}
               </td>
               <td className="px-4 py-3 text-xs">
                 <span className={cn(
@@ -421,7 +421,7 @@ export default function AssessmentsPage() {
     <div>
       <PageHeader
         title="Assessments"
-        description="AutoProctor results, synced every night at 12:00 AM IST."
+        description="AutoProctor results, synced twice a day at 12:00 AM and 12:00 PM IST."
         actions={
           <button
             type="button"
@@ -505,7 +505,7 @@ export default function AssessmentsPage() {
                 title={view === 'unmatched' ? 'Every attempt is matched' : 'No results yet'}
                 description={view === 'unmatched'
                   ? 'Attempts that don\'t match a candidate by email show up here for you to link.'
-                  : 'Results arrive after the nightly sync. To pull them now, use Scrape results.'}
+                  : 'Results arrive after the next scheduled sync (12:00 AM or 12:00 PM IST). To pull them now, use Scrape results.'}
                 action={view === 'results' && !running && summary?.enabled !== false && (
                   <button type="button" onClick={() => setShowScrape(true)} className="text-sm font-semibold text-brand-600 hover:text-brand-700">Scrape results</button>
                 )}
@@ -530,7 +530,7 @@ export default function AssessmentsPage() {
         {view === 'history' && (
           loadingRuns ? <div className="p-10 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-gray-400" /></div>
             : runs.length === 0 ? (
-              <EmptyState icon={History} title="No syncs yet" description="The nightly sync runs at 12:00 AM IST. You can also start a manual scrape." />
+              <EmptyState icon={History} title="No syncs yet" description="Syncs run at 12:00 AM and 12:00 PM IST. You can also start a manual scrape." />
             ) : <RunsTable rows={runs} />
         )}
       </div>

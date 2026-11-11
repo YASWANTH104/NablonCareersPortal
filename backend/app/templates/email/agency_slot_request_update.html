@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Interview Slots – Nablon AI Careers{% endblock %}
+
+{% block content %}
+<h2>Hi {{ agency_name }},</h2>
+
+{% if fulfilled %}
+<p>
+  Good news: the hiring team has opened{% if slots_published %} <strong>{{ slots_published }}</strong>{% endif %}
+  new <strong>{{ round_label }}</strong> time{% if slots_published != 1 %}s{% endif %} for the
+  <strong>{{ job_title }}</strong> role. You can book your candidates into them from your agency portal now.
+</p>
+{% else %}
+<p>
+  The hiring team reviewed your request for <strong>{{ round_label }}</strong> times for the
+  <strong>{{ job_title }}</strong> role and won't be opening new slots for it right now.
+</p>
+{% endif %}
+
+{% if note %}
+<p style="background:#F8F9FC; border:1px solid #E4E8F0; border-radius:8px; padding:12px 14px; color:#374151;">
+  <strong>Note from the hiring team:</strong> {{ note }}
+</p>
+{% endif %}
+
+<p style="text-align:center; margin:30px 0;">
+  <a href="{{ portal_url }}" style="background:#0238DD; color:#ffffff; padding:12px 28px; border-radius:8px; text-decoration:none; font-weight:600; font-size:15px;">
+    {% if fulfilled %}Book Interview Times{% else %}Open Agency Portal{% endif %}
+  </a>
+</p>
+
+<p style="color:#6B7280; font-size:13px;">
+  If you have any questions, please reach out to the Nablon AI hiring team.
+</p>
+{% endblock %}

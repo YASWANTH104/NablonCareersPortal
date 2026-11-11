@@ -757,6 +757,29 @@ def send_interview_scheduled_notifications(
         raise self.retry(exc=exc)
 
 
+async def _agency_cc(db, app) -> list[str]:
+    """The sourcing agency's contact, copied on the candidate's interview emails
+    so the agency can track its candidates without asking HR. Only on the
+    candidate copy — panelists' emails carry the internal profile link."""
+    if not app or not app.agency_id:
+        return []
+    from app.models.agency import Agency
+    agency = await db.get(Agency, app.agency_id)
+    if not agency or not agency.is_active or not agency.contact_email:
+        return []
+    return [agency.contact_email.strip().lower()]
+
+
+def _merge_cc(*groups) -> list[str] | None:
+    out: list[str] = []
+    for g in groups:
+        for e in ([g] if isinstance(g, str) else (g or [])):
+            e = (e or "").strip().lower()
+            if e and e not in out:
+                out.append(e)
+    return out or None
+
+
 async def _send_interview_scheduled_async(
     interview_id: str, cc_emails: list[str] | None = None, only_panelist_id: str | None = None,
 ):
@@ -801,12 +824,13 @@ async def _send_interview_scheduled_async(
 
         sends = []
         if candidate and not only_panelist_id:
+            candidate_cc = _merge_cc(cc_emails, await _agency_cc(db, app))
             sends.append((candidate.email, lambda c=candidate: send_email(
                 to_email=c.email,
                 subject=f"Interview Scheduled – {job_title}",
                 template_name="interview_scheduled",
                 context={"full_name": c.full_name, "role": "candidate", **email_ctx},
-                cc_email=cc_emails,
+                cc_email=candidate_cc,
             )))
 
         panelist_q = select(InterviewPanelist).where(InterviewPanelist.interview_id == iv_uuid)
@@ -890,6 +914,7 @@ async def _send_interview_rescheduled_async(interview_id: str):
                 subject=f"Interview Rescheduled – {job_title}",
                 template_name="interview_rescheduled",
                 context={"full_name": candidate.full_name, "role": "candidate", **email_ctx},
+                cc_email=_merge_cc(await _agency_cc(db, app)),
             )
 
         panelists = (await db.execute(
@@ -962,6 +987,7 @@ async def _send_interview_cancelled_async(interview_id: str):
                 subject=f"Interview Cancelled – {job_title}",
                 template_name="interview_cancelled",
                 context={"full_name": candidate.full_name, "role": "candidate", **email_ctx},
+                cc_email=_merge_cc(await _agency_cc(db, app)),
             )
 
         panelists = (await db.execute(
@@ -1397,3 +1423,103 @@ async def _send_preboarding_email_async(application_id: str):
         )
 
         logger.info(f"Preboarding email sent: app={application_id}, to={candidate_email}")
+
+
+# ── Agency slot requests ─────────────────────────────────────────────────────
+
+_TIME_PREF_LABELS = {
+    "any": "Any time", "morning": "Mornings (before 12 PM IST)",
+    "afternoon": "Afternoons (12–4 PM IST)", "evening": "Evenings (after 4 PM IST)",
+}
+
+
+async def _slot_request_row(db, request_id: str):
+    from app.models.agency import Agency, AgencySlotRequest
+    from app.models.job import Job
+    from sqlalchemy import select
+    return (await db.execute(
+        select(AgencySlotRequest, Agency, Job)
+        .join(Agency, Agency.id == AgencySlotRequest.agency_id)
+        .join(Job, Job.id == AgencySlotRequest.job_id)
+        .where(AgencySlotRequest.id == uuid.UUID(request_id))
+    )).first()
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def send_agency_slot_request_hr_email(self, request_id: str):
+    try:
+        asyncio.run(_send_agency_slot_request_hr_email_async(request_id))
+    except Exception as exc:
+        logger.error(f"Agency slot request HR email failed: request={request_id}: {exc}")
+        raise self.retry(exc=exc)
+
+
+async def _send_agency_slot_request_hr_email_async(request_id: str):
+    from app.config import settings
+    from app.constants.stages import ROUND_LABELS
+    from app.services.email_service import send_email
+
+    async with _task_session() as db:
+        row = await _slot_request_row(db, request_id)
+        if not row:
+            return
+        req, agency, job = row
+        round_label = ROUND_LABELS.get(req.round_type, req.round_type)
+        await send_email(
+            to_email=settings.HR_NOTIFICATION_EMAIL,
+            subject=f"Slot request: {agency.name} needs {round_label} times — {job.title}",
+            template_name="agency_slot_request",
+            context={
+                "agency_name": agency.name,
+                "agency_contact": agency.contact_name or agency.contact_email,
+                "job_title": job.title,
+                "round_label": round_label,
+                "candidates_count": req.candidates_count,
+                "date_range": f"{req.date_from.strftime('%a %d %b')} – {req.date_to.strftime('%a %d %b %Y')}",
+                "time_preference": _TIME_PREF_LABELS.get(req.time_preference, req.time_preference),
+                "note": req.note or "",
+                "publish_url": f"{settings.FRONTEND_URL}/hr/availability?mode=publish&request={req.id}",
+            },
+        )
+        logger.info(f"Agency slot request HR email sent: request={request_id}")
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def send_agency_slot_request_update_email(self, request_id: str):
+    try:
+        asyncio.run(_send_agency_slot_request_update_email_async(request_id))
+    except Exception as exc:
+        logger.error(f"Agency slot request update email failed: request={request_id}: {exc}")
+        raise self.retry(exc=exc)
+
+
+async def _send_agency_slot_request_update_email_async(request_id: str):
+    from app.config import settings
+    from app.constants.stages import ROUND_LABELS
+    from app.services.email_service import send_email
+
+    async with _task_session() as db:
+        row = await _slot_request_row(db, request_id)
+        if not row:
+            return
+        req, agency, job = row
+        if req.status not in ("fulfilled", "dismissed") or not agency.contact_email:
+            return
+        round_label = ROUND_LABELS.get(req.round_type, req.round_type)
+        fulfilled = req.status == "fulfilled"
+        await send_email(
+            to_email=agency.contact_email,
+            subject=(f"New {round_label} times are open — {job.title}" if fulfilled
+                     else f"Update on your {round_label} slot request — {job.title}"),
+            template_name="agency_slot_request_update",
+            context={
+                "agency_name": agency.contact_name or agency.name,
+                "job_title": job.title,
+                "round_label": round_label,
+                "fulfilled": fulfilled,
+                "slots_published": req.slots_published,
+                "note": req.resolution_note or "",
+                "portal_url": f"{settings.FRONTEND_URL}/agency/{agency.portal_token}",
+            },
+        )
+        logger.info(f"Agency slot request update email sent: request={request_id} status={req.status}")

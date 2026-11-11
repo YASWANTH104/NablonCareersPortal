@@ -1,5 +1,6 @@
 import uuid
-from fastapi import APIRouter, Depends
+from typing import Literal, Optional
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -8,12 +9,35 @@ from app.schemas.interview_slot import (
     SlotPublishRequest, SlotResponse, SlotBookRequest, SlotAssignBatchRequest,
     SlotBookUnassignedRequest, SlotRescheduleRequest,
 )
-from app.services import interview_slot_service
+from app.schemas.agency import AgencySlotRequestResponse, AgencySlotRequestResolve
+from app.services import interview_slot_service, agency_slot_request_service
 
 router = APIRouter(prefix="/interview-slots", tags=["interview-slots"])
 
 _HR_ROLES = (Role.HR_MANAGER, Role.ADMIN, Role.SUPER_ADMIN)
 _HR_AND_INTERVIEWER = (Role.HR_MANAGER, Role.ADMIN, Role.SUPER_ADMIN, Role.INTERVIEWER)
+
+
+# ── Agency slot requests (HR inbox) ──────────────────────────────────────────
+
+@router.get("/agency-requests")
+async def list_agency_slot_requests(
+    status: Optional[Literal["open", "fulfilled", "dismissed"]] = Query("open"),
+    _=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """{open_count, items}: open_count drives the badge whatever the filter."""
+    return await agency_slot_request_service.list_for_hr(db, status)
+
+
+@router.post("/agency-requests/{request_id}/resolve", response_model=AgencySlotRequestResponse)
+async def resolve_agency_slot_request(
+    request_id: uuid.UUID,
+    data: AgencySlotRequestResolve,
+    user=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await agency_slot_request_service.resolve(db, request_id, data.status, data.note, user)
 
 
 @router.get("/jobs")
