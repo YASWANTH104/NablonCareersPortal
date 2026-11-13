@@ -40,7 +40,9 @@ async def _poll_inflight() -> str:
         return "Zoho Sign not configured"
 
     async with _task_session() as db:
-        ids = await esign_service.inflight_request_ids(db, timedelta(minutes=30))
+        # Under the 30-min beat interval, so every in-flight envelope is checked
+        # each run, but one HR just refreshed (or a webhook just synced) is skipped
+        ids = await esign_service.inflight_request_ids(db, timedelta(minutes=25))
 
     synced = failed = 0
     for rid in ids:
@@ -56,5 +58,6 @@ async def _poll_inflight() -> str:
 
 @celery_app.task(name="poll_inflight_esign_requests")
 def poll_inflight_esign_requests():
-    """Safety net for missed webhooks: re-syncs envelopes nobody has heard about in 30 min."""
+    """Every 30 min (beat): re-syncs each in-flight envelope from Zoho. The main status
+    path on Zoho plans without webhooks; with a webhook it only catches misses."""
     return asyncio.run(_poll_inflight())

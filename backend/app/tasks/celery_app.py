@@ -33,7 +33,9 @@ conf = dict(
         },
         "poll-inflight-esign-requests": {
             "task": "poll_inflight_esign_requests",
-            "schedule": 1800,  # every 30 minutes — webhook is primary, this catches misses
+            # Every 30 minutes. Nablon's Zoho Sign plan (Professional) has no webhooks,
+            # so this poll is how signatures, declines and completion reach the portal.
+            "schedule": 1800,
         },
         "auto-reject-expired-screening-requests": {
             "task": "auto_reject_expired_screening_requests",

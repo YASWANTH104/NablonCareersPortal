@@ -2,8 +2,9 @@
 
 Flow: HR picks the parties → we render the letter with anchored signature
 slots, upload it to Zoho, place a Signature + Date field on each signer's line
-and submit. Zoho emails each party in turn. Its webhook (with a 30-minute poll
-as a safety net) triggers sync_request(), which reads the request back from
+and submit. Zoho emails each party in turn. A 30-minute worker poll (beat →
+poll_inflight_esign_requests), plus the webhook on Zoho plans that have one,
+triggers sync_request(), which reads the request back from
 Zoho as the source of truth and moves the offer along:
 
     all signed          → offer accepted (signed PDF + certificate stay in Zoho,

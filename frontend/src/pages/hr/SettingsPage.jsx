@@ -8,7 +8,7 @@ import {
   Building2, Users, Plus, Trash2, Pencil, Check, X, UserPlus, Loader2, Search,
   UserCog, ShieldCheck, KeyRound, Mail, BadgeCheck, AlertCircle, Info, Clock,
   MailWarning, CircleSlash, ArrowRight, Save, CalendarClock, Send,
-  Plug, PenLine, Copy, Webhook, PlugZap, CheckCircle2, XCircle,
+  Plug, PenLine, Copy, Webhook, PlugZap, CheckCircle2, XCircle, RefreshCw,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { jobsApi } from '@/api/jobs';
@@ -1721,38 +1721,53 @@ function IntegrationsSection() {
       </Card>
 
       <Card
-        title="Live status updates"
-        description="Zoho calls this URL the moment someone views, signs or declines, so the tracker updates on its own."
-        icon={Webhook}
+        title="Status updates"
+        description="For every offer out for signature, the portal checks Zoho every 30 minutes, so the tracker moves on its own when someone views, signs or declines."
+        icon={RefreshCw}
         action={
-          <span className={cn(
-            'inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1',
-            status.webhook_configured ? 'bg-emerald-50 text-emerald-700' : 'bg-surface-100 text-gray-600'
-          )}>
-            {status.webhook_configured ? 'Secret set' : 'Secret not set'}
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1 bg-emerald-50 text-emerald-700">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Every 30 min
           </span>
         }
       >
         <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <input readOnly value={status.webhook_url} className={cn(inputClass, 'font-mono text-xs bg-surface-50')} aria-label="Webhook URL" onFocus={(e) => e.target.select()} />
-            <button
-              type="button"
-              onClick={copyWebhook}
-              className="shrink-0 inline-flex items-center gap-1.5 px-3.5 py-2.5 border border-surface-300 text-gray-700 text-sm font-semibold rounded-lg hover:bg-surface-50"
-            >
-              <Copy className="w-4 h-4" /> Copy
-            </button>
-          </div>
-          <ol className="space-y-1.5">
-            {ZOHO_WEBHOOK_STEPS.map((step, i) => (
-              <li key={step} className="flex items-start gap-2.5 text-xs text-gray-600">
-                <span className="w-5 h-5 rounded-full bg-surface-100 text-gray-500 text-[11px] font-bold flex items-center justify-center shrink-0">{i + 1}</span>
-                <span className="pt-0.5">{step}</span>
-              </li>
-            ))}
-          </ol>
-          <p className="text-[11px] text-gray-400">Missed events are caught by a 30-minute background check, and HR can hit refresh on any offer.</p>
+          <p className="text-xs text-gray-600">
+            Need it sooner? HR can click <strong className="text-gray-800">Refresh</strong> on any offer for an instant check.
+          </p>
+          <details className="group rounded-xl border border-surface-200 bg-surface-50/60">
+            <summary className="flex items-center gap-2 px-3 py-2.5 cursor-pointer text-xs font-semibold text-gray-700 list-none">
+              <Webhook className="w-3.5 h-3.5 text-gray-400" />
+              Instant updates with a webhook
+              <span className="font-normal text-gray-400">· Zoho Sign Enterprise plan only</span>
+              <span className={cn(
+                'ml-auto text-[10px] font-semibold rounded-full px-2 py-0.5',
+                status.webhook_configured ? 'bg-emerald-50 text-emerald-700' : 'bg-surface-100 text-gray-500'
+              )}>
+                {status.webhook_configured ? 'Secret set' : 'Not set up'}
+              </span>
+            </summary>
+            <div className="px-3 pb-3 space-y-3">
+              <div className="flex items-center gap-2">
+                <input readOnly value={status.webhook_url} className={cn(inputClass, 'font-mono text-xs bg-white')} aria-label="Webhook URL" onFocus={(e) => e.target.select()} />
+                <button
+                  type="button"
+                  onClick={copyWebhook}
+                  className="shrink-0 inline-flex items-center gap-1.5 px-3.5 py-2.5 border border-surface-300 text-gray-700 text-sm font-semibold rounded-lg hover:bg-white"
+                >
+                  <Copy className="w-4 h-4" /> Copy
+                </button>
+              </div>
+              <ol className="space-y-1.5">
+                {ZOHO_WEBHOOK_STEPS.map((step, i) => (
+                  <li key={step} className="flex items-start gap-2.5 text-xs text-gray-600">
+                    <span className="w-5 h-5 rounded-full bg-white border border-surface-200 text-gray-500 text-[11px] font-bold flex items-center justify-center shrink-0">{i + 1}</span>
+                    <span className="pt-0.5">{step}</span>
+                  </li>
+                ))}
+              </ol>
+              <p className="text-[11px] text-gray-400">Not needed on the Professional plan. The 30-minute check keeps running either way.</p>
+            </div>
+          </details>
         </div>
       </Card>
 
