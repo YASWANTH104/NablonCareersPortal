@@ -30,7 +30,11 @@ Dry run by default. Pass --execute to queue tasks.
 """
 import argparse
 import asyncio
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 OUTAGE_START = "2026-11-10T11:30:00+00:00"
 
