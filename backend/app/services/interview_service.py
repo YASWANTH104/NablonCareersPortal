@@ -1128,10 +1128,30 @@ async def get_interview(db: AsyncSession, interview_id: uuid.UUID) -> InterviewR
     )
 
 
+INTERVIEWER_RESCHEDULE_FIELDS = {"scheduled_at", "duration_mins", "meeting_link", "location", "status"}
+
+
+async def assert_interviewer_can_reschedule(
+    db: AsyncSession, interview_id: uuid.UUID, user, data: InterviewUpdate,
+) -> None:
+    """Interviewers can move an interview they're a panelist on — new time,
+    duration, link/location — and nothing else (no round/title/type/notes, and
+    no status other than "rescheduled")."""
+    if not await _is_panelist(db, interview_id, user.id):
+        raise HTTPException(403, "You can only reschedule interviews you're on the panel for.")
+    fields = set(data.model_dump(exclude_unset=True))
+    extra = fields - INTERVIEWER_RESCHEDULE_FIELDS
+    if extra:
+        raise HTTPException(403, f"Interviewers can't change: {', '.join(sorted(extra))}.")
+    if "status" in fields and data.status != "rescheduled":
+        raise HTTPException(403, "Interviewers can only mark an interview as rescheduled.")
+
+
 async def update_interview(
     db: AsyncSession,
     interview_id: uuid.UUID,
     data: InterviewUpdate,
+    acting_user=None,
 ) -> InterviewResponse:
     interview = await db.get(Interview, interview_id)
     if not interview:
@@ -1299,6 +1319,24 @@ async def update_interview(
                             body=f"An interview you are paneling has been rescheduled to {scheduled_str}.",
                             link="/hr/interviews",
                         ))
+
+                # An interviewer moved it themselves — HR didn't do this, so
+                # tell the recruiter who owns the application.
+                if (
+                    acting_user is not None
+                    and acting_user.role == "interviewer"
+                    and app_obj.owner_id
+                    and app_obj.owner_id != acting_user.id
+                ):
+                    who = acting_user.full_name or acting_user.email
+                    cand_name = candidate.full_name if candidate else "a candidate"
+                    db.add(Notification(
+                        user_id=app_obj.owner_id,
+                        type="interview_rescheduled",
+                        title="Interviewer rescheduled an interview",
+                        body=f"{who} moved {cand_name}'s interview to {scheduled_str}.",
+                        link=f"/hr/applicants/{app_obj.id}",
+                    ))
 
                 await db.commit()
         except Exception:

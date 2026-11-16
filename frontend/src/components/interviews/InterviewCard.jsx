@@ -13,7 +13,7 @@ import { interviewRoundLabel, roundContextHeading } from '@/constants/interviewR
     middle, actions on the right, with feedback expanding underneath. */
 
 export default function InterviewCard({
-  interview, onCandidateClick, canComplete, canCancel, onComplete, onReschedule, onRefetch,
+  interview, onCandidateClick, canComplete, allowReschedule, onComplete, onReschedule, onRefetch,
 }) {
   const TypeIcon = typeIcon(interview.interview_type);
   const style = statusStyle(interview.status);
@@ -132,7 +132,7 @@ export default function InterviewCard({
               <CheckCircle2 className="w-3 h-3" /> Complete
             </button>
           )}
-          {canCancel && canReschedule && (
+          {allowReschedule && canReschedule && (
             <button
               onClick={() => onReschedule(interview)}
               className="flex items-center gap-1 px-3 py-1.5 border border-brand-200 text-xs text-brand-600 font-medium rounded-lg hover:bg-brand-50 transition-colors"
