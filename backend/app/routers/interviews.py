@@ -145,10 +145,14 @@ async def get_interview(
 async def update_interview(
     interview_id: uuid.UUID,
     data: InterviewUpdate,
-    user=Depends(require_roles(*_HR_ROLES)),
+    user=Depends(require_roles(*_HR_AND_INTERVIEWER)),
     db: AsyncSession = Depends(get_db),
 ):
-    return await interview_service.update_interview(db, interview_id, data)
+    # Interviewers may only reschedule interviews they sit on, and only the
+    # time/venue fields — everything else on this route stays HR-only.
+    if user.role == Role.INTERVIEWER:
+        await interview_service.assert_interviewer_can_reschedule(db, interview_id, user, data)
+    return await interview_service.update_interview(db, interview_id, data, acting_user=user)
 
 
 @router.post("/{interview_id}/panelists", response_model=InterviewResponse, status_code=201)

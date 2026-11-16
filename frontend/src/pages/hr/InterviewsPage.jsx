@@ -130,7 +130,9 @@ export default function InterviewsPage() {
   const [candidateDrawerAppId, setCandidateDrawerAppId] = useState(null);
 
   const canComplete = isHR || isInterviewer;
-  const canCancel = isHR;
+  // Interviewers only see their own interviews here (scope "mine"); the API
+  // also checks they are on the panel before letting them move one.
+  const allowReschedule = isHR || isInterviewer;
   const effectiveScope = isInterviewer ? 'mine' : scope;
 
   useEffect(() => { localStorage.setItem(VIEW_KEY, view); }, [view]);
@@ -399,7 +401,7 @@ export default function InterviewsPage() {
                     interview={interview}
                     onCandidateClick={openCandidate}
                     canComplete={canComplete}
-                    canCancel={canCancel}
+                    allowReschedule={allowReschedule}
                     onComplete={setConfirmCompleteId}
                     onReschedule={setRescheduleFor}
                     onRefetch={refetch}
@@ -445,7 +447,7 @@ export default function InterviewsPage() {
                     interview={interview}
                     onCandidateClick={openCandidate}
                     canComplete={canComplete}
-                    canCancel={canCancel}
+                    allowReschedule={allowReschedule}
                     onComplete={setConfirmCompleteId}
                     onReschedule={setRescheduleFor}
                     onRefetch={refetch}
@@ -482,7 +484,7 @@ export default function InterviewsPage() {
         <InterviewDetailDrawer
           interview={activeInterview}
           canComplete={canComplete}
-          canCancel={canCancel}
+          allowReschedule={allowReschedule}
           onComplete={setConfirmCompleteId}
           onReschedule={setRescheduleFor}
           onRefetch={refetch}

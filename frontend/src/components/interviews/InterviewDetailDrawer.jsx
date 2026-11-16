@@ -24,7 +24,7 @@ function DetailRow({ icon: Icon, label, children }) {
 /** Slide-over shown when an interview is picked out of the month or week grid.
     Everything the agenda card offers, laid out vertically for a narrow column. */
 export default function InterviewDetailDrawer({
-  interview, canComplete, canCancel, onComplete, onReschedule, onRefetch, onViewCandidate, onClose,
+  interview, canComplete, allowReschedule, onComplete, onReschedule, onRefetch, onViewCandidate, onClose,
 }) {
   const [showFeedbackForm, setShowFeedbackForm] = useState(false);
   const style = statusStyle(interview.status);
@@ -148,7 +148,7 @@ export default function InterviewDetailDrawer({
                     <CheckCircle2 className="w-4 h-4" /> Complete
                   </button>
                 )}
-                {canCancel && canReschedule && (
+                {allowReschedule && canReschedule && (
                   <button
                     onClick={() => onReschedule(interview)}
                     className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 border border-brand-200 text-brand-600 rounded-xl text-sm font-semibold hover:bg-brand-50 transition-colors"
