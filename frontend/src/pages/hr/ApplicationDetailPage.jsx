@@ -646,7 +646,6 @@ function ScheduleInterviewDialog({
                 <input
                   type="time"
                   value={timeStr}
-                  step={900}
                   onChange={(e) => setTimeStr(e.target.value)}
                   className="px-3 py-2 border border-surface-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
                 />
