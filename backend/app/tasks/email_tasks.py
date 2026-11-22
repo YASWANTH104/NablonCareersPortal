@@ -287,6 +287,69 @@ async def _send_stage_update_email_async(application_id: str, new_stage: str, fr
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def send_application_reopened_email(self, application_id: str, had_rejection_email: bool = False):
+    try:
+        asyncio.run(_send_application_reopened_email_async(application_id, had_rejection_email))
+    except Exception as exc:
+        logger.error(f"Application reopened email failed: app={application_id}: {exc}")
+        raise self.retry(exc=exc)
+
+
+# Candidate-facing wording per reopen target stage. HR's internal reopen
+# reason is deliberately never included — it's written for the timeline.
+_REOPEN_NEXT_STEPS = {
+    "applied":    "Our team will review your application and get back to you with next steps.",
+    "screening":  "The next step is a short screening conversation with our HR team. We'll be in touch to schedule it.",
+    "assessment": "The next step is an assessment. You'll receive the details and link in a separate email.",
+    "tr1":        "The next step is a technical interview. We'll be in touch shortly to schedule it.",
+    "tr2":        "The next step is a second technical interview. We'll be in touch shortly to schedule it.",
+    "final_tr":   "The next step is a final technical interview. We'll be in touch shortly to schedule it.",
+    "hr":         "The next step is an HR interview. We'll be in touch shortly to schedule it.",
+    "offer":      "Our team will be in touch shortly about the next steps toward an offer.",
+}
+
+
+async def _send_application_reopened_email_async(application_id: str, had_rejection_email: bool):
+    from app.models.application import Application
+    from app.models.user import User
+    from app.models.job import Job
+    from app.services.email_service import send_email
+    from app.constants.stages import STAGE_LABELS
+    from app.config import settings
+    from sqlalchemy import select
+
+    async with _task_session() as db:
+        row = (await db.execute(
+            select(Application.stage, User.email, User.full_name, Job.title)
+            .join(User, User.id == Application.applicant_id)
+            .join(Job, Job.id == Application.job_id)
+            .where(Application.id == uuid.UUID(application_id))
+        )).first()
+        if not row:
+            return
+        stage, email, full_name, job_title = row
+        # Re-rejected (or moved to another terminal stage) before the task ran.
+        if stage not in _REOPEN_NEXT_STEPS:
+            logger.info(f"Reopened email skipped: app={application_id} now at {stage}")
+            return
+
+        await send_email(
+            to_email=email,
+            subject=f"Your application for {job_title} at Nablon AI is active again",
+            template_name="application_reopened",
+            context={
+                "full_name": full_name,
+                "job_title": job_title,
+                "stage_label": STAGE_LABELS.get(stage, stage),
+                "next_step": _REOPEN_NEXT_STEPS[stage],
+                "had_rejection_email": had_rejection_email,
+                "portal_url": f"{settings.FRONTEND_URL}/portal/applications",
+            },
+        )
+        logger.info(f"Application reopened email sent: app={application_id}, stage={stage}, to={email}")
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def send_application_received_email(self, application_id: str):
     try:
         asyncio.run(_send_application_received_async(application_id))

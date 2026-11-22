@@ -11,7 +11,7 @@ import {
   Clock, User, Github, Linkedin, Globe, ChevronDown, Plus, Loader2,
   Video, Phone, MapPin, CheckCircle2, AlertCircle, Send, FolderOpen, Download, Eye, X,
   Pencil, Wallet, Briefcase, GraduationCap, AlertTriangle, Pause, PlayCircle, ArrowRightLeft,
-  Paperclip, XCircle, Trash2, Layers, UserPlus, Users, PenLine,
+  Paperclip, XCircle, Trash2, Layers, UserPlus, Users, PenLine, RotateCcw,
 } from 'lucide-react';
 import { PendingAttachmentChip, NoteAttachmentGallery } from '@/components/shared/NoteAttachments';
 import FilePreviewModal from '@/components/shared/FilePreviewModal';
@@ -39,6 +39,7 @@ import { FREE_TEXT_MAX } from '@/constants/fieldLimits';
 import ScheduleTimeGrid from '@/components/interviews/ScheduleTimeGrid';
 import { isWithinRescheduleGrace } from '@/components/interviews/calendarUtils';
 import StageReasonDialog from '@/components/shared/StageReasonDialog';
+import ReopenApplicationDialog from '@/components/shared/ReopenApplicationDialog';
 import HoldReasonDialog from '@/components/shared/HoldReasonDialog';
 import ConfirmDialog from '@/components/shared/ConfirmDialog';
 import { useHoldToggle } from '@/hooks/useHoldToggle';
@@ -1717,6 +1718,7 @@ export default function ApplicationDetailPage() {
   const [showRescheduleFor, setShowRescheduleFor] = useState(null);
   const [addPanelistFor, setAddPanelistFor] = useState(null);
   const [showFeedbackFor, setShowFeedbackFor] = useState(null);
+  const [reopenOpen, setReopenOpen] = useState(false);
   const [pendingReasonStage, setPendingReasonStage] = useState(null); // stage name awaiting a reason, or null
   const [editingDetails, setEditingDetails] = useState(false);
   const [showMoveJobModal, setShowMoveJobModal] = useState(false);
@@ -1822,6 +1824,17 @@ export default function ApplicationDetailPage() {
       if (ctx?.prev) queryClient.setQueryData(['application-detail', id], ctx.prev);
       toast.error(err.response?.data?.detail ?? 'Cannot move to this stage');
     },
+  });
+
+  const reopenMutation = useMutation({
+    mutationFn: (payload) => applicationsApi.reopen(id, payload),
+    onSuccess: () => {
+      setReopenOpen(false);
+      queryClient.invalidateQueries({ queryKey: ['application-detail', id], exact: true });
+      queryClient.invalidateQueries({ queryKey: ['hr-applications'] });
+      toast.success('Application reopened');
+    },
+    onError: (err) => toast.error(err.response?.data?.detail ?? 'Could not reopen application'),
   });
 
   const [confirmOfferAccept, setConfirmOfferAccept] = useState(false);
@@ -1990,6 +2003,12 @@ export default function ApplicationDetailPage() {
 
   const stageHistory = (app.stage_history ?? []).filter((h) => h.to_stage !== '_note');
   const notes = (app.stage_history ?? []).filter((h) => h.to_stage === '_note');
+  // Stage the candidate was rejected from — preselected in the reopen dialog.
+  const rejectedFromStage = app.stage === 'rejected'
+    ? [...stageHistory]
+        .filter((h) => h.to_stage === 'rejected')
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0]?.from_stage
+    : undefined;
 
   // "Last updated" — the most recent tracked activity of any kind (a stage
   // move or a note), stage moves and notes are both stored as
@@ -2153,6 +2172,16 @@ export default function ApplicationDetailPage() {
                 </>
               )}
             </div>
+            {canManage && app.stage === 'rejected' && (
+              <button
+                onClick={() => setReopenOpen(true)}
+                disabled={app.on_hold}
+                title={app.on_hold ? 'Resume from hold to reopen' : 'Move this candidate back into the pipeline'}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
+              >
+                <RotateCcw className="w-3.5 h-3.5" /> Reopen
+              </button>
+            )}
             {canManage && app.stage === 'offer' && !app.on_hold && (
               offerData?.is_signed ? (
                 <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold bg-green-50 text-green-700">
@@ -3556,6 +3585,17 @@ export default function ApplicationDetailPage() {
           }
           onCancel={() => setPendingReasonStage(null)}
           isPending={stageMutation.isPending}
+        />
+      )}
+
+      {reopenOpen && (
+        <ReopenApplicationDialog
+          candidateName={app?.applicant?.full_name ?? 'this candidate'}
+          rejectedFromStage={rejectedFromStage}
+          rejectionReason={app?.rejection_reason}
+          isPending={reopenMutation.isPending}
+          onCancel={() => setReopenOpen(false)}
+          onConfirm={(payload) => reopenMutation.mutate(payload)}
         />
       )}
 
