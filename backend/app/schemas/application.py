@@ -72,6 +72,15 @@ class ApplicationStageUpdate(BaseModel):
     drop_category: Optional[str] = None
 
 
+class ApplicationReopenRequest(BaseModel):
+    stage: str
+    reason_category: str
+    reason: str
+    # Off by default: HR decides whether the candidate (and their agency)
+    # hears about it — they may already have had the rejection email.
+    notify_candidate: bool = False
+
+
 class ApplicationRatingUpdate(BaseModel):
     rating: Optional[int] = None
 

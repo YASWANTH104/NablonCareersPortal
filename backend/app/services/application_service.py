@@ -12,7 +12,7 @@ from app.schemas.application import (
 )
 from app.constants.stages import (
     STAGE_LABELS, REASON_REQUIRED_STAGES, MOVE_JOB_ALLOWED_STAGES, TERMINAL_STAGES,
-    valid_transitions_for,
+    valid_transitions_for, REOPENABLE_STAGES, REOPEN_TARGET_STAGES, REOPEN_REASON_LABELS,
 )
 
 
@@ -1172,6 +1172,133 @@ async def move_stage(
     #         send_document_request_email_task.delay(str(application_id))
     #     except Exception:
     #         pass
+
+    return app
+
+
+REOPEN_REASON_MIN_LEN = 10
+
+
+async def reopen_application(
+    db: AsyncSession,
+    application_id: uuid.UUID,
+    target_stage: str,
+    reason_category: str,
+    reason: str,
+    moved_by: uuid.UUID,
+    notify_candidate: bool = False,
+) -> Application:
+    """Bring a rejected application back into the live pipeline at whichever
+    stage HR picks (REOPEN_TARGET_STAGES), with a mandatory reason.
+
+    Separate from move_stage on purpose: VALID_TRANSITIONS["rejected"] stays
+    empty so the ordinary Move-to menu never offers an un-reasoned way out of
+    Rejected. The audit trail is one ApplicationStageHistory row (rejected ->
+    target) whose notes carry the reopen reason AND the original rejection
+    reason, because the rejection columns are cleared here.
+
+    Clearing rejection_notify_at matters, not just tidiness: the screening
+    delayed-email sweep only claims stage == "rejected", so a reopen already
+    stops a held email — but if HR rejects the candidate again later, a stale
+    rejection_notify_at would make the sweep send a second rejection email on
+    top of move_stage's immediate one."""
+    app = await db.get(Application, application_id, with_for_update=True)
+    if not app:
+        raise HTTPException(404, "Application not found")
+    if app.stage not in REOPENABLE_STAGES:
+        raise HTTPException(400, "Only rejected applications can be reopened")
+    if app.on_hold:
+        raise HTTPException(400, "Candidate is on hold — resume before reopening.")
+    if target_stage not in REOPEN_TARGET_STAGES:
+        raise HTTPException(400, f"Cannot reopen into '{target_stage}'")
+    if reason_category not in REOPEN_REASON_LABELS:
+        raise HTTPException(400, "Pick a reopen reason")
+    reason = (reason or "").strip()
+    if len(reason) < REOPEN_REASON_MIN_LEN:
+        raise HTTPException(400, f"Explain why in at least {REOPEN_REASON_MIN_LEN} characters")
+
+    from_stage = app.stage
+    previous = app.rejection_reason
+    # Was the candidate actually told they were rejected? Immediate rejections
+    # always email; screening-flow ones only once the delayed sweep has sent.
+    # Decides whether the reopen email asks them to disregard that message.
+    had_rejection_email = app.rejection_notify_at is None or app.rejection_email_sent_at is not None
+    note = f"Reopened — {REOPEN_REASON_LABELS[reason_category]}: {reason}"
+    if previous:
+        note += f"\n\nOriginal rejection reason: {previous}"
+
+    db.add(ApplicationStageHistory(
+        application_id=application_id,
+        from_stage=from_stage,
+        to_stage=target_stage,
+        changed_by=moved_by,
+        notes=note,
+    ))
+
+    app.stage = target_stage
+    app.stage_updated_at = datetime.utcnow()
+    app.rejection_reason = None
+    app.drop_category = None
+    app.rejection_notify_at = None
+    app.rejection_notify_from_stage = None
+    app.rejection_email_sent_at = None
+
+    # Reopened straight into "applied" with a screening questionnaire that
+    # already expired unsubmitted: the expiry sweep would auto-reject them
+    # again on its next run. Give them a fresh window instead.
+    if target_stage == "applied":
+        from app.models.screening import ScreeningResponse
+        from app.services.screening_service import REQUEST_EXPIRY_DAYS
+        now = datetime.now(timezone.utc)
+        await db.execute(
+            update(ScreeningResponse)
+            .where(
+                ScreeningResponse.application_id == application_id,
+                ScreeningResponse.status == "pending",
+                ScreeningResponse.expires_at < now,
+            )
+            .values(expires_at=now + timedelta(days=REQUEST_EXPIRY_DAYS))
+            .execution_options(synchronize_session=False)
+        )
+
+    if notify_candidate:
+        from app.models.notification import Notification
+        label = STAGE_LABELS.get(target_stage, target_stage.replace("_", " ").title())
+        db.add(Notification(
+            user_id=app.applicant_id,
+            type="stage_update",
+            title=f"Application update: {label}",
+            body="Your application has been reopened. View your applications for details.",
+            link="/portal/applications",
+        ))
+
+    await db.commit()
+    await db.refresh(app)
+
+    # "notify" = in-app notification above + the candidate's reopened email
+    # (+ the agency's usual stage-update email). Any interview invite still
+    # goes out as normal when HR schedules the round.
+    if notify_candidate:
+        try:
+            from app.tasks.email_tasks import send_application_reopened_email
+            send_application_reopened_email.delay(str(application_id), had_rejection_email)
+        except Exception:
+            pass
+        if app.agency_id:
+            try:
+                from app.tasks.email_tasks import send_agency_stage_update_email
+                send_agency_stage_update_email.delay(str(application_id), target_stage)
+            except Exception:
+                pass
+
+    if target_stage == "assessment":
+        # Same as move_stage: the task no-ops for unmapped roles and for
+        # candidates who already have an assessment.
+        try:
+            from app.tasks.autoproctor_tasks import auto_send_assessment
+            auto_send_assessment.delay(str(application_id))
+        except Exception:
+            pass
 
     return app
 

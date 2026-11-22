@@ -39,6 +39,8 @@ export const applicationsApi = {
   update: (id, data) => client.patch(`/applications/${id}`, data),
   moveStage: (id, stage, notes, rejection_reason, drop_category) =>
     client.patch(`/applications/${id}/stage`, { stage, notes, rejection_reason, drop_category }),
+  reopen: (id, { stage, reason_category, reason, notify_candidate }) =>
+    client.post(`/applications/${id}/reopen`, { stage, reason_category, reason, notify_candidate }),
   markOfferAccepted: (id) => client.post(`/applications/${id}/mark-offer-accepted`),
   moveJob: (id, newJobId) => client.patch(`/applications/${id}/move-job`, { new_job_id: newJobId }),
   assign: (id, assigneeId) => client.patch(`/applications/${id}/assign`, { assignee_id: assigneeId }),

@@ -84,3 +84,18 @@ export const DROP_REASON_CATEGORIES = [
   { value: 'profile_mismatch', label: 'Profile mismatch' },
   { value: 'other', label: 'Other' },
 ];
+
+// Reopening a rejected application — mirrors REOPEN_TARGET_STAGES /
+// REOPEN_REASON_CATEGORIES in backend/app/constants/stages.py.
+export const REOPEN_TARGET_STAGES = ['applied', 'screening', 'assessment', 'tr1', 'tr2', 'final_tr', 'hr', 'offer'];
+
+export const REOPEN_REASON_CATEGORIES = [
+  { value: 'rejected_in_error', label: 'Rejected in error' },
+  { value: 'reconsidered_after_review', label: 'Reconsidered after review' },
+  { value: 'fit_for_another_round', label: 'Fit for a different round / role need' },
+  { value: 'candidate_requested', label: 'Candidate requested reconsideration' },
+  { value: 'hiring_need_changed', label: 'Hiring need changed' },
+  { value: 'other', label: 'Other' },
+];
+
+export const REOPEN_REASON_MIN_LEN = 10;

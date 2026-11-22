@@ -123,6 +123,27 @@ STUCK_THRESHOLD_DAYS = 5
 # candidate" fix past that point.
 MOVE_JOB_ALLOWED_STAGES = {"applied", "screening", "assessment", "tr1", "tr2", "final_tr", "hr"}
 
+# Reopening a rejected application. HR picks any live stage to put the
+# candidate back into — deliberately not limited to the stage they were
+# rejected from, since "rejected in error at TR1, actually ready for HR round"
+# is exactly the flexibility this exists for. "hired" is excluded because it
+# needs a signed offer (move_stage's guard); go to "offer" and on from there.
+# Reopen is its own action (application_service.reopen_application), NOT an
+# entry in VALID_TRANSITIONS["rejected"]: that would surface every stage in
+# the normal Move-to menu with no reason captured.
+REOPENABLE_STAGES = {"rejected"}
+REOPEN_TARGET_STAGES = ("applied", "screening", "assessment", "tr1", "tr2", "final_tr", "hr", "offer")
+
+REOPEN_REASON_CATEGORIES = [
+    {"value": "rejected_in_error", "label": "Rejected in error"},
+    {"value": "reconsidered_after_review", "label": "Reconsidered after review"},
+    {"value": "fit_for_another_round", "label": "Fit for a different round / role need"},
+    {"value": "candidate_requested", "label": "Candidate requested reconsideration"},
+    {"value": "hiring_need_changed", "label": "Hiring need changed"},
+    {"value": "other", "label": "Other"},
+]
+REOPEN_REASON_LABELS = {c["value"]: c["label"] for c in REOPEN_REASON_CATEGORIES}
+
 DROP_REASON_CATEGORIES = [
     {"value": "got_another_offer", "label": "Got another offer"},
     {"value": "not_aligned_with_expectations", "label": "Not aligned with expectations"},

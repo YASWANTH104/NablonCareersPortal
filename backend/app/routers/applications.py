@@ -13,7 +13,7 @@ from app.schemas.application import (
     ApplicationStageUpdate, ApplicationListResponse,
     ApplicationRatingUpdate, ApplicationAssignUpdate, ApplicationHoldUpdate,
     ApplicationUpdate, StageHistoryEntry, ApplicationResumeResponse,
-    ApplicationMoveJobRequest, NoteUpdate,
+    ApplicationMoveJobRequest, NoteUpdate, ApplicationReopenRequest,
 )
 from app.services import application_service
 
@@ -278,6 +278,20 @@ async def move_stage(
 ):
     return await application_service.move_stage(
         db, application_id, data.stage, user.id, data.notes, data.rejection_reason, data.drop_category
+    )
+
+
+@router.post("/{application_id}/reopen", response_model=ApplicationResponse)
+async def reopen_application(
+    application_id: uuid.UUID,
+    data: ApplicationReopenRequest,
+    user=Depends(require_roles(*_HR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reopen a rejected application into any live stage, with a reason."""
+    return await application_service.reopen_application(
+        db, application_id, data.stage, data.reason_category, data.reason,
+        user.id, data.notify_candidate,
     )
 
 
